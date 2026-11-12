@@ -1,0 +1,197 @@
+{
+  "name": "我在县城当首富 32 色",
+  "colors": [
+    {
+      "index": 0,
+      "hex": "#1a1218",
+      "name": "近黑",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 1,
+      "hex": "#2e222f",
+      "name": "背景紫黑",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 2,
+      "hex": "#313638",
+      "name": "马路深灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 3,
+      "hex": "#484a77",
+      "name": "深蓝紫",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 4,
+      "hex": "#5a5a6e",
+      "name": "中灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 5,
+      "hex": "#8a8a9e",
+      "name": "浅灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 6,
+      "hex": "#b2ba90",
+      "name": "米黄",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 7,
+      "hex": "#ffffff",
+      "name": "纯白",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 8,
+      "hex": "#3a5b46",
+      "name": "暗绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 9,
+      "hex": "#547e64",
+      "name": "地面绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 10,
+      "hex": "#6ea87a",
+      "name": "浅绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 11,
+      "hex": "#91db69",
+      "name": "亮绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 12,
+      "hex": "#a2a947",
+      "name": "橄榄",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 13,
+      "hex": "#d5e04b",
+      "name": "黄绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 14,
+      "hex": "#6b3b2a",
+      "name": "暗棕",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 15,
+      "hex": "#8a5a44",
+      "name": "深棕",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 16,
+      "hex": "#966c6c",
+      "name": "灰粉",
+      "group": "暖色"
+    },
+    {
+      "index": 17,
+      "hex": "#b98a6a",
+      "name": "土黄",
+      "group": "暖色"
+    },
+    {
+      "index": 18,
+      "hex": "#d9b08c",
+      "name": "肤色暗",
+      "group": "暖色"
+    },
+    {
+      "index": 19,
+      "hex": "#f0d1b0",
+      "name": "肤色亮",
+      "group": "暖色"
+    },
+    {
+      "index": 20,
+      "hex": "#c7dcd0",
+      "name": "冷白",
+      "group": "暖色"
+    },
+    {
+      "index": 21,
+      "hex": "#f9c22b",
+      "name": "明黄",
+      "group": "暖色"
+    },
+    {
+      "index": 22,
+      "hex": "#f79617",
+      "name": "橙",
+      "group": "暖色"
+    },
+    {
+      "index": 23,
+      "hex": "#e04a4a",
+      "name": "亮红",
+      "group": "暖色"
+    },
+    {
+      "index": 24,
+      "hex": "#ae2334",
+      "name": "深红",
+      "group": "冷色"
+    },
+    {
+      "index": 25,
+      "hex": "#9babb2",
+      "name": "灰蓝",
+      "group": "冷色"
+    },
+    {
+      "index": 26,
+      "hex": "#4d9be6",
+      "name": "蓝",
+      "group": "冷色"
+    },
+    {
+      "index": 27,
+      "hex": "#2f7d8c",
+      "name": "深青",
+      "group": "冷色"
+    },
+    {
+      "index": 28,
+      "hex": "#30e1b9",
+      "name": "青",
+      "group": "冷色"
+    },
+    {
+      "index": 29,
+      "hex": "#a884f3",
+      "name": "紫",
+      "group": "冷色"
+    },
+    {
+      "index": 30,
+      "hex": "#eaaded",
+      "name": "浅粉",
+      "group": "冷色"
+    },
+    {
+      "index": 31,
+      "hex": "#e8e4f0",
+      "name": "淡紫白",
+      "group": "冷色"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "tileSize": 16,
+  "gridWidth": 24,
+  "gridHeight": 40,
+  "zoomLevels": [2, 3, 4],
+  "defaultZoomIndex": 1,
+  "palette": {
+    "background": "#2e222f",
+    "ground": "#547e64",
+    "gridLine": "#3a5b46",
+    "border": "#b2ba90"
+  }
+}

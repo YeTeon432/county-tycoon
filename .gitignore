@@ -17,3 +17,8 @@ node_modules/
 *.log
 
 # 美术源文件可以提交（.aseprite 很小），导出的 png 也提交
+
+# 编辑器临时文件 / vim 交换文件
+*.swp
+*.swo
+*~

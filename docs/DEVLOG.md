@@ -10,3 +10,6 @@
 - 美术风格：场景用像素，UI 用高清（见 D003），M3 后找人试玩再确认。
 - Aseprite 从源码编译成功：~/Tools/aseprite/build/bin/aseprite。
 - 下一步：T003 装 Cocos Dashboard + Creator 3.8.x、微信开发者工具；T004 注册微信小游戏账号。
+- GitHub 推送成功（踩坑：本机 SSH key 是只读 Deploy Key → 改用 gh auth login + https；HTTP2 framing 报错 → git config --global http.version HTTP/1.1）。
+- Cocos Creator 选定 3.8.8。
+- 交接：接下来转到 Claude Code 开发。下一步 T006b 建 Cocos 项目，然后 M1（T101～T104）。

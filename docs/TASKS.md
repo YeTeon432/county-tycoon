@@ -12,7 +12,8 @@
 - ⬜ T003 安装 Cocos Dashboard + Creator 3.8.x、微信开发者工具、抖音开发者工具、Node.js LTS
 - ⬜ T004 注册微信小游戏账号，拿到 AppID
 - ⬜ T005 注册抖音小游戏账号，拿到 AppID
-- 🔄 T006 初始化 git 仓库（GitHub 私有，.gitignore 已写好）和 Cocos 项目
+- ✅ T006a git 仓库已推送到 GitHub 私有仓库 YeTeon432/county-tycoon
+- ⬜ T006b 在本目录创建 Cocos Creator 3.8.8 项目（2D 空模板，竖屏 720×1280）
 - ⬜ T007 确认 PRD v0.1 的待定项
 
 ## M1 技术跑通

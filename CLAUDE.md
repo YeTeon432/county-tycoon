@@ -8,7 +8,7 @@
 原创的中国大陆本土化城镇经营游戏（县城、夜市、网红街……），不是原作的翻版，持续迭代。
 
 ## 技术栈（见 docs/DECISIONS.md）
-- 引擎：Cocos Creator 3.8.x + TypeScript（已确认）
+- 引擎：Cocos Creator 3.8.8 + TypeScript（已确认，版本锁定，不随意升级）
 - 美术：用户自己画；正俯视，16×16 地块，32 色调色板（D003）
 - 平台：先微信，后抖音（构建面板直接出包）
 - 存档：先本地存储（wx.setStorage / tt.setStorage），后续再考虑云存档

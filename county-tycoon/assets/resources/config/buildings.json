@@ -1,0 +1,19 @@
+{
+  "buildings": [
+    { "id": "house",        "name": "自建房",     "category": "住宅", "width": 1, "height": 1, "color": "#966c6c" },
+    { "id": "apartment",    "name": "商品房小区", "category": "住宅", "width": 2, "height": 2, "color": "#9babb2" },
+    { "id": "school-house", "name": "学区房",     "category": "住宅", "width": 2, "height": 2, "color": "#c7dcd0" },
+    { "id": "breakfast",    "name": "早餐铺",     "category": "店铺", "width": 1, "height": 1, "color": "#f9c22b" },
+    { "id": "milk-tea",     "name": "奶茶店",     "category": "店铺", "width": 1, "height": 1, "color": "#eaaded" },
+    { "id": "bbq",          "name": "烧烤摊",     "category": "店铺", "width": 1, "height": 1, "color": "#f79617" },
+    { "id": "hotpot",       "name": "火锅店",     "category": "店铺", "width": 2, "height": 2, "color": "#ae2334" },
+    { "id": "parcel",       "name": "快递驿站",   "category": "店铺", "width": 1, "height": 1, "color": "#a2a947" },
+    { "id": "supermarket",  "name": "超市",       "category": "店铺", "width": 2, "height": 2, "color": "#4d9be6" },
+    { "id": "net-cafe",     "name": "网吧",       "category": "店铺", "width": 1, "height": 1, "color": "#484a77" },
+    { "id": "phone-shop",   "name": "手机店",     "category": "店铺", "width": 1, "height": 1, "color": "#30e1b9" },
+    { "id": "barber",       "name": "理发店",     "category": "店铺", "width": 1, "height": 1, "color": "#a884f3" },
+    { "id": "tutoring",     "name": "补习班",     "category": "店铺", "width": 1, "height": 1, "color": "#d5e04b" },
+    { "id": "road",         "name": "马路",       "category": "设施", "width": 1, "height": 1, "color": "#313638" },
+    { "id": "plaza",        "name": "广场",       "category": "设施", "width": 2, "height": 2, "color": "#91db69" }
+  ]
+}

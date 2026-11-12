@@ -1,0 +1,19 @@
+# Cocos Creator 自动生成，不提交
+library/
+temp/
+local/
+build/
+profiles/
+native/
+
+# Node
+node_modules/
+
+# 编辑器 / 系统
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.log
+
+# 美术源文件可以提交（.aseprite 很小），导出的 png 也提交

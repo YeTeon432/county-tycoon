@@ -37,4 +37,8 @@ os.makedirs(os.path.join(RES, 'art', 'ground'), exist_ok=True)
 atlas.save(os.path.join(RES, 'art', 'atlas.png'))
 json.dump({'frames': place}, open(os.path.join(RES, 'art', 'atlas-frames.json'), 'w'), indent=1, sort_keys=True)
 shutil.copy(os.path.join(SRC, 'ground', 'ground.png'), os.path.join(RES, 'art', 'ground', 'ground.png'))
+# 地面帧名表（T231）：支线 D 按名字取帧，不认帧号
+gf = os.path.join(SRC, 'ground', 'ground-frames.json')
+if os.path.exists(gf):
+    shutil.copy(gf, os.path.join(RES, 'art', 'ground', 'ground-frames.json'))
 print(f'{len(ims)} 张 → atlas.png {MAXW}×{H2}（用到 {H} 行）')

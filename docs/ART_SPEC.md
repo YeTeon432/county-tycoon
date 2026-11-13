@@ -54,14 +54,41 @@ docs/art/gen/iso.py          出图工具：Canvas / Box（等距长方体 + 墙
 docs/art/gen/sample.py       草地、马路、行道树、自建房
 docs/art/gen/shops.py        8 家 1×1 店铺
 docs/art/gen/big.py          5 个 2×2 大件
+docs/art/gen/facilities.py   T230 新建筑：小作坊 / 三个工厂 / 发展中心 / 学校 / 卫生院 / 派出所 / 银行 / 港口 / 矿场
+docs/art/gen/ground.py       地面图集前 36 帧：草地 + 城市道路 + 土路
+docs/art/gen/terrain.py      T231 地形帧：水 / 桥 / 山 / 矿点 / 林地 / 农田 / 池塘 + ground-frames.json
+docs/art/gen/terrain_obj.py  T231 高出地面的地形物件（terrain-mountain-* / terrain-forest-* / terrain-pond-lily）
+docs/art/gen/preview.py      预览若干张建筑图（放大 + 名字），挑图用
+docs/art/gen/scene_preview.py 拼一张小镇预览图，验收远距离区分度
 docs/art/gen/pack.py         打图集
 docs/art/gen/make.sh         一键：全部出图 + 打图集
 docs/art/build/buildings/<id>.png   单张建筑图（生成物，进 git，手改也改这里）
+docs/art/build/preview-town.png     小镇预览（×4）
+docs/art/build/preview-phone.png    真机观感预览（一个美术像素 ≈1.6pt）
 county-tycoon/assets/resources/art/atlas.png (+ atlas-frames.json)   游戏实际加载的建筑图集
 county-tycoon/assets/resources/art/ground/ground.png                 地面图集，32×16 一帧横排
+county-tycoon/assets/resources/art/ground/ground-frames.json         帧名表 {"frames":{"<名字>": 帧号}}
 ```
 
-地面图集帧号：0～3 草地（3 号带花），4 + mask 马路。mask：1 左上邻、2 右上邻、4 右下邻、8 左下邻有路。
+地面图集帧号（前 36 帧是老帧，编号不动；**新代码一律按 `ground-frames.json` 里的名字取帧，不写死帧号**）：
+
+| 帧号 | 名字 | 说明 |
+|---|---|---|
+| 0～3 | `grass-0..3` | 草地，3 号带花 |
+| 4～19 | `city-0..15` | 城市道路，4 + mask |
+| 20～35 | `dirt-0..15` | 土路，20 + mask |
+| 36～51 | `water-0..15` | 河，36 + mask |
+| 52 / 53 | `bridge-gx` / `bridge-gy` | 桥面，两个方向 |
+| 54～56 | `mountain-0..2` | 山脚石地（山体另用 terrain-mountain-*） |
+| 57～58 | `ore-0..1` | 矿点地面 |
+| 59～62 | `forest-0..3` | 林地地面（树另用 terrain-forest-*） |
+| 63～64 | `farm-0..1` | 农田 |
+| 65 | `pond` | 池塘（1×1） |
+
+两种 mask 的方向定义完全相同：**1 左上邻、2 右上邻、4 右下邻、8 左下邻**。
+道路的 mask 统计「四邻有路」；**水的 mask 统计「四邻是陆地」**——有岸的那几条边才是需要画岸的边。
+
+高出地面的地形（山、树）超过 32×16 的，做成建筑图进 atlas，名字 `terrain-mountain-0..2`、`terrain-forest-0..3`、`terrain-pond-lily`，支线 D 当物件摆在地块上。
 
 重新出图：`sh docs/art/gen/make.sh`，然后**重启 Cocos Creator**（这个路径下编辑器收不到文件变更）。
 

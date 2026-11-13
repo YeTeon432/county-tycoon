@@ -65,6 +65,6 @@
 - ⬜ T322 地形渲染（GridMap 按 ground-frames.json 取帧）【支线 D，依赖 T231】
 
 ## 美术（新建筑 / 地形）
-- ⬜ T230 新建筑等距图：workshop / textile / food-factory / electronics / center / school / clinic / police / bank / port / mine【支线 C】
-- ⬜ T231 地形地块 + ground-frames.json（按名字取帧）【支线 C】
-- ⬜ T232 新建筑门口道具与招牌区分度【支线 C】
+- ✅ T230 新建筑等距图：workshop / textile / food-factory / electronics / center / school / clinic / police / bank / port / mine【支线 C】
+- ✅ T231 地形地块 + ground-frames.json（按名字取帧）【支线 C】
+- ✅ T232 新建筑门口道具与招牌区分度【支线 C】

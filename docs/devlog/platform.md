@@ -59,20 +59,54 @@
 
 **验证**：node 跑 37 项断言（各地形类型的 typeAt、七种建筑 × 多个位置的放置判定、容错 json、TownModel 接线、setTypeAt）。全部通过。
 
+## 2026-11-13 T322 地形渲染
+
+支线 C 的 `ground-frames.json` 已进主线，开工。先 `git rebase main`（顺利，无冲突）。集成已经把我上次的待办做掉了两条：`world.json` 改成 64×64，`GameRoot` 也接上了 `loadTerrain` + `setTerrain`。
+
+**做了什么**
+- `core/ArtLibrary.ts`：加载 `art/ground/ground-frames.json`，新增 `groundByName(name)` 和 `hasGroundNames`。帧名 → 帧号的映射由支线 C 维护，代码只认名字。
+- 新建 `core/GroundFrames.ts`（纯函数，不 import 'cc'）：`grassName` / `roadName` / `waterName` / `terrainName` / `neighborMask` / `bridgeName` / `variantOf`。抽出来的理由是**能在 node 下拿真实 map.json 验证每一个帧名都存在** —— 埋在 GridMap 里只能靠开编辑器肉眼看。
+- `world/GridMap.ts`：
+  - `frameFor()` 取代 `frameIndex()`。有 ground-frames.json 时全部按名字取，没有时退回按帧号取（旧路径保留，不破坏没更新图集的环境）。
+  - `terrainFrame()` 处理河 / 山 / 矿 / 树林 / 池塘 / 桥。
+  - `drawFallback()` 增加 `drawTerrainFallback()`：没有图集时用占位色把河、山、矿、树林画出来，至少不是一片绿。
+  - 帧数要求跟着变：有地形时要 66 帧，没有时只要原来的 36 帧。
+
+**问题（三个都修了，前两个是设计错误不是笔误）**
+
+1. **桥的方向判反了。** `bridge-gx` 是沿 col 轴的一段桥面，`bridge-gy` 是沿 row 轴的。原代码在"左右都是水"时返回 gx，正好反了 —— 左右是水说明河沿 col 走，桥得跨 row 轴，应该 gy。已改。
+
+2. **地图的河画错了轴。** 原来的河在网格空间里斜着走（col 每 +1、row 约 −0.35），是照"屏幕上斜穿"的直觉画的。但**只有两个方向的桥帧**，斜着走的河没有任何桥能垂直横跨，我上一版画出来的"桥"就是一串 8 格的斜阶梯。在等距投影里，沿 col 轴的一条河看起来**本身就是**左上→右下 2:1 斜穿，所以河必须沿网格轴走。已重画：河沿 col 轴，`row 24..25` 到 `row 26..27` 拐一次，河口在右端放宽到 4 行。**这条对以后画地图的人很重要：屏幕上的斜 = 网格里的轴，不是网格里的斜。**
+
+3. 清掉重构后 GridMap 里遗留的旧 `bridgeName` / `variant` 私有方法。
+
+**验证**
+- `frames_check.ts`：拿真实 `map.json` + 真实 `ground-frames.json`，把 64×64 每一格会取的帧名全算出来，确认**每一个名字都真实存在**。地形帧、道路 32 种 mask、水 16 种 mask、草地全都对上；帧号 0..65 连续无重复。全部通过。
+- `bridge_check.ts`：两种河走向对应的桥帧方向、水 mask 的位、桥建筑能放在河上。全部通过。
+- 连同之前两套（存档 19 项、地形 37 项），四套断言全绿。
+
+**待集成验证（要编辑器 / 真机，我没开）**
+- 地形在画面上到底对不对：河有没有断流、岸线接得顺不顺、山和树林的边界。
+- **帧率**：64×64 = 4096 个 Node + UITransform + Sprite。请务必量一次。
+- 桥面：需要玩家在河上放桥建筑，确认 `bridge-gx` / `bridge-gy` 的方向和河的走向匹配。
+
+**下一步**
+- 等真机验证结果。
+- 若 4096 节点帧率不够，改成按视野裁剪（只创建视口 + 一圈边距内的 sprite）。
+
 ## 需要集成
 
-1. **`gridWidth` / `gridHeight` 改成 64** —— `assets/resources/config/world.json` 现在是 40×40，而 `map.json` 是 64×64。`world.json` 不归支线 D 管。请把这两个值改成 64；`WorldConfig.ts` 里 `DEFAULT_WORLD_CONFIG` 的兜底值也是 40，一起改。**不改的话 TownModel 只有 40×40，地形会错位。**
-2. **`GameRoot.build()` 里接地形** —— `loadTerrain()` 和世界配置并行读，然后 `model.setTerrain(terrain)`。现在的启动是 `Promise.all([loadWorldConfig(), loadBuildingConfig()])`，加一个 `loadTerrain(world.gridWidth, world.gridHeight)` 即可。
-3. **`BuildingConfig.ts` 加 `terrain` 字段** —— `buildings.json` 里 `bridge` / `port` / `mine` 已经写了 `"terrain": "river" | "riverbank" | "ore"`，但 `BuildingDef` 没解析它。`Terrain.ts` 现在用 `(def as any).terrain` + 按 id 兜底顶着；集成把字段加进 `BuildingDef` 和 `sanitize()` 后，`terrainRequirementOf()` 的第一条分支直接生效。
+1. ~~`gridWidth` / `gridHeight` 改成 64~~ —— **已由集成完成**，`world.json` 现在是 64×64。
+2. ~~`GameRoot.build()` 里接地形~~ —— **已由集成完成**，`loadTerrain` + `setTerrain` 已接上。
+3. **`BuildingConfig.ts` 加 `terrain` 字段** —— `buildings.json` 里 `bridge` / `port` / `mine` 已经写了 `"terrain": "river" | "riverbank" | "ore"`，但 `BuildingDef` 没解析它。`Terrain.ts` 现在用 `(def as any).terrain` + 按 id 兜底顶着（桥 / 港口 / 矿场三个 id 是写死的）。集成把字段加进 `BuildingDef` 和 `sanitize()` 后，`terrainRequirementOf()` 的第一条分支直接生效，那三行 id 兜底就可以删了。
 4. **真机量帧率** —— 64×64 时 `GridMap.syncSprites()` 会 `new Node()` × 4096（每格一个 UITransform + Sprite）。请在真机上量一次。**上 80×80 之前必须先改成按视野裁剪**（只创建视口 + 一圈边距内的 sprite），那是一项独立工作。
 5. `world.json` 的 `defaultZoomIndex` —— 用户确认保持 ×4，不用改。
 
-## 待办 / 下一步
-
-- **T322 地形渲染**：等支线 C 的 T231 出 `ground-frames.json`。`GridMap` 现在按帧号取地面图，要改成按名字取（`grass-0..3` / `water-<mask>` / `mountain-0..2` / `ore-0..1` / `forest-0..3` / `pond` / `bridge-gx|gy`）。**需要编辑器**，做完标「待集成验证」。
+**T322 的地面帧现在走 `ground-frames.json`。** 有人要动地面图集时必须同步改那份 json，否则 `groundByName()` 取不到会退回帧号路径（地形会错）。`ArtLibrary` 在加载失败时会 warn 一行。
 
 ## 用户已确认
 
 - 地图尺寸 64×64
 - 缩放默认档保持 ×4
-- 河道走向：左上 → 右下斜穿
+- 河道走向：左上 → 右下斜穿（实现上是沿 col 轴，等距投影下自然就是这个方向）
+

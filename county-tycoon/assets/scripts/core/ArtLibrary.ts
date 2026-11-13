@@ -16,15 +16,26 @@ const BUILDING_DIR = 'art/buildings';
 const BUILDING_ATLAS = 'art/atlas';
 const BUILDING_ATLAS_FRAMES = 'art/atlas-frames';
 const GROUND_ATLAS = 'art/ground/ground';
+const GROUND_FRAMES = 'art/ground/ground-frames';
 
 export const GROUND_GRASS_FRAMES = 4;
 /** 各种道路在地面图集里的起始帧，后面紧跟 16 种拼接（docs/art/gen/ground.py） */
 export const GROUND_ROAD_BASE: Record<'city' | 'dirt', number> = { city: 4, dirt: 20 };
 export const GROUND_FRAME_COUNT = 36;
+/**
+ * 有地形（T322）时地面帧的总数。
+ * 0～35 是原来的草地 / 道路，36 起是支线 C 加的地形帧：
+ *   36~51 水（36 + mask，mask = 四邻**是陆地**的位，有岸）
+ *   52 桥面 gx（连左上↔右下）  53 桥面 gy（连右上↔左下）
+ *   54~56 山  57~58 矿点  59~62 树林  63~64 农田  65 池塘
+ */
+export const GROUND_FRAME_COUNT_TERRAIN = 66;
 
 export class ArtLibrary {
     private readonly _buildings = new Map<string, SpriteFrame>();
     private _ground: SpriteFrame[] = [];
+    /** 帧名 → 帧号，来自 art/ground/ground-frames.json。地形按名字取帧，不认帧号 */
+    private _groundNames = new Map<string, number>();
     private _loaded = false;
 
     /** 已加载的建筑图数量（调试 / 测试用） */
@@ -50,13 +61,30 @@ export class ArtLibrary {
         return this._ground[index] ?? null;
     }
 
+    /**
+     * 按名字取地面帧（T322）。名字 → 帧号的映射来自 art/ground/ground-frames.json，
+     * 由支线 C 维护；代码这边只认名字，美术加帧、调顺序都不用改代码。
+     * 名字不存在时返回 null，调用方自己回退。
+     */
+    groundByName(name: string): SpriteFrame | null {
+        const i = this._groundNames.get(name);
+        if (i === undefined) return null;
+        return this._ground[i] ?? null;
+    }
+
+    /** 地面帧名有没有加载到（没加载到时 GridMap 退回按帧号取） */
+    get hasGroundNames(): boolean {
+        return this._groundNames.size > 0;
+    }
+
     /** 加载全部贴图。全部结束（无论成败）后回调一次；单张坏了只跳过那一张 */
     load(onDone: () => void): void {
         const infos = resources.getDirWithPath(BUILDING_DIR, ImageAsset);
         const hasGround = !!resources.getInfoWithPath(GROUND_ATLAS, ImageAsset);
+        const hasGroundFrames = !!resources.getInfoWithPath(GROUND_FRAMES, JsonAsset);
         const hasAtlas = !!resources.getInfoWithPath(BUILDING_ATLAS, ImageAsset)
             && !!resources.getInfoWithPath(BUILDING_ATLAS_FRAMES, JsonAsset);
-        let pending = infos.length + (hasGround ? 1 : 0) + (hasAtlas ? 1 : 0);
+        let pending = infos.length + (hasGround ? 1 : 0) + (hasGroundFrames ? 1 : 0) + (hasAtlas ? 1 : 0);
 
         const finish = () => {
             pending--;
@@ -110,6 +138,23 @@ export class ArtLibrary {
                     console.warn('[ArtLibrary] 地面图集加载失败，用色块代替', err);
                 } else {
                     this._ground = ArtLibrary.slice(image, 32, 16);
+                }
+                finish();
+            });
+        }
+
+        if (hasGroundFrames) {
+            resources.load(GROUND_FRAMES, JsonAsset, (err, json) => {
+                if (err || !json || !json.json) {
+                    console.warn('[ArtLibrary] ground-frames.json 加载失败，地形退回按帧号取', err);
+                } else {
+                    const frames = (json.json as { frames?: Record<string, number> }).frames;
+                    if (frames) {
+                        for (const name of Object.keys(frames)) {
+                            const i = Number(frames[name]);
+                            if (Number.isFinite(i)) this._groundNames.set(name, i);
+                        }
+                    }
                 }
                 finish();
             });

@@ -62,7 +62,7 @@
 - ✅ T312 快进测试：node 下跑 50 年，检查人口 / 财政曲线不崩【支线 A】
 - ✅ T320 存档：`core/SaveGame.ts`，key `county-save-v1`，带版本号，onHide 自动存【支线 D】
 - ✅ T321 地图数据：64×64 `config/map.json` + `core/Terrain.ts` + TownModel 地形约束【支线 D】
-- ⬜ T322 地形渲染（GridMap 按 ground-frames.json 取帧）【支线 D，依赖 T231】—— 待开工，要编辑器
+- ✅ T322 地形渲染：GridMap 按 ground-frames.json 取帧（河/山/矿/树林/池塘/桥）【支线 D】—— 画面效果待真机验证
 
 ## 美术（新建筑 / 地形）
 - ✅ T230 新建筑等距图：workshop / textile / food-factory / electronics / center / school / clinic / police / bank / port / mine【支线 C】

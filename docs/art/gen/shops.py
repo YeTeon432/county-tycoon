@@ -138,7 +138,7 @@ def breakfast(F):
     gx, gy = ground_pt(b, F, 10, 4); put_grid(pv, gx, gy, STOOL, STOOL_MAP)
     # 蒸汽从雨棚上冒出来
     sx, sy = wall_pt(b, F, 5, 16)
-    for (dx, dy) in [(0, 0), (1, -2), (0, -3), (1, -5), (4, -1), (5, -3), (4, -4)]:
+    for (dx, dy) in [(0, 0), (1, 0), (0, -1), (1, -2), (2, -2), (1, -3), (0, -4), (1, -4), (4, -1), (5, -1), (4, -2), (5, -3), (6, -3), (5, -4)]:
         pv.put(int(sx) + dx, int(sy) + dy - 1, '纯白')
     finish(cv, 'breakfast', F, pv)
 
@@ -205,11 +205,9 @@ def parcel(F):
     b.rect_on(O, 0, 10, wlen(b, O), 4, '藏青')
     m = F == 'R'
     # 门口：包裹堆 + 电动三轮
-    gx, gy = ground_pt(b, F, 2, 3)
-    put_grid(pv, gx, gy, ['.tt..', '.dd..', 'ttttt', 'ddddd'], {'t': '肤色暗', 'd': '土黄'}, m)
-    gx, gy = ground_pt(b, F, 9, 5)
-    put_grid(pv, gx, gy, ['bbbbb...', 'bWWWb.K.', 'bbbbbKKK', 'KK..KK..'],
-             {'b': '钴蓝', 'W': '纯白', 'K': '近黑'}, m)
+    gx, gy = ground_pt(b, F, 5, 4)
+    put_grid(pv, gx, gy, ['..tttt....', '..dDdd....', '..dDdd....', 'ttttttttt.', 'dddDddDdd.', 'dddDddDdd.', 'DDDDDDDDD.'],
+             {'t': '肤色亮', 'd': '土黄', 'D': '深棕'}, m)
     finish(cv, 'parcel', F, pv)
 
 # ======================= 奶茶店（屋顶大杯子） =======================
@@ -234,8 +232,6 @@ def milk_tea(F):
     gx, gy = ground_pt(b, F, 3, 4)                       # 门口太阳伞小圆桌
     put_grid(pv, gx, gy, ['..PPPPP..', '.PwPwPwP.', 'PPPPPPPPP', '....g....', '....g....', '..wwwww..', '...g.g...'],
              {'P': '玫红', 'w': '纯白', 'g': '银灰'}, m)
-    gx, gy = ground_pt(b, F, 10, 3)                      # A 字菜单板
-    put_grid(pv, gx, gy, ['.KK.', 'KPPK', 'KwwK', 'KPPK', 'K..K'], {'K': '深棕', 'P': '浅粉', 'w': '纯白'}, m)
     finish(cv, 'milk-tea', F, pv)
 
 # ======================= 手机店（玻璃幕墙 + 红横幅 + 气球） =======================
@@ -248,21 +244,16 @@ def phone(F):
     b.rect_on(F, 0, 0, n, 9, '近黑'); b.rect_on(F, 1, 0, n - 2, 8, '天蓝')
     for u in range(1, n - 1, 4): b.rect_on(F, u, 0, 1, 8, '冷白')
     b.rect_on(F, 2, 0, n - 4, 2, '纯白')                # 展示柜台
-    b.rect_on(F, 0, 9, n, 5, '深青'); b.rect_on(F, 0, 13, n, 1, '青')
+    b.rect_on(F, 0, 9, n, 5, '墨青'); b.rect_on(F, 0, 13, n, 1, '青')
     glyphs(b, F, 1, 9, 2, '纯白', 47)
     b.rect_on(F, 1, 15, n - 2, 5, '亮红'); glyphs(b, F, 2, 15, 2, '柠檬黄', 52)   # 促销横幅
     b.rect_on(F, 1, 19, n - 2, 2, '浅灰')
     b.window(O, 2, 3, 3, 4, glass='钴蓝', shine='蓝'); b.window(O, 8, 3, 3, 4, glass='钴蓝', shine='蓝')
     b.window(O, 2, 14, 3, 4, glass='钴蓝', shine='蓝'); b.window(O, 8, 14, 3, 4, glass='钴蓝', shine='蓝')
     b.rect_on(O, 4, 9, 3, 2, '纯白')                     # 空调外机
-    # 门口两根气球柱
-    for u, d in ((1, 1), (n - 2, 1)):
-        gx, gy = ground_pt(b, F, u, d)
-        cols = ['亮红', '明黄', '钴蓝']
-        for k in range(6):
-            c = cols[k % 3]
-            pv.put(gx, gy - 1 - k * 2, c); cv.put(gx + 1, gy - 1 - k * 2, c)
-            pv.put(gx, gy - 2 - k * 2, c); cv.put(gx + 1, gy - 2 - k * 2, cols[(k + 1) % 3])
+    # 屋顶前沿一块大青色灯箱，中间白色手机轮廓
+    b.rect_on(F, 0, H, n, 9, '近黑'); b.rect_on(F, 1, H + 1, n - 2, 7, '青')
+    icon(b, F, (n - 4) // 2, H + 2, ['KKKK', 'KwwK', 'KwwK', 'KwwK', 'KKKK'], {'K': '纯白', 'w': '深青'})
     finish(cv, 'phone-shop', F, pv)
 
 # ======================= 理发店（灰瓦坡顶老房子） =======================
@@ -302,10 +293,11 @@ def barber(F):
     b.rect_on(F, 0, 9, n, 5, '紫'); glyphs(b, F, 1, 9, 2, '纯白', 61)
     b.window(O, 4, 3, 4, 4, glass='钴蓝', shine='蓝')
     m = F == 'R'
-    gx, gy = ground_pt(b, F, n - 2 if F == 'L' else 1, 2)   # 转灯：门面靠前角那头
-    for k in range(10):
-        pv.put(gx, gy - 1 - k, ['亮红', '纯白', '钴蓝'][k % 3]); pv.put(gx + 1, gy - 1 - k, ['纯白', '钴蓝', '亮红'][k % 3])
-    pv.put(gx, gy - 11, '银灰'); pv.put(gx + 1, gy - 11, '银灰')
+    gx, gy = ground_pt(b, F, n - 2 if F == 'L' else 1, 2)   # 转灯：3 宽 13 高
+    for k in range(13):
+        for i in range(3):
+            pv.put(gx - 1 + i, gy - 1 - k, ['亮红', '纯白', '钴蓝'][(k + i) % 3])
+    for i in range(3): pv.put(gx - 1 + i, gy - 14, '银灰'); pv.put(gx - 1 + i, gy, '中灰')
     gx, gy = ground_pt(b, F, 1 if F == 'L' else n - 3, 3)   # 盆栽
     put_grid(pv, gx, gy, ['.lgl.', 'lglgl', '.lgl.', '.ddd.', '.ddd.'], {'l': '亮绿', 'g': '地面绿', 'd': '赭橙'}, m)
     finish(cv, 'barber', F, pv)
@@ -325,7 +317,7 @@ def net_cafe(F):
         for w in (F, O):
             L_ = wlen(b, w)
             b.rect_on(w, 1, v, L_ - 2, 7, '近黑'); b.rect_on(w, 2, v + 1, L_ - 4, 5, '背景紫黑')
-            for u in range(3, L_ - 3, 3): b.rect_on(w, u, v + 2, 1, 2, '青' if w == F else '深青')
+            for u in range(3, L_ - 3, 3): b.rect_on(w, u, v + 2, 2, 3, '青' if w == F else '深青')
     b.rect_on(F, 0, 9, n, 1, '青'); b.rect_on(O, 0, 9, wlen(b, O), 1, '深青')
     # 竖招牌：在门面墙靠前角那一头，往外伸 4 像素
     u = n - 1 if F == 'L' else 0
@@ -333,9 +325,9 @@ def net_cafe(F):
     for v in range(12, 31):
         for k in range(1, 5):
             x, y = wall_pt(b, F, u + .5, v)
-            cv.put(int(x + ox * k), int(round(y + oy * k)), '近黑' if v in (12, 30) or k == 4 else '背景紫黑')
+            cv.put(int(x + ox * k), int(round(y + oy * k)), '近黑' if v in (12, 30) or k == 4 else '青')
     x, y = wall_pt(b, F, u + .5, 29)
-    vglyphs(cv, [(int(x + ox * 2.5) - 1, int(round(y + oy * 2.5)) + 4 * i) for i in range(4)], '青', 71)
+    vglyphs(cv, [(int(x + ox * 2.5) - 1, int(round(y + oy * 2.5)) + 4 * i) for i in range(4)], '藏青', 71)
     # 屋顶：天线 + 空调
     T_ = b.roof_pts()[0]
     for z in range(6): cv.put(int(T_[0]), int(T_[1]) + 3 - z, '银灰')

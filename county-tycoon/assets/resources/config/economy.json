@@ -18,7 +18,7 @@
     "leaveMood": 20,
     "leaveMonths": 3,
     "unemployedLeaveMonths": 6,
-    "immigrationRate": 0.6,
+    "immigrationRate": 2.0,
     "bailout": 8000,
     "taxRange": { "min": 0.02, "max": 0.3 },
     "maxEducationWithSchool": 3,

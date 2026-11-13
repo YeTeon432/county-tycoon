@@ -150,6 +150,6 @@ export class GameRoot extends Component {
                 : '选建筑点地块放置；点已有建筑换朝向');
 
         this._zoomLabel.string =
-            `《我在县城当首富》  ×${zoom.toFixed(1)}  建筑 ${count}\n${mode}`;
+            `《我在县城当县长》  ×${zoom.toFixed(1)}  建筑 ${count}\n${mode}`;
     }
 }

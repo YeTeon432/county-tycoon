@@ -20,6 +20,8 @@ export class Panel extends Component {
     protected card: Node | null = null;
     protected content: Node | null = null;
     protected titleLabel: Label | null = null;
+    /** 标题右边的类别小字。子类在标题行放按钮时要挪它（见 BuildingPanel.buildFacingButton） */
+    protected subtitleLabel: Label | null = null;
 
     /** 面板被关掉时通知（同一时间只留一个面板，父级用它来清引用） */
     onClosed: (() => void) | null = null;
@@ -88,6 +90,7 @@ export class Panel extends Component {
 
         if (subtitle) {
             const sub = makeLabel(card, 'Subtitle', subtitle, UI_FONT.small, UI_COLOR.textDim, 100);
+            this.subtitleLabel = sub;
             sub.node.setPosition(cw / 2 - 86, ch / 2 - 46, 0);
             sub.horizontalAlign = Label.HorizontalAlign.RIGHT;
             sub.node.getComponent(UITransform)!.setAnchorPoint(1, 0.5);

@@ -4,7 +4,7 @@ import { BuildingSim, Resident } from '../core/sim/types';
 import { PlacedBuilding, TownModel } from '../core/TownModel';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
-import { formatNumber, makeLabel, UI_COLOR, UI_FONT } from './UiTheme';
+import { formatNumber, makeLabel, makePill, UI_COLOR, UI_FONT } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -29,6 +29,12 @@ export class BuildingPanel extends Panel {
     private _sim: SimApi | null = null;
     private _placed: PlacedBuilding | null = null;
     private _onResidentTap: ResidentTapHandler | null = null;
+    /** 换朝向（GameRoot 接到 WorldView）。返回 false = 这栋楼没有第二个朝向 */
+    private _toggleFacing: ((uid: number) => boolean) | null = null;
+    /** 往顶栏第二行打一句提示（UiRoot 给） */
+    private _onHint: ((text: string) => void) | null = null;
+    private _facingBtnLabel: Label | null = null;
+    private _facingPill: { setActive: (on: boolean) => void } | null = null;
 
     /** 打开某栋建筑；找不到返回 null（比如 uid 已过期） */
     static show(
@@ -37,6 +43,8 @@ export class BuildingPanel extends Panel {
         model: TownModel,
         uid: number,
         onResidentTap: ResidentTapHandler,
+        toggleFacing: ((uid: number) => boolean) | null,
+        onHint: ((text: string) => void) | null = null,
     ): BuildingPanel | null {
         const placed = model.allBuildings().find((b) => b.uid === uid) ?? null;
         if (!placed) return null;
@@ -45,7 +53,10 @@ export class BuildingPanel extends Panel {
         panel._sim = sim;
         panel._placed = placed;
         panel._onResidentTap = onResidentTap;
+        panel._toggleFacing = toggleFacing;
+        panel._onHint = onHint;
         panel.fill();
+        panel.buildFacingButton();
         return panel;
     }
 
@@ -109,6 +120,51 @@ export class BuildingPanel extends Panel {
             build: (row) => this.buildPersonRow(row, r),
         }));
         list.setRows(rows);
+    }
+
+    /**
+     * 「换朝向」按钮：原来「空手点一下就转」的交互，现在收到详情面板里。
+     *
+     * 位置在卡片标题行、关闭按钮左边。不占内容区，名单不会因为它少一行。
+     * 行道树、广场这类只有一个朝向的建筑，点了会返回 false —— 按钮变灰并提示一句，
+     * 不让玩家反复点却没反应。
+     */
+    private buildFacingButton(): void {
+        const card = this.card;
+        const placed = this._placed;
+        if (!card || !placed) return;
+        // 贴地的（马路、桥）没有门面，没有朝向可换
+        if (placed.def.flat) return;
+
+        const cw = card.getComponent(UITransform)!.width;
+        const ch = card.getComponent(UITransform)!.height;
+        const W = 108;
+        const H = 40;
+
+        const btn = makePill(card, 'FacingBtn', '换朝向', W, H, () => {
+            this.toggleFacing();
+        }, this);
+        btn.node.setPosition(cw / 2 - 60 - W / 2 - 10, ch / 2 - 46, 0);
+        // 类别小字往左让出按钮的位置，否则两个会叠在一起
+        if (this.subtitleLabel) {
+            this.subtitleLabel.node.setPosition(cw / 2 - 60 - W - 22, ch / 2 - 46, 0);
+        }
+        this._facingBtnLabel = btn.label;
+        this._facingPill = btn;
+    }
+
+    private toggleFacing(): void {
+        const placed = this._placed;
+        if (!placed || !this._toggleFacing) return;
+
+        if (this._toggleFacing(placed.uid)) {
+            if (this._onHint) this._onHint(`已换朝向：${placed.def.name}`);
+            return;
+        }
+        // 没有第二个朝向（行道树、广场只有一张图）：按钮变灰并改字，别让玩家反复点却没反应
+        if (this._facingBtnLabel) this._facingBtnLabel.string = '只有一个朝向';
+        if (this._facingPill) this._facingPill.setActive(false);
+        if (this._onHint) this._onHint(`${placed.def.name} 没有第二个朝向`);
     }
 
     /** 住户：住在这里的居民 */

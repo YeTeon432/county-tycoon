@@ -32,6 +32,8 @@ export class BuildingLayer extends Component {
     private readonly _shown = new Map<number, SpriteFrame | null>();
     /** 节点 -> 前后排序键（建筑和会动的东西共用，见 sortAll） */
     private readonly _depth = new Map<Node, number>();
+    /** 山、树林的精灵节点 */
+    private readonly _terrainNodes: Node[] = [];
     /** 尺寸不对的图只警告一次 */
     private readonly _warned = new Set<string>();
 
@@ -95,6 +97,47 @@ export class BuildingLayer extends Component {
         });
 
         this.sortByDepth(list);
+    }
+
+    /**
+     * 地形上立起来的东西：山、树林（支线 C 画在建筑图集里的 terrain-*）。
+     * 每格一个精灵，和建筑、行人共用前后排序，所以人和楼会被山挡住、也能挡住山。
+     * 地形变了（以后砍树开荒）再调一次即可，已有的节点会清掉重建。
+     */
+    syncTerrainObjects(): void {
+        const art = this._art, model = this._model, iso = this._iso, root = this._objRoot;
+        if (!art || !model || !iso || !root) return;
+        const t = model.terrain;
+        for (const n of this._terrainNodes) { this._depth.delete(n); n.removeFromParent(); n.destroy(); }
+        this._terrainNodes.length = 0;
+        if (!t) return;
+        const pick = (kind: string, c: number, r: number) => {
+            const h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
+            if (kind === 'mountain') return art.get(`terrain-mountain-${h % 3}`);
+            if (kind === 'forest') return art.get(`terrain-forest-${h % 4}`);
+            if (kind === 'pond' && h % 3 === 0) return art.get('terrain-pond-lily');
+            return null;
+        };
+        for (let r = 0; r < t.height; r++) {
+            for (let c = 0; c < t.width; c++) {
+                if (model.getAt(c, r)) continue;           // 已经盖了东西的格子不再立树
+                const frame = pick(t.typeAt(c, r), c, r);
+                if (!frame) continue;
+                const node = BuildingLayer.makeChild(root, `T${c}_${r}`);
+                const ui = node.getComponent(UITransform)!;
+                ui.setAnchorPoint(new Vec2(0.5, 0));
+                ui.setContentSize(frame.rect.width, frame.rect.height);
+                const p = iso.footBottom(c, r, 1, 1);
+                node.setPosition(p.x, p.y, 0);
+                const s = node.addComponent(Sprite);
+                s.sizeMode = Sprite.SizeMode.CUSTOM;
+                s.trim = false;
+                s.spriteFrame = frame;
+                this._depth.set(node, IsoMath.depth(c, r, 1, 1));
+                this._terrainNodes.push(node);
+            }
+        }
+        this.sortAll();
     }
 
     /** 某栋建筑的节点（金币特效找位置用） */

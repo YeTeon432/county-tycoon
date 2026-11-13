@@ -147,7 +147,11 @@ export class WorldView extends Component {
     /** 建筑或马路有变化：地面（马路拼接）和建筑层都要重画 */
     redrawTown(): void {
         if (this._map) this._map.redraw();
-        if (this._buildings) this._buildings.redraw();
+        if (this._buildings) {
+            this._buildings.redraw();
+            // 树林上盖了楼，那格的树要撤掉；拆了楼树也不会长回来（树林已经砍了）——先简单整体重建
+            this._buildings.syncTerrainObjects();
+        }
         if (this._life) this._life.onTownChanged();
     }
 

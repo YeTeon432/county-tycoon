@@ -7,8 +7,8 @@ import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
 import { ZoomButtons } from '../ui/ZoomButtons';
 import { UiRoot } from '../ui/UiRoot';
-import { MockSim } from '../core/sim/mock';
 import { SimApi } from '../core/sim/SimApi';
+import { createSimulation, loadSimJson } from '../core/SimLoader';
 import { WorldView } from '../world/WorldView';
 
 const { ccclass } = _decorator;
@@ -36,27 +36,40 @@ export class GameRoot extends Component {
 
     protected start(): void {
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
-        Promise.all([loadWorldConfig(), loadBuildingConfig()])
-            .then(([world, buildings]) => {
+        Promise.all([loadWorldConfig(), loadBuildingConfig(), loadSimJson()])
+            .then(([world, buildings, [economy, names]]) => {
                 this._config = world;
-                this.build(world, buildings);
+                this.build(world, buildings, economy, names);
             })
             .catch((err) => {
                 console.error('[GameRoot] 启动失败', err);
             });
     }
 
-    private build(world: WorldConfig, buildings: BuildingDef[]): void {
+    private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any): void {
         const model = new TownModel(world.gridWidth, world.gridHeight);
         this._model = model;
 
-        this._sim = new MockSim();
+        // 开局地块：一条土路 + 两栋自建房（PRD 第 2 节）。要在建模拟之前放，模拟层会把它们登记成开局的家
+        this.placeOpening(model, buildings);
+        const sim = createSimulation(model, economy, names, Date.now() % 100000000);
+        this._sim = sim;
 
         this.buildWorld(world, model);
         this.buildHud();
         this.buildBar(buildings);
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model);
+    }
+
+    private placeOpening(model: TownModel, defs: BuildingDef[]): void {
+        const def = (id: string) => defs.find((d) => d.id === id);
+        const road = def('dirt-road'), house = def('house');
+        if (!road || !house) return;
+        const cx = Math.floor(model.width / 2), cy = Math.floor(model.height / 2);
+        for (let c = cx - 4; c <= cx + 4; c++) model.place(road, c, cy);
+        model.place(house, cx - 1, cy - 1);
+        model.place(house, cx + 1, cy - 1);
     }
 
     /** 搭地图，挂到本节点下 */
@@ -73,6 +86,10 @@ export class GameRoot extends Component {
 
         // 放置/拆除之后刷新 HUD 上的计数
         worldView.onTownChanged = () => this.updateZoomLabel(worldView.zoom);
+        // 接模拟层：盖楼扣钱、拆楼清人
+        worldView.onBuilt = (b) => (this._sim ? this._sim.onBuilt(b.uid, b.def.id) : true);
+        worldView.onDemolished = (uid) => { if (this._sim) this._sim.onDemolished(uid); };
+        worldView.onPlaceRejected = (d, why) => console.log(`[GameRoot] ${d.name} 没盖成：${why}`);
     }
 
     /** 顶部 HUD：标题、倍率、建筑数 */

@@ -123,3 +123,10 @@
 
 - **玩法定稿（D018）**：和用户讨论后，改为管理者视角，游戏名《我在县城当县长》。核心：每个居民有档案、每月过日子；玩家拿税建设；季度招商引资引来工厂和外县居民；后期加河流、矿、港口、树林；店铺升级和地价保留。PRD 改为 v0.3，新增 `docs/DESIGN.md` 写规则和数值，TASKS 拆出 M2（T301～T312）。首版规模 5 → 100 人。
 - **T300 ✅ 并行开发准备（D019）**：写好模拟↔画面合同（`core/sim/types.ts`、`SimApi.ts`）和假模拟 `mock.ts`；`ui/UiRoot.ts` 入口已接进 GameRoot（用 MockSim）；buildings.json 加了 12 个新建筑 id（占位色块）；`docs/PARALLEL.md` 定了四条支线的分工、文件归属、合并流程和开场白。各线日志在 `docs/devlog/`。
+- **集成：合并支线 A（lane/sim，f7c34a5）**：模拟层 T301～T306、T312，45 个测试全过，模拟层不依赖引擎。按它的「需要集成」接进游戏：
+  - 新增 `core/SimLoader.ts`（读 economy.json / names.json，用 TownModel 做 TownView），GameRoot 的 `MockSim` 换成真 `Simulation`。
+  - 开局地块：地图中间一条 9 格土路 + 两栋自建房，在建模拟之前放好，模拟层登记成开局 5 人的家。
+  - WorldView 加 `onBuilt` / `onDemolished` / `onPlaceRejected`：盖楼扣建设资金，钱不够就撤销放置；拆楼把住户和员工清出去。
+  - 验证：tsc 通过；node 下用真 TownModel + 真 Simulation 跑同一套流程：开局 5 人住进两栋自建房；盖早餐铺和小作坊后一年 5 人全部就业，资金 50000 → 45898，月账单有营业税、企业税、个税；资金只剩 10 时盖火锅店被拒，地图上也撤掉了。
+  - 待验证：画面上还没跑过（编辑器归支线 B），等 B 下次合并时一起看。时间推进（每 20 秒一个月）是 B 的 T307，在那之前模拟不会自己走。
+

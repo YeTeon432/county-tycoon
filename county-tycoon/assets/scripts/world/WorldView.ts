@@ -3,7 +3,7 @@ import {
 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
-import { TownModel } from '../core/TownModel';
+import { PlacedBuilding, TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
@@ -81,6 +81,15 @@ export class WorldView extends Component {
     onZoomChanged: ((zoom: number, index: number) => void) | null = null;
     /** 点中某一格时的回调（col, row） */
     onCellTapped: ((col: number, row: number) => void) | null = null;
+    /**
+     * 放下之后、生效之前问一句（集成接模拟层：扣建设资金）。返回 false 就撤销这次放置。
+     * 道路也会问，造价由 economy.json 决定。
+     */
+    onBuilt: ((b: PlacedBuilding) => boolean) | null = null;
+    /** 拆掉之后通知（模拟层把住户、员工清出去） */
+    onDemolished: ((uid: number) => void) | null = null;
+    /** 放置失败（资金不够等）时的提示 */
+    onPlaceRejected: ((def: BuildingDef, reason: string) => void) | null = null;
     /** 放置/拆除之后的通知，给 HUD 刷新计数用 */
     onTownChanged: (() => void) | null = null;
 
@@ -294,6 +303,11 @@ export class WorldView extends Component {
             console.log(`[WorldView] ${def.name} 放不下：(${col}, ${row})`);
             return;
         }
+        if (this.onBuilt && !this.onBuilt(placed)) {
+            model.removeAt(col, row);
+            if (this.onPlaceRejected) this.onPlaceRejected(def, '建设资金不够');
+            return;
+        }
         this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
     }
@@ -306,6 +320,7 @@ export class WorldView extends Component {
 
         const removed = model.removeAt(col, row);
         if (!removed) return;
+        if (this.onDemolished) this.onDemolished(removed.uid);
         this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
     }

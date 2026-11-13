@@ -105,6 +105,11 @@ export class GameRoot extends Component {
         for (let c = cx - 4; c <= cx + 4; c++) model.place(road, c, cy);
         model.place(house, cx - 1, cy - 1);
         model.place(house, cx + 1, cy - 1);
+        // 开局要有饭碗：只有住宅时 6 个月内全员找不到工作搬走（M2 验收发现）。
+        // 一间小作坊（4 岗）+ 一家早餐铺（2 岗，也满足吃饭），够开局 5 人里能干活的都有活干
+        const workshop = def('workshop'), breakfast = def('breakfast');
+        if (workshop) model.place(workshop, cx + 3, cy - 1);
+        if (breakfast) model.place(breakfast, cx - 3, cy - 1);
     }
 
     /** 搭地图，挂到本节点下 */

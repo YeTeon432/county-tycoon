@@ -22,3 +22,5 @@ node_modules/
 # WebStorm
 #//////////////////////////
 .idea/
+# 模拟层测试的编译产物
+county-tycoon/tests/.build/

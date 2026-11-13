@@ -3,5 +3,8 @@
   "uuid": "7afc787a-35b5-41b0-aabd-630e6f56f15b",
   "creator": {
     "version": "3.8.8"
+  },
+  "scripts": {
+    "test:sim": "node tests/sim/run.js"
   }
 }

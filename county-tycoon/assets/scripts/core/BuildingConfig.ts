@@ -15,9 +15,15 @@ export interface BuildingDef {
     height: number;
     /** 占位色：没有贴图时画色块用 */
     color: string;
-    /** 贴地的东西（马路）：画进地面层、按四邻自动拼接，不参与前后遮挡排序（D014） */
+    /** 贴地的东西（道路）：画进地面层、按四邻自动拼接，不参与前后遮挡排序（D014） */
     flat: boolean;
+    /** 道路种类：土路 / 城市道路。两种都算"道路"，互相连通（PRD 第 5 节）；非道路为 null */
+    road: RoadKind | null;
+    /** 城镇等级到几级解锁（0 = 村口，2 = 县城，见 PRD 第 7 节）。等级系统做好之前只记录不生效 */
+    unlockLevel: number;
 }
+
+export type RoadKind = 'dirt' | 'city';
 
 interface BuildingConfigJson {
     buildings: BuildingDef[];
@@ -25,9 +31,9 @@ interface BuildingConfigJson {
 
 /** 兜底：只留三种，够验证逻辑，缺字段时也有东西可放 */
 export const DEFAULT_BUILDINGS: BuildingDef[] = [
-    { id: 'house', name: '自建房', category: '住宅', width: 1, height: 1, color: '#966c6c', flat: false },
-    { id: 'milk-tea', name: '奶茶店', category: '店铺', width: 1, height: 1, color: '#eaaded', flat: false },
-    { id: 'road', name: '马路', category: '设施', width: 1, height: 1, color: '#313638', flat: true },
+    { id: 'house', name: '自建房', category: '住宅', width: 1, height: 1, color: '#966c6c', flat: false, road: null, unlockLevel: 0 },
+    { id: 'milk-tea', name: '奶茶店', category: '店铺', width: 1, height: 1, color: '#eaaded', flat: false, road: null, unlockLevel: 0 },
+    { id: 'dirt-road', name: '土路', category: '设施', width: 1, height: 1, color: '#b98a6a', flat: true, road: 'dirt', unlockLevel: 0 },
 ];
 
 /** 校验一条定义，防止配置写错（比如宽高为 0、id 重复）把逻辑搞坏 */
@@ -44,6 +50,8 @@ function sanitize(def: BuildingDef, index: number): BuildingDef | null {
         height: Math.max(1, Math.floor(def.height || 1)),
         color: typeof def.color === 'string' && def.color ? def.color : '#966c6c',
         flat: def.flat === true,
+        road: def.road === 'dirt' || def.road === 'city' ? def.road : null,
+        unlockLevel: typeof def.unlockLevel === 'number' ? Math.max(0, Math.floor(def.unlockLevel)) : 0,
     };
 }
 

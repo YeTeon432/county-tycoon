@@ -1,5 +1,5 @@
 """
-把 docs/art/build/buildings/*.png 打成一张图集（T217）。
+把 docs/art/build/buildings/*.png 和 actors/*.png 打成一张图集（T217）。
 输出到游戏 resources：
   art/atlas.png          所有建筑图，按高度排的货架式装箱，每张四周留 2 像素透明边防串色
   art/atlas-frames.json  {"frames": {"<文件名>": [x, y, w, h]}}，坐标原点在左上
@@ -10,8 +10,15 @@ from PIL import Image
 
 SRC, RES = sys.argv[1], sys.argv[2]
 PAD = 2; MAXW = 1024
-files = sorted(f for f in os.listdir(os.path.join(SRC, 'buildings')) if f.endswith('.png'))
-ims = [(f[:-4], Image.open(os.path.join(SRC, 'buildings', f)).convert('RGBA')) for f in files]
+# 建筑和会动的东西打进同一张图集：同一纹理，前后交错排序也能合批
+ims = []
+for sub in ('buildings', 'actors'):
+    d = os.path.join(SRC, sub)
+    if not os.path.isdir(d): continue
+    for f in sorted(os.listdir(d)):
+        if f.endswith('.png'):
+            ims.append((f[:-4], Image.open(os.path.join(d, f)).convert('RGBA')))
+assert len({n for n, _ in ims}) == len(ims), '建筑和角色有重名'
 ims.sort(key=lambda t: (-t[1].height, t[0]))
 x = y = shelf = 0; place = {}
 for name, im in ims:

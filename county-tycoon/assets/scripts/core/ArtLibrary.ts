@@ -7,7 +7,7 @@ import { ImageAsset, JsonAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resour
  *   - art/atlas.png + art/atlas-frames.json  全部建筑图打成的一张图集（docs/art/gen/pack.py 生成），
  *     帧名 = 建筑 id（朝右的版本是 <id>_r），宽必须是 (w+h)·16
  *   - art/buildings/<id>.png  可选：散图，同名时覆盖图集里的那帧，方便手改一张图直接试
- *   - art/ground/ground.png   地面图集，每帧 32×16 横排：0~3 草地，4+mask 马路（mask 见 GridMap）
+ *   - art/ground/ground.png   地面图集，每帧 32×16 横排：0~3 草地，4+mask 城市道路，20+mask 土路（mask 见 GridMap）
  *
  * 像素锐利由代码保证：加载原始 ImageAsset，自建 Texture2D 并强制最近邻 / 无 mipmap / Clamp，
  * 也不进动态合图（合图纹理是线性过滤）。导入面板里的 Filter Mode 改不改都不影响游戏。
@@ -18,7 +18,9 @@ const BUILDING_ATLAS_FRAMES = 'art/atlas-frames';
 const GROUND_ATLAS = 'art/ground/ground';
 
 export const GROUND_GRASS_FRAMES = 4;
-export const GROUND_ROAD_BASE = 4;
+/** 各种道路在地面图集里的起始帧，后面紧跟 16 种拼接（docs/art/gen/ground.py） */
+export const GROUND_ROAD_BASE: Record<'city' | 'dirt', number> = { city: 4, dirt: 20 };
+export const GROUND_FRAME_COUNT = 36;
 
 export class ArtLibrary {
     private readonly _buildings = new Map<string, SpriteFrame>();

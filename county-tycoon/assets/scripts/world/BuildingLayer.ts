@@ -30,6 +30,8 @@ export class BuildingLayer extends Component {
     private readonly _nodes = new Map<number, Node>();
     /** uid -> 节点当前显示的是哪张图（null = 色块）。贴图晚到、朝向变化时据此重建 */
     private readonly _shown = new Map<number, SpriteFrame | null>();
+    /** 节点 -> 前后排序键（建筑和会动的东西共用，见 sortAll） */
+    private readonly _depth = new Map<Node, number>();
     /** 尺寸不对的图只警告一次 */
     private readonly _warned = new Set<string>();
 
@@ -86,6 +88,7 @@ export class BuildingLayer extends Component {
                 // destroy 要到帧末才生效，先摘下来，同一帧内再查子节点也是对的
                 node.removeFromParent();
                 node.destroy();
+                this._depth.delete(node);
                 this._nodes.delete(uid);
                 this._shown.delete(uid);
             }
@@ -94,15 +97,40 @@ export class BuildingLayer extends Component {
         this.sortByDepth(list);
     }
 
-    private sortByDepth(list: PlacedBuilding[]): void {
-        const sorted = list.filter((b) => !b.def.flat).sort((a, b) =>
-            IsoMath.depth(a.col, a.row, a.def.width, a.def.height)
-            - IsoMath.depth(b.col, b.row, b.def.width, b.def.height)
-            || a.col - b.col);
-        for (let i = 0; i < sorted.length; i++) {
-            const n = this._nodes.get(sorted[i].uid);
-            if (n && n.getSiblingIndex() !== i) n.setSiblingIndex(i);
+    /** 某栋建筑的节点（金币特效找位置用） */
+    nodeOf(uid: number): Node | null {
+        return this._nodes.get(uid) ?? null;
+    }
+
+    /** 会动的东西（行人、车）挂进同一个父节点，才能和建筑互相遮挡 */
+    addActor(node: Node, depth: number): void {
+        this._objRoot!.addChild(node);
+        this._depth.set(node, depth);
+    }
+
+    setActorDepth(node: Node, depth: number): void {
+        this._depth.set(node, depth);
+    }
+
+    removeActor(node: Node): void {
+        this._depth.delete(node);
+        node.removeFromParent();
+        node.destroy();
+    }
+
+    /** 按排序键重排所有子节点；只动顺序变了的，每帧调也不贵 */
+    sortAll(): void {
+        const root = this._objRoot;
+        if (!root) return;
+        const kids = root.children.slice();
+        kids.sort((a, b) => (this._depth.get(a) ?? 0) - (this._depth.get(b) ?? 0));
+        for (let i = 0; i < kids.length; i++) {
+            if (kids[i].getSiblingIndex() !== i) kids[i].setSiblingIndex(i);
         }
+    }
+
+    private sortByDepth(_list: PlacedBuilding[]): void {
+        this.sortAll();
     }
 
     /**
@@ -154,7 +182,9 @@ export class BuildingLayer extends Component {
             node.destroy();
         }
 
+        if (node) this._depth.delete(node);
         node = BuildingLayer.makeChild(this._objRoot!, `B${b.uid}_${b.def.id}`);
+        this._depth.set(node, IsoMath.depth(b.col, b.row, b.def.width, b.def.height));
         const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
         node.setPosition(p.x, p.y, 0);
 

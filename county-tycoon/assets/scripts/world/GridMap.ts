@@ -1,7 +1,7 @@
 import {
     _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, Vec2, SpriteFrame,
 } from 'cc';
-import { ArtLibrary, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
+import { ArtLibrary, GROUND_FRAME_COUNT, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
@@ -9,12 +9,13 @@ import { WorldConfig } from '../core/WorldConfig';
 const { ccclass } = _decorator;
 
 /**
- * 地面层：等距菱形地块 + 贴地的东西（马路）（D014）。
+ * 地面层：等距菱形地块 + 贴地的东西（道路：土路 / 城市道路）（D014）。
  *
  * 有地面图集时每格一个 Sprite，全部来自同一张纹理，引擎会合成一次绘制；
  * 图集没加载到时用 Graphics 画纯色菱形顶上。
  *
- * 马路按四邻自动选图（mask 的位和 docs/art/gen/sample.py 一致）：
+ * 道路按四邻自动选图（mask 的位和 docs/art/gen/ground.py 一致）。土路和城市道路互相算连通，
+ * 所以两种路接头处不会断开，各自画各自的样子：
  *   1 = 左上邻 (col-1)   2 = 右上邻 (row-1)   4 = 右下邻 (col+1)   8 = 左下邻 (row+1)
  */
 @ccclass('GridMap')
@@ -57,7 +58,7 @@ export class GridMap extends Component {
     /** 地块或马路有变化时调用 */
     redraw(): void {
         const art = this._art;
-        if (art && art.groundFrameCount >= GROUND_ROAD_BASE + 16) {
+        if (art && art.groundFrameCount >= GROUND_FRAME_COUNT) {
             if (this._fallback) this._fallback.clear();
             this.syncSprites(art);
         } else {
@@ -67,12 +68,13 @@ export class GridMap extends Component {
 
     /** 这一格该用哪一帧 */
     private frameIndex(col: number, row: number): number {
-        if (this.isRoad(col, row)) {
+        const kind = this.roadKind(col, row);
+        if (kind) {
             const mask = (this.isRoad(col - 1, row) ? 1 : 0)
                 | (this.isRoad(col, row - 1) ? 2 : 0)
                 | (this.isRoad(col + 1, row) ? 4 : 0)
                 | (this.isRoad(col, row + 1) ? 8 : 0);
-            return GROUND_ROAD_BASE + mask;
+            return GROUND_ROAD_BASE[kind] + mask;
         }
         // 草地变体按坐标哈希取，保证同一格每次都一样；第 0 帧最常见，带花的最少
         const h = ((col * 73856093) ^ (row * 19349663)) >>> 0;
@@ -80,9 +82,14 @@ export class GridMap extends Component {
         return r < 4 ? 0 : (r < 6 ? 1 : (r < 8 ? 2 : GROUND_GRASS_FRAMES - 1));
     }
 
-    private isRoad(col: number, row: number): boolean {
+    private roadKind(col: number, row: number): 'city' | 'dirt' | null {
         const b = this._model ? this._model.getAt(col, row) : null;
-        return !!b && b.def.flat;
+        if (!b || !b.def.flat) return null;
+        return b.def.road ?? 'city';
+    }
+
+    private isRoad(col: number, row: number): boolean {
+        return this.roadKind(col, row) !== null;
     }
 
     private syncSprites(art: ArtLibrary): void {
@@ -137,13 +144,15 @@ export class GridMap extends Component {
         poly(iso.footprint(0, 0, iso.cols, iso.rows));
         g.fill();
 
-        g.fillColor = new Color().fromHEX('#313638');
+        // 道路用各自配置里的占位色（土路土黄、城市道路深灰）
         for (let row = 0; row < iso.rows; row++) {
             for (let col = 0; col < iso.cols; col++) {
-                if (this.isRoad(col, row)) poly(iso.footprint(col, row, 1, 1));
+                if (!this.isRoad(col, row)) continue;
+                g.fillColor = new Color().fromHEX(this._model!.getAt(col, row)!.def.color);
+                poly(iso.footprint(col, row, 1, 1));
+                g.fill();
             }
         }
-        g.fill();
 
         g.lineWidth = 1;
         g.strokeColor = new Color().fromHEX(config.palette.gridLine);

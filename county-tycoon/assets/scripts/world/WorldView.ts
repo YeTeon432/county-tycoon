@@ -9,6 +9,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { BuildingLayer } from './BuildingLayer';
 import { GridMap } from './GridMap';
+import { LifeLayer } from './LifeLayer';
 
 const { ccclass } = _decorator;
 
@@ -37,6 +38,7 @@ export class WorldView extends Component {
     private _world: Node | null = null;
     private _map: GridMap | null = null;
     private _buildings: BuildingLayer | null = null;
+    private _life: LifeLayer | null = null;
     private _model: TownModel | null = null;
     private _iso: IsoMath | null = null;
     private readonly _art = new ArtLibrary();
@@ -106,6 +108,11 @@ export class WorldView extends Component {
         world.addChild(buildingNode);
         this._buildings = buildingNode.getComponent(BuildingLayer);
 
+        // 行人、车、金币：人和车挂进建筑层一起排序，金币飘在最上面
+        const lifeNode = LifeLayer.create(iso, model, this._art, this._buildings!);
+        world.addChild(lifeNode);
+        this._life = lifeNode.getComponent(LifeLayer);
+
         // 贴图异步加载，先用色块顶着，加载完两层各重画一次
         this._art.load(() => {
             if (!this.isValid) return;
@@ -130,6 +137,7 @@ export class WorldView extends Component {
     redrawTown(): void {
         if (this._map) this._map.redraw();
         if (this._buildings) this._buildings.redraw();
+        if (this._life) this._life.onTownChanged();
     }
 
     get model(): TownModel | null {

@@ -29,7 +29,7 @@
 ### 等距版
 - ✅ T213 代码改等距：`IsoMath` 坐标换算、地面层（草地 + 马路自动拼接）、建筑层前后排序、等距预览框、点击换算
 - ✅ T214 48 色调色板 + 等距出图脚本 + 样板（自建房、行道树、草地 4 种、马路 16 种拼接）
-- ⬜ T215 1×1 店铺等距版：`milk-tea`/`breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring`
+- ✅ T215 1×1 店铺等距版：`milk-tea`/`breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring` → 每家两个朝向，按马路自动选（D015）
 - ⬜ T216 2×2 大件：`hotpot`/`supermarket`/`apartment`/`school-house`/`plaza`
 - ⬜ T217 合并图集，降 draw call（现在约 67）
 - ⬜ T218 地面补充：泥土、石板路、花坛；地图外围填地形，不露紫色底

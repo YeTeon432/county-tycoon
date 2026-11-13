@@ -1,4 +1,4 @@
-import { _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, Vec2 } from 'cc';
+import { _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, SpriteFrame, Vec2 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
@@ -28,8 +28,8 @@ export class BuildingLayer extends Component {
     private _ghost: Graphics | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
     private readonly _nodes = new Map<number, Node>();
-    /** uid -> 这个节点当前是贴图还是色块（贴图晚加载完时要换掉色块） */
-    private readonly _isSprite = new Map<number, boolean>();
+    /** uid -> 节点当前显示的是哪张图（null = 色块）。贴图晚到、朝向变化时据此重建 */
+    private readonly _shown = new Map<number, SpriteFrame | null>();
     /** 尺寸不对的图只警告一次 */
     private readonly _warned = new Set<string>();
 
@@ -87,7 +87,7 @@ export class BuildingLayer extends Component {
                 node.removeFromParent();
                 node.destroy();
                 this._nodes.delete(uid);
-                this._isSprite.delete(uid);
+                this._shown.delete(uid);
             }
         });
 
@@ -105,11 +105,32 @@ export class BuildingLayer extends Component {
         }
     }
 
-    /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽 */
-    private usableFrame(def: BuildingDef) {
+    /**
+     * 门面朝哪边（D015）。等距下只看得到左下墙（朝 +row）和右下墙（朝 +col）：
+     *   - 左下边挨着马路 → 默认图（门面在左墙）
+     *   - 否则右下边挨着马路 → `<id>_r` 图（门面在右墙）
+     *   - 都不挨（马路在背后或没有马路）→ 默认图
+     */
+    private facesRight(b: PlacedBuilding): boolean {
+        const m = this._model!;
+        const road = (c: number, r: number) => {
+            const x = m.getAt(c, r);
+            return !!x && x.def.flat;
+        };
+        for (let c = b.col; c < b.col + b.def.width; c++) {
+            if (road(c, b.row + b.def.height)) return false;
+        }
+        for (let r = b.row; r < b.row + b.def.height; r++) {
+            if (road(b.col + b.def.width, r)) return true;
+        }
+        return false;
+    }
+
+    /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽；朝右的图缺了就用默认图 */
+    private usableFrame(def: BuildingDef, right: boolean) {
         const art = this._art;
         const iso = this._iso!;
-        const frame = art ? art.get(def.id) : null;
+        const frame = art ? ((right ? art.get(`${def.id}_r`) : null) ?? art.get(def.id)) : null;
         if (!frame) return null;
         const want = (def.width + def.height) * iso.hw;
         if (frame.texture.width !== want) {
@@ -124,10 +145,9 @@ export class BuildingLayer extends Component {
 
     private syncNode(b: PlacedBuilding): void {
         const iso = this._iso!;
-        const frame = this.usableFrame(b.def);
-        const wantSprite = !!frame;
+        const frame = this.usableFrame(b.def, this.facesRight(b));
         let node = this._nodes.get(b.uid);
-        if (node && this._isSprite.get(b.uid) === wantSprite) return;
+        if (node && this._shown.get(b.uid) === frame) return;
         if (node) {
             node.removeFromParent();
             node.destroy();
@@ -150,7 +170,7 @@ export class BuildingLayer extends Component {
             this.drawBlock(node.addComponent(Graphics), b.def);
         }
         this._nodes.set(b.uid, node);
-        this._isSprite.set(b.uid, wantSprite);
+        this._shown.set(b.uid, frame);
     }
 
     /** 没贴图：等距色块。原点是占地最下顶点，墙高按占地大小给一个合理值 */

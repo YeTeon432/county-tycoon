@@ -113,7 +113,9 @@ def tree():
 tree().save(f'{OUT}/buildings/tree.png')
 
 # ---------- 自建房（1×1，3 层，红瓦檐口 + 空调外机 + 屋顶太阳能） ----------
-def house():
+def house(F):
+    O = 'R' if F == 'L' else 'L'
+    FL = 14; OL = 14
     H = 50; cv = Canvas(32, H)
     b = Box(cv, 1, 1, 25, 16, H, inset=1)
     b.draw(roof='中灰', left='淡紫白', right='银灰')
@@ -121,16 +123,16 @@ def house():
     for v in (8, 16):
         b.rect_on('L', 0, v, b.lw_len, 1, '银灰'); b.rect_on('R', 0, v, b.rw_len, 1, '浅灰')
     # 一楼：左墙卷帘门（开店用），右墙木门
-    b.rect_on('L', 2, 0, 9, 7, '浅灰')
-    for v in range(1, 7, 2): b.rect_on('L', 2, v, 9, 1, '中灰')
-    b.rect_on('L', 1, 7, 11, 1, '近黑')
-    b.rect_on('R', 6, 0, 4, 7, '近黑'); b.rect_on('R', 7, 0, 2, 6, '深棕'); b.rect_on('R', 8, 3, 1, 1, '明黄')
-    b.window('R', 2, 2, 2, 3, glass='钴蓝', shine='蓝')
+    b.rect_on(F, 2, 0, 9, 7, '浅灰')
+    for v in range(1, 7, 2): b.rect_on(F, 2, v, 9, 1, '中灰')
+    b.rect_on(F, 1, 7, 11, 1, '近黑')
+    b.rect_on(O, 6, 0, 4, 7, '近黑'); b.rect_on(O, 7, 0, 2, 6, '深棕'); b.rect_on(O, 8, 3, 1, 1, '明黄')
+    b.window(O, 2, 2, 2, 3, glass='钴蓝' if O == 'R' else '蓝', shine='蓝' if O == 'R' else '天蓝')
     # 二三楼窗户；二楼左墙挂一台空调外机
     for v in (10, 18):
         b.window('L', 2, v, 3, 4); b.window('L', 9, v, 3, 4)
         b.window('R', 2, v, 3, 4, glass='钴蓝', shine='蓝'); b.window('R', 9, v, 3, 4, glass='钴蓝', shine='蓝')
-    b.rect_on('L', 6, 10, 2, 3, '银灰'); b.rect_on('L', 6, 11, 2, 1, '中灰')
+    b.rect_on(F, 6, 10, 2, 3, '银灰'); b.rect_on(F, 6, 11, 2, 1, '中灰')
     # 红瓦檐口：屋顶边缘下面一条
     b.rect_on('L', 0, 23, b.lw_len, 2, '深红'); b.rect_on('R', 0, 23, b.rw_len, 2, '酒红')
     for u in range(0, b.lw_len, 2): b.rect_on('L', u, 24, 1, 1, '亮红')
@@ -148,5 +150,6 @@ def house():
         cv.put(12 + i, ty + 4 + i // 2, '银灰')
     cv.outline('近黑')
     return cv
-house().save(f'{OUT}/buildings/house.png')
+house('L').save(f'{OUT}/buildings/house.png')
+house('R').save(f'{OUT}/buildings/house_r.png')
 print('ok')

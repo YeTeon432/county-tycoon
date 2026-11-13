@@ -9,7 +9,7 @@
 
 ## 技术栈（见 docs/DECISIONS.md）
 - 引擎：Cocos Creator 3.8.8 + TypeScript（已确认，版本锁定，不随意升级）
-- 美术：用户自己画；正俯视，16×16 地块，32 色调色板（D003）
+- 美术：等距视角 2:1，地块 32×16，48 色调色板（D014，取代 D003 的正俯视）；Claude 用 `docs/art/gen/` 的脚本出图，用户可在 Aseprite 里改
 - 平台：先微信，后抖音（构建面板直接出包）
 - 存档：先本地存储（wx.setStorage / tt.setStorage），后续再考虑云存档
 - 版本管理：git

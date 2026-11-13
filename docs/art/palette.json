@@ -1,5 +1,5 @@
 {
-  "name": "我在县城当首富 32 色",
+  "name": "我在县城当首富 48 色",
   "colors": [
     {
       "index": 0,
@@ -191,6 +191,102 @@
       "index": 31,
       "hex": "#e8e4f0",
       "name": "淡紫白",
+      "group": "冷色"
+    },
+    {
+      "index": 32,
+      "hex": "#3e3546",
+      "name": "暗紫灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 33,
+      "hex": "#45494c",
+      "name": "马路浅灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 34,
+      "hex": "#b4b4c4",
+      "name": "银灰",
+      "group": "中性 / 深色"
+    },
+    {
+      "index": 35,
+      "hex": "#23412f",
+      "name": "墨绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 36,
+      "hex": "#c6ef8c",
+      "name": "嫩绿",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 37,
+      "hex": "#4a2a22",
+      "name": "焦棕",
+      "group": "绿 / 土"
+    },
+    {
+      "index": 38,
+      "hex": "#6e1b2a",
+      "name": "酒红",
+      "group": "暖色"
+    },
+    {
+      "index": 39,
+      "hex": "#f27d6c",
+      "name": "珊瑚",
+      "group": "暖色"
+    },
+    {
+      "index": 40,
+      "hex": "#b8561f",
+      "name": "赭橙",
+      "group": "暖色"
+    },
+    {
+      "index": 41,
+      "hex": "#fff07a",
+      "name": "柠檬黄",
+      "group": "暖色"
+    },
+    {
+      "index": 42,
+      "hex": "#22345e",
+      "name": "藏青",
+      "group": "冷色"
+    },
+    {
+      "index": 43,
+      "hex": "#2f5fa8",
+      "name": "钴蓝",
+      "group": "冷色"
+    },
+    {
+      "index": 44,
+      "hex": "#8fd3ff",
+      "name": "天蓝",
+      "group": "冷色"
+    },
+    {
+      "index": 45,
+      "hex": "#1f5560",
+      "name": "墨青",
+      "group": "冷色"
+    },
+    {
+      "index": 46,
+      "hex": "#7b54b5",
+      "name": "深紫",
+      "group": "冷色"
+    },
+    {
+      "index": 47,
+      "hex": "#c4378a",
+      "name": "玫红",
       "group": "冷色"
     }
   ]

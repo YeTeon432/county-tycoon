@@ -5,6 +5,8 @@ import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
+import { ArtLibrary } from '../core/ArtLibrary';
+import { IsoMath } from '../core/IsoMath';
 import { BuildingLayer } from './BuildingLayer';
 import { GridMap } from './GridMap';
 
@@ -36,6 +38,8 @@ export class WorldView extends Component {
     private _map: GridMap | null = null;
     private _buildings: BuildingLayer | null = null;
     private _model: TownModel | null = null;
+    private _iso: IsoMath | null = null;
+    private readonly _art = new ArtLibrary();
 
     /** 当前缩放档位在 zoomLevels 里的下标 */
     private _zoomIndex = 0;
@@ -90,14 +94,23 @@ export class WorldView extends Component {
         this.node.addChild(world);
         this._world = world;
 
-        const mapNode = GridMap.create(config);
+        const iso = new IsoMath(config);
+        this._iso = iso;
+
+        const mapNode = GridMap.create(config, iso, model, this._art);
         world.addChild(mapNode);
         this._map = mapNode.getComponent(GridMap);
 
-        // 建筑层压在网格之上
-        const buildingNode = BuildingLayer.create(config, model);
+        // 建筑层压在地面之上
+        const buildingNode = BuildingLayer.create(iso, model, this._art);
         world.addChild(buildingNode);
         this._buildings = buildingNode.getComponent(BuildingLayer);
+
+        // 贴图异步加载，先用色块顶着，加载完两层各重画一次
+        this._art.load(() => {
+            if (!this.isValid) return;
+            this.redrawTown();
+        });
 
         this._world.setPosition(0, 0, 0);
         this.applyTransform();
@@ -111,6 +124,12 @@ export class WorldView extends Component {
 
     get zoomLevels(): number[] {
         return this._config ? this._config.zoomLevels : [];
+    }
+
+    /** 建筑或马路有变化：地面（马路拼接）和建筑层都要重画 */
+    redrawTown(): void {
+        if (this._map) this._map.redraw();
+        if (this._buildings) this._buildings.redraw();
     }
 
     get model(): TownModel | null {
@@ -255,7 +274,7 @@ export class WorldView extends Component {
             console.log(`[WorldView] ${def.name} 放不下：(${col}, ${row})`);
             return;
         }
-        layer.redraw();
+        this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
     }
 
@@ -267,7 +286,7 @@ export class WorldView extends Component {
 
         const removed = model.removeAt(col, row);
         if (!removed) return;
-        layer.redraw();
+        this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
     }
 
@@ -343,18 +362,7 @@ export class WorldView extends Component {
         const localX = (WorldView._tmpWorld.x - p.x) / this._zoom;
         const localY = (WorldView._tmpWorld.y - p.y) / this._zoom;
 
-        const tile = config.tileSize;
-        const halfW = config.gridWidth * tile / 2;
-        const halfH = config.gridHeight * tile / 2;
-
-        const col = Math.floor((localX + halfW) / tile);
-        // 屏幕 y 向上，行号从下往上，所以直接把 localY 平移就行
-        const row = Math.floor((localY + halfH) / tile);
-
-        if (col < 0 || row < 0 || col >= config.gridWidth || row >= config.gridHeight) {
-            return null;
-        }
-        return [col, row];
+        return this._iso ? this._iso.toCell(localX, localY) : null;
     }
 
     /** 两指之间的距离，用 UI 坐标，与设备分辨率无关 */

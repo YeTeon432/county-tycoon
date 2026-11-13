@@ -13,8 +13,10 @@ export interface BuildingDef {
     category: string;
     width: number;
     height: number;
-    /** 占位色。等 M4 美术到位后换成贴图，这个字段就只剩调试用 */
+    /** 占位色：没有贴图时画色块用 */
     color: string;
+    /** 贴地的东西（马路）：画进地面层、按四邻自动拼接，不参与前后遮挡排序（D014） */
+    flat: boolean;
 }
 
 interface BuildingConfigJson {
@@ -23,9 +25,9 @@ interface BuildingConfigJson {
 
 /** 兜底：只留三种，够验证逻辑，缺字段时也有东西可放 */
 export const DEFAULT_BUILDINGS: BuildingDef[] = [
-    { id: 'house', name: '自建房', category: '住宅', width: 1, height: 1, color: '#966c6c' },
-    { id: 'milk-tea', name: '奶茶店', category: '店铺', width: 1, height: 1, color: '#eaaded' },
-    { id: 'road', name: '马路', category: '设施', width: 1, height: 1, color: '#313638' },
+    { id: 'house', name: '自建房', category: '住宅', width: 1, height: 1, color: '#966c6c', flat: false },
+    { id: 'milk-tea', name: '奶茶店', category: '店铺', width: 1, height: 1, color: '#eaaded', flat: false },
+    { id: 'road', name: '马路', category: '设施', width: 1, height: 1, color: '#313638', flat: true },
 ];
 
 /** 校验一条定义，防止配置写错（比如宽高为 0、id 重复）把逻辑搞坏 */
@@ -41,6 +43,7 @@ function sanitize(def: BuildingDef, index: number): BuildingDef | null {
         width: Math.max(1, Math.floor(def.width || 1)),
         height: Math.max(1, Math.floor(def.height || 1)),
         color: typeof def.color === 'string' && def.color ? def.color : '#966c6c',
+        flat: def.flat === true,
     };
 }
 

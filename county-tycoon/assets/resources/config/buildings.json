@@ -13,7 +13,8 @@
     { "id": "phone-shop",   "name": "手机店",     "category": "店铺", "width": 1, "height": 1, "color": "#30e1b9" },
     { "id": "barber",       "name": "理发店",     "category": "店铺", "width": 1, "height": 1, "color": "#a884f3" },
     { "id": "tutoring",     "name": "补习班",     "category": "店铺", "width": 1, "height": 1, "color": "#d5e04b" },
-    { "id": "road",         "name": "马路",       "category": "设施", "width": 1, "height": 1, "color": "#313638" },
+    { "id": "road",         "name": "马路",       "category": "设施", "width": 1, "height": 1, "color": "#313638", "flat": true },
+    { "id": "tree",         "name": "行道树",     "category": "设施", "width": 1, "height": 1, "color": "#3a5b46" },
     { "id": "plaza",        "name": "广场",       "category": "设施", "width": 2, "height": 2, "color": "#91db69" }
   ]
 }

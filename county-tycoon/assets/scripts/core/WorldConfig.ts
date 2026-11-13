@@ -19,8 +19,10 @@ export interface WorldPalette {
 }
 
 export interface WorldConfig {
-    /** 单个地块边长，单位是"美术像素"，与 16×16 的像素图对齐（D003） */
-    tileSize: number;
+    /** 等距菱形地块的宽，单位"美术像素"（D014：32） */
+    tileWidth: number;
+    /** 等距菱形地块的高（D014：16，宽高 2:1） */
+    tileHeight: number;
     /** 地图横向地块数 */
     gridWidth: number;
     /** 地图纵向地块数 */
@@ -32,16 +34,17 @@ export interface WorldConfig {
     zoomLevels: number[];
     /** 默认档位在 zoomLevels 里的下标 */
     defaultZoomIndex: number;
-    /** 占位配色，取自固定的 32 色调色板（D003） */
+    /** 占位配色，取自固定调色板（D011 / D014） */
     palette: WorldPalette;
 }
 
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
-    tileSize: 16,
-    gridWidth: 24,
+    tileWidth: 32,
+    tileHeight: 16,
+    gridWidth: 40,
     gridHeight: 40,
     zoomLevels: [2, 3, 4],
-    defaultZoomIndex: 1,
+    defaultZoomIndex: 0,
     palette: {
         background: '#2e222f',
         ground: '#547e64',

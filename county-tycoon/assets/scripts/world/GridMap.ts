@@ -1,105 +1,160 @@
 import {
-    _decorator, Component, Graphics, Layers, Node, UITransform, Color,
+    _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, Vec2, SpriteFrame,
 } from 'cc';
-import { DEFAULT_WORLD_CONFIG, WorldConfig } from '../core/WorldConfig';
+import { ArtLibrary, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
+import { IsoMath } from '../core/IsoMath';
+import { TownModel } from '../core/TownModel';
+import { WorldConfig } from '../core/WorldConfig';
 
 const { ccclass } = _decorator;
 
 /**
- * 网格地图的绘制。
+ * 地面层：等距菱形地块 + 贴地的东西（马路）（D014）。
  *
- * 现阶段没有美术资源（D003：M2 之前用占位色块），所以整张地图用 Graphics 画出来，
- * 不依赖任何贴图。等正式美术到位后，这里换成按地块铺 Sprite 即可，
- * 对外的 mapWidth / mapHeight / tileSize 接口不用变。
+ * 有地面图集时每格一个 Sprite，全部来自同一张纹理，引擎会合成一次绘制；
+ * 图集没加载到时用 Graphics 画纯色菱形顶上。
  *
- * 节点自身的坐标原点在地图正中，所以地图范围是 [-w/2, w/2] × [-h/2, h/2]，
- * 缩放和平移都围绕中心做，数学上更省事。
+ * 马路按四邻自动选图（mask 的位和 docs/art/gen/sample.py 一致）：
+ *   1 = 左上邻 (col-1)   2 = 右上邻 (row-1)   4 = 右下邻 (col+1)   8 = 左下邻 (row+1)
  */
 @ccclass('GridMap')
 export class GridMap extends Component {
-    private _graphics: Graphics | null = null;
-    private _config: WorldConfig = DEFAULT_WORLD_CONFIG;
+    private _config: WorldConfig | null = null;
+    private _iso: IsoMath | null = null;
+    private _model: TownModel | null = null;
+    private _art: ArtLibrary | null = null;
 
-    /** 建一个已经画好网格的地图节点 */
-    static create(config: WorldConfig): Node {
+    private _fallback: Graphics | null = null;
+    private _tileRoot: Node | null = null;
+    /** 下标 = row * cols + col */
+    private _tiles: Sprite[] = [];
+
+    static create(config: WorldConfig, iso: IsoMath, model: TownModel, art: ArtLibrary): Node {
         const node = new Node('GridMap');
         node.layer = Layers.Enum.UI_2D;
         node.addComponent(UITransform);
-        const map = node.addComponent(GridMap);
-        map.build(config);
+        node.addComponent(GridMap).build(config, iso, model, art);
         return node;
     }
 
-    /** 地图宽度，单位：美术像素（未缩放） */
     get mapWidth(): number {
-        return this._config.gridWidth * this._config.tileSize;
+        return this._iso ? this._iso.mapWidth : 0;
     }
 
-    /** 地图高度，单位：美术像素（未缩放） */
     get mapHeight(): number {
-        return this._config.gridHeight * this._config.tileSize;
+        return this._iso ? this._iso.mapHeight : 0;
     }
 
-    /** 单个地块边长，单位：美术像素（未缩放） */
-    get tileSize(): number {
-        return this._config.tileSize;
-    }
-
-    build(config: WorldConfig): void {
+    build(config: WorldConfig, iso: IsoMath, model: TownModel, art: ArtLibrary): void {
         this._config = config;
-
-        if (!this.node.getComponent(UITransform)) {
-            this.node.addComponent(UITransform);
-        }
-        let g = this.node.getComponent(Graphics);
-        if (!g) {
-            g = this.node.addComponent(Graphics);
-        }
-        this._graphics = g;
-
+        this._iso = iso;
+        this._model = model;
+        this._art = art;
+        this._fallback = this.node.getComponent(Graphics) ?? this.node.addComponent(Graphics);
         this.redraw();
     }
 
-    /**
-     * 重画整张地图。
-     *
-     * 全部用"填充矩形"而不是描线：填充出来的边正好落在整数像素上，
-     * 放大到 2/3/4 倍也不会出现半像素发虚或线条粗细不匀（D003 的整数倍放大要求）。
-     */
-    private redraw(): void {
-        const g = this._graphics;
-        if (!g) return;
+    /** 地块或马路有变化时调用 */
+    redraw(): void {
+        const art = this._art;
+        if (art && art.groundFrameCount >= GROUND_ROAD_BASE + 16) {
+            if (this._fallback) this._fallback.clear();
+            this.syncSprites(art);
+        } else {
+            this.drawFallback();
+        }
+    }
 
-        const { tileSize, gridWidth, gridHeight, palette } = this._config;
-        const w = this.mapWidth;
-        const h = this.mapHeight;
-        const left = -w / 2;
-        const bottom = -h / 2;
+    /** 这一格该用哪一帧 */
+    private frameIndex(col: number, row: number): number {
+        if (this.isRoad(col, row)) {
+            const mask = (this.isRoad(col - 1, row) ? 1 : 0)
+                | (this.isRoad(col, row - 1) ? 2 : 0)
+                | (this.isRoad(col + 1, row) ? 4 : 0)
+                | (this.isRoad(col, row + 1) ? 8 : 0);
+            return GROUND_ROAD_BASE + mask;
+        }
+        // 草地变体按坐标哈希取，保证同一格每次都一样；第 0 帧最常见，带花的最少
+        const h = ((col * 73856093) ^ (row * 19349663)) >>> 0;
+        const r = h % 10;
+        return r < 4 ? 0 : (r < 6 ? 1 : (r < 8 ? 2 : GROUND_GRASS_FRAMES - 1));
+    }
 
+    private isRoad(col: number, row: number): boolean {
+        const b = this._model ? this._model.getAt(col, row) : null;
+        return !!b && b.def.flat;
+    }
+
+    private syncSprites(art: ArtLibrary): void {
+        const iso = this._iso!;
+        if (!this._tileRoot) {
+            this._tileRoot = new Node('Tiles');
+            this._tileRoot.layer = Layers.Enum.UI_2D;
+            this._tileRoot.addComponent(UITransform);
+            this.node.addChild(this._tileRoot);
+            const p = { x: 0, y: 0 };
+            for (let row = 0; row < iso.rows; row++) {
+                for (let col = 0; col < iso.cols; col++) {
+                    const n = new Node();
+                    n.layer = Layers.Enum.UI_2D;
+                    const ui = n.addComponent(UITransform);
+                    ui.setAnchorPoint(new Vec2(0.5, 1));
+                    ui.setContentSize(iso.hw * 2, iso.hh * 2);
+                    iso.cellTop(col, row, p);
+                    n.setPosition(p.x, p.y, 0);
+                    const s = n.addComponent(Sprite);
+                    s.sizeMode = Sprite.SizeMode.CUSTOM;
+                    s.trim = false;
+                    this._tileRoot.addChild(n);
+                    this._tiles.push(s);
+                }
+            }
+        }
+        for (let row = 0; row < iso.rows; row++) {
+            for (let col = 0; col < iso.cols; col++) {
+                const s = this._tiles[row * iso.cols + col];
+                const f: SpriteFrame | null = art.ground(this.frameIndex(col, row));
+                if (s.spriteFrame !== f) s.spriteFrame = f;
+            }
+        }
+    }
+
+    /** 没有图集：纯色菱形 + 网格线 + 马路深色格 */
+    private drawFallback(): void {
+        const g = this._fallback;
+        const iso = this._iso;
+        const config = this._config;
+        if (!g || !iso || !config) return;
         g.clear();
 
-        // 1. 地面底色
-        g.fillColor = new Color().fromHEX(palette.ground);
-        g.rect(left, bottom, w, h);
+        const poly = (pts: { x: number; y: number }[]) => {
+            g.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
+            g.close();
+        };
+
+        g.fillColor = new Color().fromHEX(config.palette.ground);
+        poly(iso.footprint(0, 0, iso.cols, iso.rows));
         g.fill();
 
-        // 2. 网格线：1 像素宽的细条，全部塞进一次 fill
-        g.fillColor = new Color().fromHEX(palette.gridLine);
-        for (let i = 1; i < gridWidth; i++) {
-            g.rect(left + i * tileSize, bottom, 1, h);
-        }
-        for (let j = 1; j < gridHeight; j++) {
-            g.rect(left, bottom + j * tileSize, w, 1);
+        g.fillColor = new Color().fromHEX('#313638');
+        for (let row = 0; row < iso.rows; row++) {
+            for (let col = 0; col < iso.cols; col++) {
+                if (this.isRoad(col, row)) poly(iso.footprint(col, row, 1, 1));
+            }
         }
         g.fill();
 
-        // 3. 外框
-        g.fillColor = new Color().fromHEX(palette.border);
-        const bw = 2;
-        g.rect(left, bottom + h - bw, w, bw);       // 上
-        g.rect(left, bottom, w, bw);                // 下
-        g.rect(left, bottom, bw, h);                // 左
-        g.rect(left + w - bw, bottom, bw, h);       // 右
-        g.fill();
+        g.lineWidth = 1;
+        g.strokeColor = new Color().fromHEX(config.palette.gridLine);
+        for (let i = 0; i <= iso.cols; i++) {
+            const a = iso.toLocal(i, 0), b = iso.toLocal(i, iso.rows);
+            g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+        }
+        for (let j = 0; j <= iso.rows; j++) {
+            const a = iso.toLocal(0, j), b = iso.toLocal(iso.cols, j);
+            g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+        }
+        g.stroke();
     }
 }

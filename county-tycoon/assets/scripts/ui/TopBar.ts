@@ -26,6 +26,8 @@ export class TopBar extends Component {
     onSpeedChange: ((speed: Speed) => void) | null = null;
     /** 玩家点了「账单」 */
     onReportTap: (() => void) | null = null;
+    /** 玩家点了「人口」→ 打开居民总览 */
+    onPopulationTap: (() => void) | null = null;
 
     private _sim: SimApi | null = null;
     private _speed: Speed = 1;
@@ -79,8 +81,17 @@ export class TopBar extends Component {
         this._funds.node.setPosition(x, row1, 0);
 
         x += C2_W / 2 + GAP + C3_W / 2;
-        this._population = makeLabel(this.node, 'Population', '', UI_FONT.number, UI_COLOR.text, C3_W);
+        this._population = makeLabel(this.node, 'Population', '', UI_FONT.number, UI_COLOR.gold, C3_W);
         this._population.node.setPosition(x, row1, 0);
+        // 人口这一列可以点，进居民总览。文字用金色表示"可点"，和旁边只读的心情区分开。
+        const popBtn = new Node('PopulationBtn');
+        popBtn.layer = Layers.Enum.UI_2D;
+        popBtn.addComponent(UITransform).setContentSize(C3_W + 24, 52);
+        popBtn.setPosition(x, row1, 0);
+        this.node.addChild(popBtn);
+        popBtn.on(Node.EventType.TOUCH_END, () => {
+            if (this.onPopulationTap) this.onPopulationTap();
+        }, this);
 
         x += C3_W / 2 + GAP + C4_W / 2;
         this._mood = makeLabel(this.node, 'Mood', '', UI_FONT.number, UI_COLOR.up, C4_W);

@@ -79,6 +79,7 @@ export class UiRoot extends Component {
             if (this._clock) this._clock.setSpeed(speed);
         };
         bar.onReportTap = () => this.openReport();
+        bar.onPopulationTap = () => this.openResidentList();
         this._topBar = bar;
     }
 

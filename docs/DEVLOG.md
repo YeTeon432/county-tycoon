@@ -135,3 +135,4 @@
   - 按 B 的「需要集成」：删掉 GameRoot 旧的占位标题栏（和顶栏重叠）；空手点建筑不再直接换朝向，改为 `WorldView.onBuildingTapped(uid)` → `UiRoot.onBuildingTapped(uid)` 打开详情；换朝向留给详情面板按钮，入口 `WorldView.toggleFacingByUid(uid)`，GameRoot 赋给 `UiRoot.requestToggleFacing`（这个字段需要 B 在 UiRoot 里声明）。
   - 待验证：画面（编辑器在 B 手上）。`ground-frames.json.meta` 需要编辑器开一次才会生成。
 
+- **集成：合并 lane/ui T308**（建筑详情 + 居民档案面板），无冲突，tsc 通过。B 要的「空手点建筑开详情、换朝向挪进面板」主线上一轮已经接好；面板里的「换朝向」按钮还要 B 在 UiRoot 声明 `requestToggleFacing` 后加。

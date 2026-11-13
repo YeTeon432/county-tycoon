@@ -3,6 +3,7 @@ import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { BuildingPanel } from './BuildingPanel';
+import { MonthReportPanel } from './MonthReportPanel';
 import { ResidentListPanel } from './ResidentListPanel';
 import { ResidentPanel } from './ResidentPanel';
 import { TimeController } from './TimeController';
@@ -38,6 +39,10 @@ export class UiRoot extends Component {
     private _residentPanel: ResidentPanel | null = null;
     /** 居民总览 */
     private _listPanel: ResidentListPanel | null = null;
+    /** 月度账单 */
+    private _reportPanel: MonthReportPanel | null = null;
+    /** 上月账单（「账单」按钮重新打开用） */
+    private _lastReport: MonthlyReport | null = null;
 
     static create(parent: Node, sim: SimApi, model: TownModel): UiRoot {
         const node = new Node('UiRoot');
@@ -73,6 +78,7 @@ export class UiRoot extends Component {
         bar.onSpeedChange = (speed) => {
             if (this._clock) this._clock.setSpeed(speed);
         };
+        bar.onReportTap = () => this.openReport();
         this._topBar = bar;
     }
 
@@ -97,9 +103,31 @@ export class UiRoot extends Component {
         this._panelLayer = layer;
     }
 
-    /** 一个月结算完：刷新顶栏；T310 的月账单也从这里接 */
-    private onMonthStepped(_report: MonthlyReport): void {
-        if (this._topBar) this._topBar.refresh();
+    /**
+     * 一个月结算完：刷新顶栏，并把账单按钮点亮。
+     *
+     * 不做"每月自动弹窗"：一个月 20 秒，弹窗会一直打断玩家。
+     * 账单放在顶栏的按钮上，亮起小圆点提醒，玩家想看再看。
+     * （真机流程要的话，以后可以在"年末"或"大事发生"时才强弹。）
+     */
+    private onMonthStepped(report: MonthlyReport): void {
+        this._lastReport = report;
+        if (this._topBar) {
+            this._topBar.refresh();
+            this._topBar.setReportFresh(true);
+        }
+    }
+
+    /** 打开上月账单；还没有结算过就什么都不做 */
+    private openReport(): void {
+        const layer = this._panelLayer;
+        if (!this.sim || !layer || !this._lastReport) return;
+        this.closeTopPanel();
+        const panel = MonthReportPanel.show(layer, this.sim, this._lastReport);
+        panel.onClosed = () => {
+            if (this._reportPanel === panel) this._reportPanel = null;
+        };
+        this._reportPanel = panel;
     }
 
     private loadEconomyTiming(): void {
@@ -151,6 +179,10 @@ export class UiRoot extends Component {
     }
 
     private closeTopPanel(): void {
+        if (this._reportPanel && this._reportPanel.node?.isValid) {
+            this._reportPanel.node.destroy();
+        }
+        this._reportPanel = null;
         if (this._listPanel && this._listPanel.node?.isValid) {
             this._listPanel.node.destroy();
         }

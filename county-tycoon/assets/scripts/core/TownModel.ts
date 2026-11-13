@@ -1,4 +1,5 @@
 import { BuildingDef } from './BuildingConfig';
+import { Terrain } from './Terrain';
 
 /** 已经放在地图上的一栋建筑 */
 export interface PlacedBuilding {
@@ -35,11 +36,25 @@ export class TownModel {
     /** 下标 = row * width + col，空地为 null */
     private _cells: (PlacedBuilding | null)[] = [];
     private _nextUid = 1;
+    /**
+     * 地形（T321，支线 D）。null = 没接地形，行为和以前完全一样。
+     * 接上之后 canPlace 会多查一条"这格地形能不能盖"，其余逻辑不变。
+     */
+    private _terrain: Terrain | null = null;
 
     constructor(width: number, height: number) {
         this.width = Math.max(1, width);
         this.height = Math.max(1, height);
         this._cells = new Array(this.width * this.height).fill(null);
+    }
+
+    /** 接上地形数据。不调也行，那就当全平地处理（兼容没读 map.json 的场景） */
+    setTerrain(terrain: Terrain | null): void {
+        this._terrain = terrain;
+    }
+
+    get terrain(): Terrain | null {
+        return this._terrain;
     }
 
     /** 坐标是否在地图内 */
@@ -53,7 +68,7 @@ export class TownModel {
         return this._cells[row * this.width + col];
     }
 
-    /** 能否在这个位置放下这栋建筑：所有占用的格子都要在地图内且为空 */
+    /** 能否在这个位置放下这栋建筑：所有占用的格子都要在地图内、为空、地形允许 */
     canPlace(def: BuildingDef, col: number, row: number): boolean {
         for (let r = 0; r < def.height; r++) {
             for (let c = 0; c < def.width; c++) {
@@ -63,6 +78,8 @@ export class TownModel {
                 if (this._cells[rr * this.width + cc] !== null) return false;
             }
         }
+        // 地形判断放在最后：走得最多的"越界 / 被占"两条先短路，省得每次都算地形
+        if (this._terrain && !this._terrain.canBuild(def, col, row)) return false;
         return true;
     }
 
@@ -162,5 +179,56 @@ export class TownModel {
     clear(): void {
         this._cells.fill(null);
         this._nextUid = 1;
+    }
+
+    // ------------------------------------------------------------------
+    // 读档用（支线 D / T320）。只加不改：上面已有的方法行为完全没动。
+    // ------------------------------------------------------------------
+
+    /** 下一个要用的 uid。存档时记下来，读档后接着编号，避免新建筑撞号 */
+    peekNextUid(): number {
+        return this._nextUid;
+    }
+
+    /**
+     * 保证"下一个要分配的 uid"至少是这个数。
+     * 读档时把存档里的 nextUid 塞回来，避免新建筑和旧建筑撞号。
+     */
+    ensureNextUidAtLeast(nextUid: number): void {
+        if (Number.isFinite(nextUid) && nextUid > this._nextUid) {
+            this._nextUid = Math.floor(nextUid);
+        }
+    }
+
+    /**
+     * 用存档里记录的 uid 放一栋建筑。
+     *
+     * 和 place() 的唯一区别是不自己分配 uid —— 读档必须保留原来的编号，
+     * 因为 SimState 里的住户 / 员工全是按 uid 对上的。
+     * 朝向由调用方随后赋值（place 里那套自动定朝向对读档是错的：
+     * 存档里面对的是玩家手动换过的结果，不该被重新推断覆盖）。
+     *
+     * 放不下返回 null，调用方跳过这栋即可。
+     */
+    placeWithUid(def: BuildingDef, col: number, row: number, uid: number): PlacedBuilding | null {
+        if (!this.canPlace(def, col, row)) return null;
+
+        const placed: PlacedBuilding = { uid, def, col, row, facing: null };
+        for (let r = 0; r < def.height; r++) {
+            for (let c = 0; c < def.width; c++) {
+                this._cells[(row + r) * this.width + (col + c)] = placed;
+            }
+        }
+        this.ensureNextUidAtLeast(uid + 1);
+        return placed;
+    }
+
+    /** uid 是否已经被占（读档时查重用） */
+    hasUid(uid: number): boolean {
+        for (let i = 0; i < this._cells.length; i++) {
+            const b = this._cells[i];
+            if (b && b.uid === uid) return true;
+        }
+        return false;
     }
 }

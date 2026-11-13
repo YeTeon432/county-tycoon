@@ -40,7 +40,7 @@
 - ✅ T207 用第一批 3 张图跑预览，确认 ×2/×3/×4 下像素锐利、和色块风格能对上
 
 ### 第二批（店铺，7 个）
-- ⬜ T208 画 `breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring`（均 16×16）
+- ✅ T208 画 `breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring`（均 16×16）
 
 ### 第三批（大件，5 个）
 - ⬜ T209 画 `hotpot`/`supermarket`/`apartment`/`school-house`/`plaza`（均 32×32）

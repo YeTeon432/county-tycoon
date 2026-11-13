@@ -35,7 +35,9 @@ function build() {
 }
 
 if (!process.argv.includes('--no-build')) build();
-if (process.argv.includes('--long')) {
+if (process.argv.includes('--sweep')) {
+    require(path.join(outDir, 'tests/sim/sweep.js')).main();
+} else if (process.argv.includes('--long')) {
     require(path.join(outDir, 'tests/sim/longrun.js')).main();
 } else {
     require(path.join(outDir, 'tests/sim/sim.test.js'));

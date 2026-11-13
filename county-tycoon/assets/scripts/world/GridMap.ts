@@ -1,7 +1,10 @@
 import {
     _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, Vec2, SpriteFrame,
 } from 'cc';
-import { ArtLibrary, GROUND_FRAME_COUNT, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
+import {
+    ArtLibrary, GROUND_FRAME_COUNT, GROUND_FRAME_COUNT_TERRAIN, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE,
+} from '../core/ArtLibrary';
+import { bridgeName, grassName, neighborMask, roadName, terrainName } from '../core/GroundFrames';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
@@ -9,14 +12,20 @@ import { WorldConfig } from '../core/WorldConfig';
 const { ccclass } = _decorator;
 
 /**
- * 地面层：等距菱形地块 + 贴地的东西（道路：土路 / 城市道路）（D014）。
+ * 地面层：等距菱形地块 + 贴地的东西（道路：土路 / 城市道路）+ 地形（T322）（D014）。
  *
  * 有地面图集时每格一个 Sprite，全部来自同一张纹理，引擎会合成一次绘制；
  * 图集没加载到时用 Graphics 画纯色菱形顶上。
  *
- * 道路按四邻自动选图（mask 的位和 docs/art/gen/ground.py 一致）。土路和城市道路互相算连通，
- * 所以两种路接头处不会断开，各自画各自的样子：
+ * 取帧方式有两套：
+ *   - **按名字**（有 ground-frames.json 时，优先）：地形和道路都按名字取，
+ *     美术加帧、调顺序都不用改代码。名字约定见 docs/PARALLEL.md 支线 C。
+ *   - 按帧号（老路径，没有 ground-frames.json 时）：只有草地和道路，认 0~35。
+ *
+ * mask 的位（和 docs/art/gen/terrain.py 一致）：
  *   1 = 左上邻 (col-1)   2 = 右上邻 (row-1)   4 = 右下邻 (col+1)   8 = 左下邻 (row+1)
+ *   道路：这些位是"四邻是道路"
+ *   水：  这些位是"四邻是陆地"（有岸的那几条边）
  */
 @ccclass('GridMap')
 export class GridMap extends Component {
@@ -58,7 +67,9 @@ export class GridMap extends Component {
     /** 地块或马路有变化时调用 */
     redraw(): void {
         const art = this._art;
-        if (art && art.groundFrameCount >= GROUND_FRAME_COUNT) {
+        // 有地形时图集是 66 帧；没有地形帧的旧图集只要 36 帧就够画草地和道路
+        const need = this._terrain ? GROUND_FRAME_COUNT_TERRAIN : GROUND_FRAME_COUNT;
+        if (art && art.groundFrameCount >= need) {
             if (this._fallback) this._fallback.clear();
             this.syncSprites(art);
         } else {
@@ -66,20 +77,91 @@ export class GridMap extends Component {
         }
     }
 
-    /** 这一格该用哪一帧 */
-    private frameIndex(col: number, row: number): number {
+    private get _terrain() {
+        return this._model ? this._model.terrain : null;
+    }
+
+    /**
+     * 这一格该用哪一帧。按名字取（T322）；没有 ground-frames.json 时退回帧号。
+     * 返回 null 表示查不到，调用方保持原样。
+     */
+    private frameFor(col: number, row: number): SpriteFrame | null {
+        const art = this._art;
+        if (!art) return null;
+
+        // 道路优先：道路是玩家放的建筑，盖在地形上面
         const kind = this.roadKind(col, row);
         if (kind) {
-            const mask = (this.isRoad(col - 1, row) ? 1 : 0)
-                | (this.isRoad(col, row - 1) ? 2 : 0)
-                | (this.isRoad(col + 1, row) ? 4 : 0)
-                | (this.isRoad(col, row + 1) ? 8 : 0);
-            return GROUND_ROAD_BASE[kind] + mask;
+            const name = roadName(kind, neighborMask((c, r) => this.isRoad(c, r), col, row));
+            if (art.hasGroundNames) {
+                return art.groundByName(name) ?? art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
+            }
+            return art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
         }
+
+        // 地形
+        const terrain = this._terrain;
+        if (terrain && art.hasGroundNames) {
+            const f = this.terrainFrame(art, col, row);
+            if (f) return f;
+        }
+
         // 草地变体按坐标哈希取，保证同一格每次都一样；第 0 帧最常见，带花的最少
-        const h = ((col * 73856093) ^ (row * 19349663)) >>> 0;
-        const r = h % 10;
-        return r < 4 ? 0 : (r < 6 ? 1 : (r < 8 ? 2 : GROUND_GRASS_FRAMES - 1));
+        return art.ground(this.grassVariant(col, row));
+    }
+
+    /** 地形格 → 帧。桥面也在这里，因为桥没有对应的建筑图 */
+    private terrainFrame(art: ArtLibrary, col: number, row: number): SpriteFrame | null {
+        const terrain = this._terrain;
+        if (!terrain) return null;
+
+        // 桥（玩家放的建筑）压在地面上：这格画桥面，不画水
+        const here = this._model ? this._model.getAt(col, row) : null;
+        if (here && here.def.id === 'bridge') {
+            return art.groundByName(
+                bridgeName((c, r) => this.isBridgeable(c, r), col, row),
+            );
+        }
+
+        const t = terrain.typeAt(col, row);
+        if (t === 'river') {
+            // 水的 mask：位 = 四邻是陆地，有岸的那几条边
+            const name = `water-${neighborMask((c, r) => !this.isWater(c, r), col, row)}`;
+            return art.groundByName(name) ?? art.groundByName('water-0');
+        }
+        if (t === 'bridge') {
+            // map.json 里手工画的桥位（还没放桥建筑）
+            return art.groundByName(bridgeName((c, r) => this.isBridgeable(c, r), col, row))
+                ?? art.groundByName('water-0');
+        }
+        return art.groundByName(terrainName(t, col, row));
+    }
+
+    /**
+     * 桥面朝哪个方向 —— 逻辑在 GroundFrames.bridgeName 里，
+     * 这边只提供"桥能延伸到哪"的判定，方便在 node 下单独测帧名。
+     */
+    private isBridgeable(col: number, row: number): boolean {
+        const t = this._terrain;
+        if (!t) return false;
+        const type = t.typeAt(col, row);
+        return type === 'river' || type === 'bridge';
+    }
+
+    private roadMask(col: number, row: number): number {
+        return neighborMask((c, r) => this.isRoad(c, r), col, row);
+    }
+
+    private isWater(col: number, row: number): boolean {
+        const t = this._terrain;
+        if (!t) return false;
+        const type = t.typeAt(col, row);
+        return type === 'river' || type === 'pond';
+    }
+
+    /** 草地：0 最常见，带花的最少（取法和 GroundFrames.grassName 一致，这里只要帧号） */
+    private grassVariant(col: number, row: number): number {
+        return Number(grassName(col, row, GROUND_GRASS_FRAMES).split('-')[1]);
     }
 
     private roadKind(col: number, row: number): 'city' | 'dirt' | null {
@@ -120,7 +202,7 @@ export class GridMap extends Component {
         for (let row = 0; row < iso.rows; row++) {
             for (let col = 0; col < iso.cols; col++) {
                 const s = this._tiles[row * iso.cols + col];
-                const f: SpriteFrame | null = art.ground(this.frameIndex(col, row));
+                const f: SpriteFrame | null = this.frameFor(col, row);
                 if (s.spriteFrame !== f) s.spriteFrame = f;
             }
         }
@@ -144,6 +226,9 @@ export class GridMap extends Component {
         poly(iso.footprint(0, 0, iso.cols, iso.rows));
         g.fill();
 
+        // 地形占位色（没有图集时至少能看出河、山、矿在哪）。颜色取自固定调色板。
+        this.drawTerrainFallback(g, poly, iso);
+
         // 道路用各自配置里的占位色（土路土黄、城市道路深灰）
         for (let row = 0; row < iso.rows; row++) {
             for (let col = 0; col < iso.cols; col++) {
@@ -165,5 +250,37 @@ export class GridMap extends Component {
             g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
         }
         g.stroke();
+    }
+
+    /**
+     * 地形占位色。没有地面图集时，至少能看出哪是河、哪是山、哪是矿。
+     * 颜色取自 48 色调色板（D014），和美术那边的取色习惯一致。
+     */
+    private drawTerrainFallback(g: Graphics, poly: (pts: { x: number; y: number }[]) => void,
+        iso: IsoMath): void {
+        const terrain = this._terrain;
+        if (!terrain) return;
+
+        const COLOR: Record<string, string | null> = {
+            river: '#4d9be6',
+            pond: '#4d9be6',
+            mountain: '#7a7086',
+            ore: '#5a5a6e',
+            forest: '#2f7d3a',
+            bridge: '#b4b4c4',
+        };
+
+        for (let row = 0; row < iso.rows; row++) {
+            for (let col = 0; col < iso.cols; col++) {
+                const hex = COLOR[terrain.typeAt(col, row)];
+                if (!hex) continue;                       // 草地不画，底下已经是地面色
+                // 桥建筑压在地面上：画桥面而不是水
+                const here = this._model ? this._model.getAt(col, row) : null;
+                if (here && here.def.id === 'bridge') continue;
+                g.fillColor = new Color().fromHEX(hex);
+                poly(iso.footprint(col, row, 1, 1));
+                g.fill();
+            }
+        }
     }
 }

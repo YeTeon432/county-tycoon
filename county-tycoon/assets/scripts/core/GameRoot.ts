@@ -74,6 +74,10 @@ export class GameRoot extends Component {
         if (view) {
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
+            // T311：街上的行人是真实居民，点一下看档案
+            view.onResidentTapped = (id) => ui.openResidentById(id);
+            const sim = this._sim;
+            if (view.life && sim) view.life.setResidentSource(() => sim.state.residents);
             // 放置 / 拆除的提示文字，原来在旧 HUD 里，现在归顶栏第二行
             view.onCellTapped = () => this.updatePlacementHint();
             view.onTownChanged = () => this.updatePlacementHint();

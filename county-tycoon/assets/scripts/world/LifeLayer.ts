@@ -30,6 +30,15 @@ interface Agent {
     speed: number;              // 格 / 秒
     side: number;               // 行人走哪侧人行道：±1
     anim: number;
+    /** 这个小人是哪位居民（T311）；汽车和没有居民数据时为 null */
+    residentId: number | null;
+}
+
+/** 行人抽样需要的居民信息（只读，来自模拟层） */
+export interface WalkerInfo {
+    id: number;
+    gender: 'M' | 'F';
+    age: number;
 }
 
 const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
@@ -51,6 +60,31 @@ export class LifeLayer extends Component {
     private _balanceTimer = 0;
     private _coinTimer = 0;
     private readonly _p = { x: 0, y: 0 };
+    /** 居民名单来源（T311）。不设就退回随机小人（老行为） */
+    private _residents: (() => readonly WalkerInfo[]) | null = null;
+    private _residentCache: WalkerInfo[] = [];
+
+    /** 接上模拟层：街上的行人、电动车骑手从真实居民里抽 */
+    setResidentSource(fn: () => readonly WalkerInfo[]): void {
+        this._residents = fn;
+        this._dirty = true;
+    }
+
+    /**
+     * 地图本地坐标点中了哪位居民（点行人看是谁）。
+     * 小人只有 8×13，判定框四周各放宽 4 像素；重叠时取画在最前面的那个。
+     */
+    pickResidentAt(x: number, y: number): number | null {
+        let best: Agent | null = null, bestY = Infinity;
+        for (const a of this._agents) {
+            if (a.residentId === null) continue;
+            const ui = a.node.getComponent(UITransform)!;
+            const p = a.node.position, w = ui.contentSize.width, h = ui.contentSize.height;
+            if (x < p.x - w / 2 - 4 || x > p.x + w / 2 + 4 || y < p.y - 4 || y > p.y + h + 4) continue;
+            if (p.y < bestY) { best = a; bestY = p.y; }     // 越靠下越在前面
+        }
+        return best ? best.residentId : null;
+    }
 
     static create(iso: IsoMath, model: TownModel, art: ArtLibrary, layer: BuildingLayer): Node {
         const node = new Node('LifeLayer');
@@ -126,9 +160,22 @@ export class LifeLayer extends Component {
                 if (!this.canWalk(a, a.col, a.row) || !this.canWalk(a, a.tc, a.tr)) this.despawn(i);
             }
         }
+        // 居民在不在：搬走了、去世了的人，街上对应的小人也要消失
+        if (this._residents) {
+            this._residentCache = this._residents().slice();
+            const alive = new Set(this._residentCache.map((r) => r.id));
+            for (let i = this._agents.length - 1; i >= 0; i--) {
+                const id = this._agents[i].residentId;
+                if (id !== null && !alive.has(id)) this.despawn(i);
+            }
+        }
+        const pop = this._residents ? this._residentCache.length : Infinity;
+        const adults = this._residents ? this._residentCache.filter((r) => r.age >= 18 && r.age < 60).length : Infinity;
+        // 不会比真实人口多：5 个人的村子街上最多 5 个人
+        const scoot = Math.min(14, Math.floor(this._roads.length / 8), Math.floor(adults / 3));
         const want: Record<Kind, number> = {
-            ped: Math.min(40, Math.floor(this._roads.length / 3)),
-            scoot: Math.min(14, Math.floor(this._roads.length / 8)),
+            ped: Math.min(40, Math.floor(this._roads.length / 3), pop - scoot),
+            scoot,
             car: Math.min(12, Math.floor(this._cityRoads.length / 7)),
         };
         (['ped', 'scoot', 'car'] as Kind[]).forEach((k) => {
@@ -153,8 +200,16 @@ export class LifeLayer extends Component {
         const sprite = node.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.trim = false;
+        let residentId: number | null = null;
+        let skin = Math.floor(Math.random() * skins);
+        if (this._residents && kind !== 'car') {
+            const who = this.pickWalker(kind);
+            if (!who) { node.destroy(); return false; }
+            residentId = who.id;
+            skin = LifeLayer.skinOf(who, kind);
+        }
         const a: Agent = {
-            kind, node, sprite, skin: Math.floor(Math.random() * skins),
+            kind, node, sprite, skin, residentId,
             col, row, tc: col, tr: row, t: 1,
             speed: kind === 'ped' ? 0.55 + Math.random() * 0.25 : (kind === 'scoot' ? 1.4 + Math.random() * 0.4 : 1.9 + Math.random() * 0.5),
             side: Math.random() < 0.5 ? 1 : -1,
@@ -165,6 +220,23 @@ export class LifeLayer extends Component {
         this._agents.push(a);
         this.place(a);
         return true;
+    }
+
+    /** 挑一位还没上街的居民。电动车只给成年人骑 */
+    private pickWalker(kind: Kind): WalkerInfo | null {
+        const shown = new Set<number>();
+        for (const a of this._agents) if (a.residentId !== null) shown.add(a.residentId);
+        const pool = this._residentCache.filter((r) => !shown.has(r.id) && (kind !== 'scoot' || (r.age >= 18 && r.age < 60)));
+        return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+    }
+
+    /** 外观跟着人走：老人银发、女性多穿浅色；同一个人每次出门都是同一身衣服 */
+    private static skinOf(r: WalkerInfo, kind: Kind): number {
+        if (kind === 'scoot') return r.id % SCOOT_SKINS;
+        if (r.age >= 60) return 3;
+        const female = [4, 0, 5], male = [1, 2, 5, 0];
+        const set = r.gender === 'F' ? female : male;
+        return set[r.id % set.length];
     }
 
     private despawn(i: number): void {

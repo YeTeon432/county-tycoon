@@ -90,6 +90,8 @@ export class WorldView extends Component {
     onDemolished: ((uid: number) => void) | null = null;
     /** 放置失败（资金不够等）时的提示 */
     onPlaceRejected: ((def: BuildingDef, reason: string) => void) | null = null;
+    /** 空手点中了街上的某位居民（T311） */
+    onResidentTapped: ((residentId: number) => void) | null = null;
     /** 空手点了一栋建筑（道路除外） */
     onBuildingTapped: ((uid: number) => void) | null = null;
     /** 放置/拆除之后的通知，给 HUD 刷新计数用 */
@@ -265,6 +267,15 @@ export class WorldView extends Component {
 
     /** 屏幕/UI 坐标 → 地块坐标 → 交给上层处理 */
     private tapAt(uiX: number, uiY: number): void {
+        // 空手时先看是不是点中了街上的人（人比格子小，优先判定）
+        if (!this._selected && !this._demolishing && this._life && this.onResidentTapped) {
+            const lp = this.uiToLocal(uiX, uiY);
+            const id = lp ? this._life.pickResidentAt(lp.x, lp.y) : null;
+            if (id !== null) {
+                this.onResidentTapped(id);
+                return;
+            }
+        }
         const cell = this.uiToCell(uiX, uiY);
         if (!cell) {
             this.clearGhost();
@@ -420,6 +431,22 @@ export class WorldView extends Component {
      * 拿到本节点本地坐标后，再减掉世界容器的位移、除以缩放，就得到地图本地坐标。
      * 越界返回 null。
      */
+    /** 行人层（GameRoot 接居民名单用） */
+    get life(): LifeLayer | null {
+        return this._life;
+    }
+
+    /** UI 坐标 → 地图本地坐标 */
+    private uiToLocal(uiX: number, uiY: number): { x: number; y: number } | null {
+        const world = this._world;
+        const trans = this.node.getComponent(UITransform);
+        if (!world || !trans) return null;
+        WorldView._tmpWorld.set(uiX, uiY, 0);
+        trans.convertToNodeSpaceAR(WorldView._tmpWorld, WorldView._tmpWorld);
+        const p = world.position;
+        return { x: (WorldView._tmpWorld.x - p.x) / this._zoom, y: (WorldView._tmpWorld.y - p.y) / this._zoom };
+    }
+
     private uiToCell(uiX: number, uiY: number): [number, number] | null {
         const world = this._world;
         const config = this._config;

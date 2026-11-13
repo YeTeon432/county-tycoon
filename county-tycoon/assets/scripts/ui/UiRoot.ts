@@ -191,6 +191,11 @@ export class UiRoot extends Component {
     }
 
     /** 从建筑详情点名字 → 居民档案，叠在建筑详情上面 */
+    /** 从地图上点了街上的行人（T311，集成接线）：直接打开这位居民的档案 */
+    openResidentById(residentId: number): void {
+        this.openResident(residentId);
+    }
+
     private openResident(residentId: number): void {
         const layer = this._panelLayer;
         if (!this.sim || !this.model || !layer) return;

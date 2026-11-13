@@ -88,8 +88,8 @@ county-tycoon/assets/resources/art/buildings/road.png
 
 ## 6. 工作流建议
 
-1. 用 Aseprite 打开 `docs/art/palette.png`，把色卡导入为调色板（File → Load Palette）。
-2. 新建 16×16 画布，网格设成 16×16（View → Grid Settings），开网格。
+1. 打开模板：1×1 建筑用 `docs/art/templates/tile16.aseprite`，2×2 用 `tile32.aseprite`。模板里已装好 32 色调色板，有「画这里」和「参考（不导出）」两个图层。先「另存为」`<id>.aseprite` 再画，别覆盖模板。
+2. 调色板单独要用时：`docs/art/palette.gpl`（File → Load Palette）。不要直接加载 `palette.png`，色卡上的边框和文字会被当成颜色，读出 256 色。
 3. 画完导出到 `county-tycoon/assets/resources/art/buildings/<id>.png`。
 4. 重启 Cocos Creator 让它导入（过滤设置代码会处理，不用改）。
 5. 在预览里看一眼，放大到 ×4 检查边缘是否锐利。

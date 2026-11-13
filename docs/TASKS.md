@@ -28,7 +28,7 @@
 
 ### 准备
 - ✅ T201 定 32 色调色板 + 出色卡 + 写美术规范 → `docs/ART_SPEC.md`、`docs/art/palette.png`
-- ⬜ T202 在 Aseprite 里导入色卡为调色板，新建 16×16 模板文件（网格、参考图层）
+- ✅ T202 Aseprite 模板 → `docs/art/templates/tile16.aseprite`、`tile32.aseprite`，调色板 `docs/art/palette.gpl`
 
 ### 第一批（验证美术链路，只画 3 个）
 - ⬜ T203 画 `house` 自建房（16×16）

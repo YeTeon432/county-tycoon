@@ -24,6 +24,8 @@ export class TopBar extends Component {
 
     /** 玩家点了速度按钮 */
     onSpeedChange: ((speed: Speed) => void) | null = null;
+    /** 玩家点了「账单」 */
+    onReportTap: (() => void) | null = null;
 
     private _sim: SimApi | null = null;
     private _speed: Speed = 1;
@@ -35,6 +37,11 @@ export class TopBar extends Component {
     private _employment: Label | null = null;
 
     private readonly _speedButtons: { node: Node; g: Graphics; speed: Speed }[] = [];
+    private _reportNode: Node | null = null;
+    private _reportG: Graphics | null = null;
+    private _reportLabel: Label | null = null;
+    /** 有没有"还没看过"的新账单（图标旁的小圆点） */
+    private _reportFresh = false;
 
     build(sim: SimApi): void {
         this._sim = sim;
@@ -79,14 +86,16 @@ export class TopBar extends Component {
         this._mood = makeLabel(this.node, 'Mood', '', UI_FONT.number, UI_COLOR.up, C4_W);
         this._mood.node.setPosition(x, row1, 0);
 
-        // 第二行：左边就业，右边速度按钮
+        // 第二行：左边就业 + 账单按钮，右边速度按钮
         const row2 = -32;
-        this._employment = makeLabel(this.node, 'Employment', '', UI_FONT.small, UI_COLOR.textDim, W - 2 * PAD - 3 * 74 - 20);
+        const RW = 76;   // 账单按钮宽
+        this._employment = makeLabel(this.node, 'Employment', '', UI_FONT.small, UI_COLOR.textDim, W - 2 * PAD - 3 * 74 - RW - 30);
         this._employment.node.setPosition(-W / 2 + PAD, row2, 0);
         this._employment.horizontalAlign = Label.HorizontalAlign.LEFT;
         this._employment.node.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
 
         this.buildSpeedButtons(W, row2);
+        this.buildReportButton(W, row2, RW);
 
         this.refresh();
         InputGuard.add(this.node);
@@ -149,6 +158,62 @@ export class TopBar extends Component {
 
             this._speedButtons.push({ node, g, speed: d.speed });
             x -= W + GAP;
+        }
+    }
+
+    /** 「账单」按钮：看上月收支和大事记。有新账单时右下角一个小圆点 */
+    private buildReportButton(visibleW: number, y: number, W: number): void {
+        const H = 44;
+        // 摆在速度按钮左边 10 的空位
+        const x = visibleW / 2 - 18 - 3 * 64 - 2 * 10 - 10 - W / 2;
+
+        const node = new Node('ReportBtn');
+        node.layer = Layers.Enum.UI_2D;
+        node.addComponent(UITransform).setContentSize(W, H);
+        node.setPosition(x, y, 0);
+        this.node.addChild(node);
+
+        const g = node.addComponent(Graphics);
+        this._reportG = g;
+        this._reportLabel = makeLabel(node, 'Txt', '账单', UI_FONT.small, UI_COLOR.text, W - 6);
+
+        node.on(Node.EventType.TOUCH_END, () => {
+            this._reportFresh = false;
+            this.drawReportButton();
+            if (this.onReportTap) this.onReportTap();
+        }, this);
+
+        this._reportNode = node;
+        this.drawReportButton();
+    }
+
+    /** 有新账单时亮起来（金边 + 圆点），看过之后恢复常态 */
+    setReportFresh(fresh: boolean): void {
+        this._reportFresh = fresh;
+        this.drawReportButton();
+    }
+
+    private drawReportButton(): void {
+        const g = this._reportG;
+        if (!g) return;
+        const W = 76;
+        const H = 44;
+        g.clear();
+        g.fillColor = this._reportFresh ? UI_COLOR.buttonActive : UI_COLOR.button;
+        g.roundRect(-W / 2, -H / 2, W, H, 10);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = this._reportFresh ? new Color(255, 240, 190, 255) : UI_COLOR.borderDim;
+        g.roundRect(-W / 2, -H / 2, W, H, 10);
+        g.stroke();
+        if (this._reportLabel) {
+            this._reportLabel.color = this._reportFresh ? new Color(40, 30, 20, 255) : UI_COLOR.text;
+        }
+        if (this._reportFresh) {
+            // 右上角的小圆点，提醒"有新的"
+            g.fillColor = UI_COLOR.down;
+            g.circle(W / 2 - 8, H / 2 - 8, 6);
+            g.fill();
         }
     }
 

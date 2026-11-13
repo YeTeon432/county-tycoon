@@ -31,13 +31,13 @@
 - ✅ T202 Aseprite 模板 → `docs/art/templates/tile16.aseprite`、`tile32.aseprite`，调色板 `docs/art/palette.gpl`
 
 ### 第一批（验证美术链路，只画 3 个）
-- ⬜ T203 画 `house` 自建房（16×16）
-- ⬜ T204 画 `road` 马路（16×16，要能四向拼接）
-- ⬜ T205 画 `milk-tea` 奶茶店（16×16）
+- ✅ T203 画 `house` 自建房（16×16）
+- ✅ T204 画 `road` 马路（16×16，要能四向拼接）→ 首版为无标线沥青，任意方向无缝；带标线/路口的自动拼接版留到后面
+- ✅ T205 画 `milk-tea` 奶茶店（16×16）
 
 ### 接入
 - ✅ T206 接入贴图：`BuildingLayer` 改为按 id 加载 Sprite，图片缺失时回退到现在的色块。→ 已完成：图放 `assets/resources/art/buildings/<id>.png` 即生效，过滤方式代码强制（D013）
-- ⬜ T207 用第一批 3 张图跑预览，确认 ×2/×3/×4 下像素锐利、和色块风格能对上
+- ✅ T207 用第一批 3 张图跑预览，确认 ×2/×3/×4 下像素锐利、和色块风格能对上
 
 ### 第二批（店铺，7 个）
 - ⬜ T208 画 `breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring`（均 16×16）

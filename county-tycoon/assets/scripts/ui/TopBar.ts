@@ -37,6 +37,9 @@ export class TopBar extends Component {
     private _population: Label | null = null;
     private _mood: Label | null = null;
     private _employment: Label | null = null;
+    /** 第二行左侧的提示（放置：火锅店 / 拆除模式），有提示时顶掉就业数据 */
+    private _hint: Label | null = null;
+    private _hintText = '';
 
     private readonly _speedButtons: { node: Node; g: Graphics; speed: Speed }[] = [];
     private _reportNode: Node | null = null;
@@ -58,9 +61,8 @@ export class TopBar extends Component {
         this.node.setPosition(0, visible.height / 2 - H / 2, 0);
 
         const bg = this.node.addComponent(Graphics);
-        // 底色必须完全不透明：GameRoot 里还有一块旧的占位 HUD（同为 120 高、同一位置），
-        // 半透明会让那两行旧文字从后面透上来。等集成删掉旧 HUD 后可以改回半透明。
-        drawPanel(bg, W, H, new Color(18, 18, 24, 255), null, 0);
+        // 旧占位 HUD 已由集成删掉，这里回到半透明（留一点地图透出来，不闷）
+        drawPanel(bg, W, H, new Color(18, 18, 24, 238), null, 0);
 
         // 按列排，列宽写死。720 宽摆四列，每列宽度见下面的常量。
         // 用 SHRINK 让文字自己缩，不会因为数字变大就溢出列。
@@ -97,10 +99,16 @@ export class TopBar extends Component {
         this._mood = makeLabel(this.node, 'Mood', '', UI_FONT.number, UI_COLOR.up, C4_W);
         this._mood.node.setPosition(x, row1, 0);
 
-        // 第二行：左边就业 + 账单按钮，右边速度按钮
+        // 第二行：左边一句提示（放置 / 拆除）或就业数据，右边账单 + 速度按钮
         const row2 = -32;
         const RW = 76;   // 账单按钮宽
-        this._employment = makeLabel(this.node, 'Employment', '', UI_FONT.small, UI_COLOR.textDim, W - 2 * PAD - 3 * 74 - RW - 30);
+        const leftW = W - 2 * PAD - 3 * 74 - RW - 30;
+        this._hint = makeLabel(this.node, 'Hint', '', UI_FONT.small, UI_COLOR.gold, leftW);
+        this._hint.node.setPosition(-W / 2 + PAD, row2, 0);
+        this._hint.horizontalAlign = Label.HorizontalAlign.LEFT;
+        this._hint.node.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
+
+        this._employment = makeLabel(this.node, 'Employment', '', UI_FONT.small, UI_COLOR.textDim, leftW);
         this._employment.node.setPosition(-W / 2 + PAD, row2, 0);
         this._employment.horizontalAlign = Label.HorizontalAlign.LEFT;
         this._employment.node.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
@@ -110,6 +118,25 @@ export class TopBar extends Component {
 
         this.refresh();
         InputGuard.add(this.node);
+    }
+
+    /**
+     * 第二行的提示文字（原来在旧 HUD 里）：选建筑 / 拆除模式时显示。
+     * 有提示就显示提示、藏起就业数据；空字符串恢复显示就业。
+     * 一行放不下两样（720 宽只够 386），所以是互斥而不是并排。
+     */
+    setHint(text: string): void {
+        this._hintText = text;
+        if (this._hint) {
+            this._hint.string = text;
+            this._hint.node.active = text.length > 0;
+        }
+        this.refreshHintVisibility();
+    }
+
+    private refreshHintVisibility(): void {
+        const hasHint = this._hintText.length > 0;
+        if (this._employment) this._employment.node.active = !hasHint;
     }
 
     /** 换月、盖楼后刷新一次。开销很小，直接全量重写文字 */

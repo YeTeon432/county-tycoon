@@ -67,12 +67,31 @@ export class GameRoot extends Component {
         this.buildBar(buildings);
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model);
-        // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView（UiRoot 加上 requestToggleFacing 字段后生效）
+        // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView
         const view = this._view, ui = this._ui;
         if (view) {
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
-            (ui as unknown as { requestToggleFacing?: (uid: number) => boolean }).requestToggleFacing =
-                (uid) => view.toggleFacingByUid(uid);
+            ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
+            // 放置 / 拆除的提示文字，原来在旧 HUD 里，现在归顶栏第二行
+            view.onCellTapped = () => this.updatePlacementHint();
+            view.onTownChanged = () => this.updatePlacementHint();
+        }
+        this.updatePlacementHint();
+    }
+
+    /**
+     * 顶栏第二行的提示：当前是拆除模式 / 正在放哪栋楼 / 空手。
+     * 空手时给一句能看懂的下一步提示，而不是空白。
+     */
+    private updatePlacementHint(): void {
+        const ui = this._ui, view = this._view;
+        if (!ui || !view) return;
+        if (view.demolishing) {
+            ui.setPlacementHint('拆除模式：点建筑移除');
+        } else if (view.selectedBuilding) {
+            ui.setPlacementHint(`放置：${view.selectedBuilding.name}`);
+        } else {
+            ui.setPlacementHint('点建筑看详情；底部选建筑后可放置');
         }
     }
 
@@ -119,9 +138,11 @@ export class GameRoot extends Component {
 
         bar.onSelect = (def) => {
             if (this._view) this._view.selectBuilding(def);
+            this.updatePlacementHint();
         };
         bar.onDemolishToggle = (on) => {
             if (this._view) this._view.setDemolishMode(on);
+            this.updatePlacementHint();
         };
 
         // 右侧缩放按钮

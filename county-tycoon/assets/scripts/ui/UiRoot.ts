@@ -29,6 +29,14 @@ export class UiRoot extends Component {
     protected sim: SimApi | null = null;
     protected model: TownModel | null = null;
 
+    /**
+     * 换朝向：由 GameRoot 接上（接到 WorldView.toggleFacingByUid）。
+     * 返回 false = 这栋楼没有两个朝向（行道树、广场只有一张图）。
+     */
+    requestToggleFacing: ((uid: number) => boolean) | null = null;
+    /** 当前的放置/拆除提示（GameRoot 和建筑栏会调 setPlacementHint） */
+    private _hint = '';
+
     private _topBar: TopBar | null = null;
     private _clock: TimeController | null = null;
     /** 弹窗层：建筑详情、居民总览、月账单都放这里 */
@@ -150,10 +158,27 @@ export class UiRoot extends Component {
 
         // 同一时间只留一个面板：先关掉旧的（居民档案叠在建筑详情上面时另说，见 openResident）
         this.closeTopPanel();
-        const panel = BuildingPanel.show(layer, this.sim, this.model, uid, (residentId) => {
-            this.openResident(residentId);
-        });
+        const panel = BuildingPanel.show(
+            layer, this.sim, this.model, uid,
+            (residentId) => this.openResident(residentId),
+            this.requestToggleFacing,
+            (text) => this.setPlacementHint(text),
+        );
         if (panel) this._topPanel = panel;
+    }
+
+    /**
+     * 顶栏第二行左侧的提示文字（原来在旧 HUD 里）：
+     * 「选建筑点地块放置」/「放置：火锅店」/「拆除模式：点建筑移除」。
+     * GameRoot 在选建筑、进拆除、放下建筑之后调它。
+     */
+    setPlacementHint(text: string): void {
+        this._hint = text;
+        if (this._topBar) this._topBar.setHint(text);
+    }
+
+    get placementHint(): string {
+        return this._hint;
     }
 
     /** 打开居民总览（T309）。入口按钮由集成在顶栏/底栏安排，这里先留方法 */

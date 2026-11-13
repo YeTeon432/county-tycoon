@@ -6,6 +6,9 @@ import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
 import { ZoomButtons } from '../ui/ZoomButtons';
+import { UiRoot } from '../ui/UiRoot';
+import { MockSim } from '../core/sim/mock';
+import { SimApi } from '../core/sim/SimApi';
 import { WorldView } from '../world/WorldView';
 
 const { ccclass } = _decorator;
@@ -27,6 +30,9 @@ export class GameRoot extends Component {
     private _view: WorldView | null = null;
     private _bar: BuildingBar | null = null;
     private _zoomLabel: Label | null = null;
+    /** 模拟层。支线 A 做好 Simulation 后把 MockSim 换掉（只改这一处） */
+    private _sim: SimApi | null = null;
+    private _ui: UiRoot | null = null;
 
     protected start(): void {
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
@@ -44,9 +50,13 @@ export class GameRoot extends Component {
         const model = new TownModel(world.gridWidth, world.gridHeight);
         this._model = model;
 
+        this._sim = new MockSim();
+
         this.buildWorld(world, model);
         this.buildHud();
         this.buildBar(buildings);
+        // 经营界面（支线 B）放最后，压在所有东西上面
+        this._ui = UiRoot.create(this.node, this._sim, model);
     }
 
     /** 搭地图，挂到本节点下 */

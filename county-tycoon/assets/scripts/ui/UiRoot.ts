@@ -2,6 +2,8 @@ import { _decorator, Component, JsonAsset, Layers, Node, resources, UITransform 
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
+import { BuildingPanel } from './BuildingPanel';
+import { ResidentPanel } from './ResidentPanel';
 import { TimeController } from './TimeController';
 import { TopBar } from './TopBar';
 
@@ -29,6 +31,10 @@ export class UiRoot extends Component {
     private _clock: TimeController | null = null;
     /** 弹窗层：建筑详情、居民总览、月账单都放这里 */
     private _panelLayer: Node | null = null;
+    /** 当前打开的建筑详情 */
+    private _topPanel: BuildingPanel | null = null;
+    /** 叠在建筑详情上面的居民档案 */
+    private _residentPanel: ResidentPanel | null = null;
 
     static create(parent: Node, sim: SimApi, model: TownModel): UiRoot {
         const node = new Node('UiRoot');
@@ -104,9 +110,43 @@ export class UiRoot extends Component {
         });
     }
 
-    /** 玩家在空手状态点了一栋建筑（换朝向之外，也用来打开详情） */
-    onBuildingTapped(_uid: number): void {
-        // T308：打开建筑详情面板
+    /** 玩家在空手状态点了一栋建筑 → 打开建筑详情 */
+    onBuildingTapped(uid: number): void {
+        if (!this.sim || !this.model) return;
+        const layer = this._panelLayer;
+        if (!layer) return;
+
+        // 同一时间只留一个面板：先关掉旧的（居民档案叠在建筑详情上面时另说，见 openResident）
+        this.closeTopPanel();
+        const panel = BuildingPanel.show(layer, this.sim, this.model, uid, (residentId) => {
+            this.openResident(residentId);
+        });
+        if (panel) this._topPanel = panel;
+    }
+
+    /** 从建筑详情点名字 → 居民档案，叠在建筑详情上面 */
+    private openResident(residentId: number): void {
+        const layer = this._panelLayer;
+        if (!this.sim || !this.model || !layer) return;
+        // 详情面板保持打开，档案压在上面；档案关掉后详情还在，符合"点了人再返回"的操作习惯
+        const panel = ResidentPanel.show(layer, this.sim, this.model, residentId);
+        if (panel) {
+            panel.onClosed = () => {
+                if (this._residentPanel === panel) this._residentPanel = null;
+            };
+            this._residentPanel = panel;
+        }
+    }
+
+    private closeTopPanel(): void {
+        if (this._residentPanel && this._residentPanel.node?.isValid) {
+            this._residentPanel.node.destroy();
+        }
+        this._residentPanel = null;
+        if (this._topPanel && this._topPanel.node?.isValid) {
+            this._topPanel.node.destroy();
+        }
+        this._topPanel = null;
     }
 
     /** 给以后的面板用：挂到弹窗层上 */

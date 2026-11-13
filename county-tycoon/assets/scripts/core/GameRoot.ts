@@ -34,6 +34,8 @@ export class GameRoot extends Component {
     /** 模拟层。支线 A 做好 Simulation 后把 MockSim 换掉（只改这一处） */
     private _sim: SimApi | null = null;
     private _ui: UiRoot | null = null;
+    /** 开局那条土路的中心格（镜头对准这里） */
+    private _openingCell: [number, number] = [0, 0];
 
     protected start(): void {
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
@@ -63,7 +65,7 @@ export class GameRoot extends Component {
         this._sim = sim;
 
         this.buildWorld(world, model);
-        if (this._view && model.terrain) this._view.focusCell(model.terrain.spawn.col + 4, model.terrain.spawn.row);
+        if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
         this.buildBar(buildings);
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model);
@@ -99,17 +101,31 @@ export class GameRoot extends Component {
         const def = (id: string) => defs.find((d) => d.id === id);
         const road = def('dirt-road'), house = def('house');
         if (!road || !house) return;
-        // 开局放在地图的出生点（map.json 的 spawn），不是地图中心——64×64 的中心在河边
+        // 开局放在出生点附近（map.json 的 spawn）。出生点那一排可能压着池塘、树林，
+        // 所以上下找一排：9 格土路 + 路南 4 栋都放得下的最近一排
         const sp = model.terrain ? model.terrain.spawn : { col: Math.floor(model.width / 2), row: Math.floor(model.height / 2) };
-        const cx = sp.col + 4, cy = sp.row;
+        const workshop0 = def('workshop'), breakfast0 = def('breakfast');
+        const fits = (cx: number, cy: number) => {
+            for (let c = cx - 4; c <= cx + 4; c++) if (!model.canPlace(road, c, cy)) return false;
+            const lots: [BuildingDef | undefined, number][] = [[house, cx - 1], [house, cx + 1], [workshop0, cx + 3], [breakfast0, cx - 3]];
+            return lots.every(([d, c]) => !d || model.canPlace(d, c, cy - 1));
+        };
+        let cx = sp.col + 4, cy = sp.row;
+        search: for (let d = 0; d < 12; d++) {
+            for (const dy of d === 0 ? [0] : [-d, d]) {
+                for (const dx of [0, -2, 2, -4, 4]) {
+                    if (fits(sp.col + 4 + dx, sp.row + dy)) { cx = sp.col + 4 + dx; cy = sp.row + dy; break search; }
+                }
+            }
+        }
+        this._openingCell = [cx, cy];
         for (let c = cx - 4; c <= cx + 4; c++) model.place(road, c, cy);
         model.place(house, cx - 1, cy - 1);
         model.place(house, cx + 1, cy - 1);
         // 开局要有饭碗：只有住宅时 6 个月内全员找不到工作搬走（M2 验收发现）。
         // 一间小作坊（4 岗）+ 一家早餐铺（2 岗，也满足吃饭），够开局 5 人里能干活的都有活干
-        const workshop = def('workshop'), breakfast = def('breakfast');
-        if (workshop) model.place(workshop, cx + 3, cy - 1);
-        if (breakfast) model.place(breakfast, cx - 3, cy - 1);
+        if (workshop0) model.place(workshop0, cx + 3, cy - 1);
+        if (breakfast0) model.place(breakfast0, cx - 3, cy - 1);
     }
 
     /** 搭地图，挂到本节点下 */

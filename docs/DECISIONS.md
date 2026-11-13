@@ -72,4 +72,10 @@
 - Cocos 图片资源默认是线性过滤（`linear`），16×16 的图放大到 ×3 后边缘会被插值成模糊的过渡色，像素风直接毁掉。
 - 必须改成 `nearest`（导入器里的取值是 `'none' | 'nearest' | 'linear'`，字段名 `magfilter` / `minfilter`），Mip Maps 关掉，Wrap Mode 用 `clamp-to-edge`。
 - 这条容易漏，因为默认值看起来"能跑"——只是糊。所以写进 ART_SPEC 的导出清单，每次导图都对照一遍。
-- 待验证：T206 接入贴图时要实测一次，确认按这个设置后 ×2/×3/×4 下边缘锐利。
+- ~~待验证~~ → 已由 D013 改为代码兜底，导入设置不再是必须项。
+
+## D013 建筑贴图按 id 自动加载，过滤方式由代码强制（2026-11-13，Claude 决策）
+- 图放 `assets/resources/art/buildings/<id>.png`，启动时用 `resources.getDirWithPath` 列出目录里真实存在的图再加载，缺图不发请求、不报错，直接回退色块。贴图和色块可以混在一张地图上，美术能一张一张往里加。
+- 不依赖导入设置保证锐利：加载原始 `ImageAsset`，自己建 `Texture2D` 并设 `NEAREST / 无 mipmap / CLAMP_TO_EDGE`，`SpriteFrame.packable = false`（动态合图的纹理是线性过滤）。D012 那条"每次导图都要手动改"容易漏，改成代码兜底后漏了也不会糊。
+- 代价：同一张图不能直接拖到编辑器场景里用（那边还是导入设置）。目前建筑全部由代码生成，不受影响；以后要在编辑器里摆 UI 图时再按 D012 改导入设置。
+- `BuildingLayer` 拆成三层：色块 Graphics（本节点）→ 精灵子节点（按 uid 复用，只增删变化的）→ 预览 Graphics。预览单独一层后，鼠标移动时不再整张重画建筑。

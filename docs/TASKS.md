@@ -36,7 +36,7 @@
 - ⬜ T205 画 `milk-tea` 奶茶店（16×16）
 
 ### 接入
-- ⬜ T206 接入贴图：`BuildingLayer` 改为按 id 加载 Sprite，图片缺失时回退到现在的色块。**关键：导入时 Filter Mode 必须设 Point，否则放大就糊**
+- ✅ T206 接入贴图：`BuildingLayer` 改为按 id 加载 Sprite，图片缺失时回退到现在的色块。→ 已完成：图放 `assets/resources/art/buildings/<id>.png` 即生效，过滤方式代码强制（D013）
 - ⬜ T207 用第一批 3 张图跑预览，确认 ×2/×3/×4 下像素锐利、和色块风格能对上
 
 ### 第二批（店铺，7 个）

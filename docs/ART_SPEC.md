@@ -35,9 +35,9 @@
 ## 4. 导出与命名
 
 ```
-assets/art/buildings/house.png          # 1×1
-assets/art/buildings/hotpot.png         # 2×2
-assets/art/buildings/road.png
+county-tycoon/assets/resources/art/buildings/house.png    # 1×1
+county-tycoon/assets/resources/art/buildings/hotpot.png   # 2×2
+county-tycoon/assets/resources/art/buildings/road.png
 ```
 
 文件名必须和 `assets/resources/config/buildings.json` 里的 `id` 完全一致。这张表是唯一的对照来源，改名字两边一起改。
@@ -47,16 +47,13 @@ assets/art/buildings/road.png
 - 缩放：**100%**，不要导出 2 倍或 4 倍
 - 不要勾"叠加图层"以外的任何选项
 
-导入 Cocos 时的关键设置（否则放大后会糊）：
+放进这个目录就自动生效，**不用改代码、不用改配置**：游戏启动时扫描目录，有图的建筑显示贴图，没图的继续显示色块。可以画一张接一张，随时进游戏看效果。
 
-| 设置项 | 值 | 原因 |
-|---|---|---|
-| Filter Mode | **Point / Nearest** | 线性过滤会把像素边缘插值成模糊的过渡色，整数倍放大也会糊 |
-| Mip Maps | **关闭** | 像素图不需要多级纹理，开着反而在缩小时变糊 |
-| Wrap Mode | Clamp | 防止边缘像素被对侧采样 |
-| Packable | 开 | 后续合并图集用 |
+导入 Cocos 后**不需要手动改 Filter Mode**（D013）：代码加载时会强制最近邻过滤、关 Mip Maps、Clamp 边缘，并且不进动态合图（合图纹理是线性过滤，进去就糊）。导入面板里显示的 `linear` 可以不管，它只影响编辑器里的缩略图。
 
-Cocos 的图片资源默认是线性过滤，**每次导入新图都要手动改**，这是最容易漏的一步。
+自检：尺寸不对（比如导出成了 2 倍）时，预览的控制台会打一条 `[BuildingLayer] xxx.png 是 32×32，应为 16×16` 的警告。
+
+> 注意：编辑器在这个路径下收不到文件变更，**放进新图后要重启 Cocos Creator** 才会导入。
 
 ## 5. 首版要画的清单
 
@@ -93,8 +90,8 @@ Cocos 的图片资源默认是线性过滤，**每次导入新图都要手动改
 
 1. 用 Aseprite 打开 `docs/art/palette.png`，把色卡导入为调色板（File → Load Palette）。
 2. 新建 16×16 画布，网格设成 16×16（View → Grid Settings），开网格。
-3. 画完导出到 `assets/art/buildings/<id>.png`。
-4. 拖进 Cocos，改 Filter Mode 为 Point。
+3. 画完导出到 `county-tycoon/assets/resources/art/buildings/<id>.png`。
+4. 重启 Cocos Creator 让它导入（过滤设置代码会处理，不用改）。
 5. 在预览里看一眼，放大到 ×4 检查边缘是否锐利。
 
 **不要一次画 15 个。** 先画 `house`、`road`、`milk-tea` 三个，接进游戏看效果。风格定下来再批量画，避免画了 15 个发现方向不对全部重来。

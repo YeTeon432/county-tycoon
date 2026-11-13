@@ -20,7 +20,7 @@
 - ✅ T101 新建竖屏场景，搭网格地图（相机平移和缩放）→ 24×40 地块（已改为等距 40×40，见 T213），拖动平移 / 双指捏合 / 滚轮缩放，整数倍吸附
 - ✅ T102 点击网格放置方块 → 15 种建筑、1×1/2×2 占格、重叠与越界拒绝、拆除模式、底栏横向滚动
 - ⬜ T103 构建微信小游戏，在真机上预览
-- ⬜ T104 平台适配层骨架（platform/wx.ts、platform/tt.ts）【支线 D】
+- ✅ T104 平台适配层：`platform/` 的 IPlatform + wx / tt / web 三个实现（存储、系统信息、onShow/onHide、震动）【支线 D】
 
 ## M1.5 美术素材（并行，不阻塞 M1）
 
@@ -60,9 +60,9 @@
 - ⬜ T310 月度账单 + 大事记【支线 B】
 - ⬜ T311 行人改为从真实居民抽样，点行人看是谁【集成】
 - ⬜ T312 快进测试：node 下跑 50 年，检查人口 / 财政曲线不崩【支线 A】
-- ⬜ T320 存档（走平台存储，带版本号，onHide 自动存）【支线 D】
-- ⬜ T321 地图数据 map.json + Terrain.ts + 放置的地形约束【支线 D】
-- ⬜ T322 地形渲染（GridMap 按 ground-frames.json 取帧）【支线 D，依赖 T231】
+- ✅ T320 存档：`core/SaveGame.ts`，key `county-save-v1`，带版本号，onHide 自动存【支线 D】
+- ✅ T321 地图数据：64×64 `config/map.json` + `core/Terrain.ts` + TownModel 地形约束【支线 D】（集成需把 world.json 改成 64）
+- ⬜ T322 地形渲染（GridMap 按 ground-frames.json 取帧）【支线 D，依赖 T231】—— 待开工，要编辑器
 
 ## 美术（新建筑 / 地形）
 - ⬜ T230 新建筑等距图：workshop / textile / food-factory / electronics / center / school / clinic / police / bank / port / mine【支线 C】

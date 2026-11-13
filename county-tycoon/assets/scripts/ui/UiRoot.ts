@@ -3,6 +3,7 @@ import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { BuildingPanel } from './BuildingPanel';
+import { ResidentListPanel } from './ResidentListPanel';
 import { ResidentPanel } from './ResidentPanel';
 import { TimeController } from './TimeController';
 import { TopBar } from './TopBar';
@@ -35,6 +36,8 @@ export class UiRoot extends Component {
     private _topPanel: BuildingPanel | null = null;
     /** 叠在建筑详情上面的居民档案 */
     private _residentPanel: ResidentPanel | null = null;
+    /** 居民总览 */
+    private _listPanel: ResidentListPanel | null = null;
 
     static create(parent: Node, sim: SimApi, model: TownModel): UiRoot {
         const node = new Node('UiRoot');
@@ -124,6 +127,15 @@ export class UiRoot extends Component {
         if (panel) this._topPanel = panel;
     }
 
+    /** 打开居民总览（T309）。入口按钮由集成在顶栏/底栏安排，这里先留方法 */
+    openResidentList(): void {
+        const layer = this._panelLayer;
+        if (!this.sim || !this.model || !layer) return;
+        this.closeTopPanel();
+        const panel = ResidentListPanel.show(layer, this.sim, this.model, (id) => this.openResident(id));
+        this._listPanel = panel;
+    }
+
     /** 从建筑详情点名字 → 居民档案，叠在建筑详情上面 */
     private openResident(residentId: number): void {
         const layer = this._panelLayer;
@@ -139,6 +151,10 @@ export class UiRoot extends Component {
     }
 
     private closeTopPanel(): void {
+        if (this._listPanel && this._listPanel.node?.isValid) {
+            this._listPanel.node.destroy();
+        }
+        this._listPanel = null;
         if (this._residentPanel && this._residentPanel.node?.isValid) {
             this._residentPanel.node.destroy();
         }

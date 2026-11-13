@@ -43,8 +43,8 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
     tileHeight: 16,
     gridWidth: 40,
     gridHeight: 40,
-    zoomLevels: [2, 3, 4],
-    defaultZoomIndex: 1,
+    zoomLevels: [2, 3, 4, 5],
+    defaultZoomIndex: 2,
     palette: {
         background: '#2e222f',
         ground: '#547e64',

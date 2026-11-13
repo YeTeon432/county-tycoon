@@ -310,6 +310,21 @@ export class WorldView extends Component {
         if (this.onTownChanged) this.onTownChanged();
     }
 
+    /** 按钮用：放大 / 缩小一档 */
+    zoomStep(delta: number): void {
+        const config = this._config;
+        if (!config) return;
+        const levels = config.zoomLevels;
+        const next = Math.max(0, Math.min(levels.length - 1, this._zoomIndex + delta));
+        if (next === this._zoomIndex) return;
+        this._zoomIndex = next;
+        this.setZoom(levels[next], false);
+    }
+
+    get zoomIndex(): number {
+        return this._zoomIndex;
+    }
+
     private onMouseWheel(event: EventMouse): void {
         const scrollY = event.getScrollY();
         if (scrollY === 0 || !this._config) return;

@@ -5,6 +5,7 @@ import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
+import { ZoomButtons } from '../ui/ZoomButtons';
 import { WorldView } from '../world/WorldView';
 
 const { ccclass } = _decorator;
@@ -119,8 +120,21 @@ export class GameRoot extends Component {
             this.updateZoomLabel(this._view ? this._view.zoom : 1);
         };
 
+        // 右侧缩放按钮
+        const zoomNode = new Node('ZoomButtons');
+        zoomNode.layer = Layers.Enum.UI_2D;
+        this.node.addChild(zoomNode);
+        const zoomBtns = zoomNode.addComponent(ZoomButtons);
+        zoomBtns.build(BuildingBar.BAR_HEIGHT);
+        zoomBtns.onStep = (d) => { if (this._view) this._view.zoomStep(d); };
+        const refreshZoom = () => {
+            const v = this._view;
+            if (v) zoomBtns.refresh(v.zoom, v.zoomIndex, v.zoomLevels.length);
+        };
+        refreshZoom();
+
         if (this._view) {
-            this._view.onZoomChanged = (zoom) => this.updateZoomLabel(zoom);
+            this._view.onZoomChanged = (zoom) => { this.updateZoomLabel(zoom); refreshZoom(); };
             this._view.onCellTapped = () => this.updateZoomLabel(this._view ? this._view.zoom : 1);
         }
     }

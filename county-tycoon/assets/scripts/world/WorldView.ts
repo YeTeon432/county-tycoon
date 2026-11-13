@@ -264,10 +264,22 @@ export class WorldView extends Component {
         } else if (this._selected) {
             this.doPlace(this._selected, col, row);
         } else {
-            // 没选建筑也没开拆除：只是点了一下地面，什么都不做
-            return;
+            // 没选建筑也没开拆除：点中建筑就换朝向，点空地什么都不做
+            if (!this.toggleFacing(col, row)) return;
         }
         this.refreshGhost();
+    }
+
+    /** 手动换朝向；只有画了两个朝向的建筑才有意义（行道树、广场只有一张图） */
+    toggleFacing(col: number, row: number): boolean {
+        const model = this._model;
+        if (!model) return false;
+        const b = model.getAt(col, row);
+        if (!b || b.def.flat || !this._art.get(`${b.def.id}_r`)) return false;
+        model.toggleFacing(col, row);
+        this.redrawTown();
+        if (this.onTownChanged) this.onTownChanged();
+        return true;
     }
 
     /** 在当前手指/鼠标位置放一栋建筑 */

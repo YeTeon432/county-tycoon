@@ -9,7 +9,15 @@ export interface PlacedBuilding {
     col: number;
     /** 左下角所在行（0 起，从下往上） */
     row: number;
+    /**
+     * 门面朝向（D015 修订）：'L' 门面在左下墙，'R' 在右下墙。
+     * null = 还没定（放下时四周没有道路）；第一次挨上道路时定一次，之后锁住，
+     * 只有玩家手动点它才会再变。道路本身不用这个字段。
+     */
+    facing: Facing | null;
 }
+
+export type Facing = 'L' | 'R';
 
 /**
  * 城镇的地块数据。
@@ -65,13 +73,54 @@ export class TownModel {
     place(def: BuildingDef, col: number, row: number): PlacedBuilding | null {
         if (!this.canPlace(def, col, row)) return null;
 
-        const placed: PlacedBuilding = { uid: this._nextUid++, def, col, row };
+        const placed: PlacedBuilding = { uid: this._nextUid++, def, col, row, facing: null };
         for (let r = 0; r < def.height; r++) {
             for (let c = 0; c < def.width; c++) {
                 this._cells[(row + r) * this.width + (col + c)] = placed;
             }
         }
+        // 新盖的楼给自己定朝向；新修的路给旁边还没定朝向的楼定朝向
+        this.settleFacings();
         return placed;
+    }
+
+    private isRoad(col: number, row: number): boolean {
+        const b = this.getAt(col, row);
+        return !!b && b.def.flat;
+    }
+
+    /**
+     * 给还没定朝向、且已经挨着道路的建筑定朝向，定了就不再改。
+     * 规则：左下边（row+h 那一侧）有路 → 'L'；否则右下边（col+w 那一侧）有路 → 'R'；
+     * 只有背后（左上 / 右上）有路 → 'L'（门面没法对着背后的路，只能朝镜头）。
+     */
+    settleFacings(): void {
+        const list = this.allBuildings();
+        for (let i = 0; i < list.length; i++) {
+            const b = list[i];
+            if (b.def.flat || b.facing) continue;
+            const { col, row } = b, w = b.def.width, h = b.def.height;
+            let front = false, right = false, back = false;
+            for (let c = col; c < col + w; c++) {
+                if (this.isRoad(c, row + h)) front = true;
+                if (this.isRoad(c, row - 1)) back = true;
+            }
+            for (let r = row; r < row + h; r++) {
+                if (this.isRoad(col + w, r)) right = true;
+                if (this.isRoad(col - 1, r)) back = true;
+            }
+            if (front) b.facing = 'L';
+            else if (right) b.facing = 'R';
+            else if (back) b.facing = 'L';
+        }
+    }
+
+    /** 玩家手动换朝向（路口转角想朝另一条路时用）。道路和空地返回 null */
+    toggleFacing(col: number, row: number): PlacedBuilding | null {
+        const b = this.getAt(col, row);
+        if (!b || b.def.flat) return null;
+        b.facing = b.facing === 'R' ? 'L' : 'R';
+        return b;
     }
 
     /**

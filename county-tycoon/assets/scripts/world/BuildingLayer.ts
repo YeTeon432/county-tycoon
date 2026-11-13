@@ -133,27 +133,6 @@ export class BuildingLayer extends Component {
         this.sortAll();
     }
 
-    /**
-     * 门面朝哪边（D015）。等距下只看得到左下墙（朝 +row）和右下墙（朝 +col）：
-     *   - 左下边挨着马路 → 默认图（门面在左墙）
-     *   - 否则右下边挨着马路 → `<id>_r` 图（门面在右墙）
-     *   - 都不挨（马路在背后或没有马路）→ 默认图
-     */
-    private facesRight(b: PlacedBuilding): boolean {
-        const m = this._model!;
-        const road = (c: number, r: number) => {
-            const x = m.getAt(c, r);
-            return !!x && x.def.flat;
-        };
-        for (let c = b.col; c < b.col + b.def.width; c++) {
-            if (road(c, b.row + b.def.height)) return false;
-        }
-        for (let r = b.row; r < b.row + b.def.height; r++) {
-            if (road(b.col + b.def.width, r)) return true;
-        }
-        return false;
-    }
-
     /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽；朝右的图缺了就用默认图 */
     private usableFrame(def: BuildingDef, right: boolean) {
         const art = this._art;
@@ -174,7 +153,8 @@ export class BuildingLayer extends Component {
 
     private syncNode(b: PlacedBuilding): void {
         const iso = this._iso!;
-        const frame = this.usableFrame(b.def, this.facesRight(b));
+        // 朝向由 TownModel 定好并锁住，这里只读（null = 还没挨过路，先用默认图）
+        const frame = this.usableFrame(b.def, b.facing === 'R');
         let node = this._nodes.get(b.uid);
         if (node && this._shown.get(b.uid) === frame) return;
         if (node) {

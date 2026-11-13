@@ -133,7 +133,7 @@ export class GameRoot extends Component {
             ? '拆除模式：点建筑移除'
             : (this._view?.selectedBuilding
                 ? `放置：${this._view.selectedBuilding.name}`
-                : '选一个建筑，点地块放置');
+                : '选建筑点地块放置；点已有建筑换朝向');
 
         this._zoomLabel.string =
             `《我在县城当首富》  ×${zoom.toFixed(1)}  建筑 ${count}\n${mode}`;

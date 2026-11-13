@@ -123,3 +123,49 @@ export function moodLabel(mood: number): string {
     if (mood >= 30) return '低落';
     return '很差';
 }
+
+/** 按心情取颜色：好绿、中黄、差红 */
+export function moodColor(mood: number): Color {
+    if (mood >= 60) return UI_COLOR.up;
+    if (mood >= 40) return UI_COLOR.gold;
+    return UI_COLOR.down;
+}
+
+/**
+ * 小按钮（筛选、排序用的那种药丸按钮）。
+ * 返回节点，调用方自己挂 TOUCH_END；重画用 redrawPill 换选中态。
+ */
+export function makePill(
+    parent: Node,
+    name: string,
+    text: string,
+    w: number,
+    h: number,
+    onTap: () => void,
+    owner?: object,
+): { node: Node; g: Graphics; label: Label; setActive: (on: boolean) => void } {
+    const node = new Node(name);
+    node.layer = Layers.Enum.UI_2D;
+    node.addComponent(UITransform).setContentSize(w, h);
+    parent.addChild(node);
+
+    const g = node.addComponent(Graphics);
+    const label = makeLabel(node, 'Txt', text, UI_FONT.small, UI_COLOR.text, w - 8);
+
+    const draw = (on: boolean) => {
+        g.clear();
+        g.fillColor = on ? UI_COLOR.buttonActive : UI_COLOR.button;
+        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+        g.fill();
+        g.lineWidth = 2;
+        g.strokeColor = on ? new Color(255, 240, 190, 255) : UI_COLOR.borderDim;
+        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+        g.stroke();
+        label.color = on ? new Color(40, 30, 20, 255) : UI_COLOR.text;
+    };
+    draw(false);
+
+    node.on(Node.EventType.TOUCH_END, onTap, owner);
+    return { node, g, label, setActive: draw };
+}
+

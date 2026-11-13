@@ -31,7 +31,7 @@
 - ✅ T214 48 色调色板 + 等距出图脚本 + 样板（自建房、行道树、草地 4 种、马路 16 种拼接）
 - ✅ T215 1×1 店铺等距版：`milk-tea`/`breakfast`/`bbq`/`parcel`/`net-cafe`/`phone-shop`/`barber`/`tutoring` → 每家两个朝向，按马路自动选（D015）
 - ✅ T216 2×2 大件：`hotpot`/`supermarket`/`apartment`/`school-house`/`plaza`
-- ⬜ T217 合并图集，降 draw call（现在约 67）
+- ✅ T217 合并图集 → 地图部分 85 → 3 次绘制；剩下约 37 次全是占位 UI（文字和 Graphics），T212 做正式 UI 时一并解决
 - ⬜ T218 地面补充：泥土、石板路、花坛；地图外围填地形，不露紫色底
 - ⬜ T210 居民小人 + 走路动画（等距 4 方向）
 - ⬜ T219 生活感：行人、车辆、金币飘字、对话气泡

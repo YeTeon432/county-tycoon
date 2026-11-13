@@ -39,20 +39,27 @@
 
 ```
 docs/art/gen/iso.py          出图工具：Canvas / Box（等距长方体 + 墙面坐标）
-docs/art/gen/sample.py       样板：草地、马路、行道树、自建房
-county-tycoon/assets/resources/art/buildings/<id>.png   建筑，id 和 buildings.json 一致
-county-tycoon/assets/resources/art/ground/ground.png    地面图集，32×16 一帧横排
+docs/art/gen/sample.py       草地、马路、行道树、自建房
+docs/art/gen/shops.py        8 家 1×1 店铺
+docs/art/gen/big.py          5 个 2×2 大件
+docs/art/gen/pack.py         打图集
+docs/art/gen/make.sh         一键：全部出图 + 打图集
+docs/art/build/buildings/<id>.png   单张建筑图（生成物，进 git，手改也改这里）
+county-tycoon/assets/resources/art/atlas.png (+ atlas-frames.json)   游戏实际加载的建筑图集
+county-tycoon/assets/resources/art/ground/ground.png                 地面图集，32×16 一帧横排
 ```
 
 地面图集帧号：0～3 草地（3 号带花），4 + mask 马路。mask：1 左上邻、2 右上邻、4 右下邻、8 左下邻有路。
 
-重新出图：`python3 -I docs/art/gen/sample.py county-tycoon/assets/resources/art`，然后**重启 Cocos Creator**（这个路径下编辑器收不到文件变更）。
+重新出图：`sh docs/art/gen/make.sh`，然后**重启 Cocos Creator**（这个路径下编辑器收不到文件变更）。
+
+临时试一张图：直接放 `county-tycoon/assets/resources/art/buildings/<id>.png`，会覆盖图集里同名那帧（D016）。试完记得删掉，改动落到 `docs/art/build/` 再跑 make.sh。
 
 导入设置不用改：代码加载时强制最近邻 / 无 mipmap / Clamp（D013）。
 
 ## 5. 想手改某张图
 
-用 Aseprite 打开 png（调色板加载 `palette.gpl`），改完覆盖保存。注意：之后再跑出图脚本会把手改的覆盖掉——手改过的图在脚本里把那一项注释掉，并在这里记一笔。
+用 Aseprite 打开 `docs/art/build/buildings/<id>.png`（调色板加载 `palette.gpl`），改完保存，再只跑 `python3 -I docs/art/gen/pack.py docs/art/build county-tycoon/assets/resources`。注意：跑完整的 make.sh 会把手改的覆盖掉——手改过的图在对应脚本里把那一项注释掉，并在这里记一笔。
 
 ## 6. 清单（见 TASKS T215～T219）
 

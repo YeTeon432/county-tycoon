@@ -133,10 +133,11 @@ export class BuildingLayer extends Component {
         const frame = art ? ((right ? art.get(`${def.id}_r`) : null) ?? art.get(def.id)) : null;
         if (!frame) return null;
         const want = (def.width + def.height) * iso.hw;
-        if (frame.texture.width !== want) {
+        const fw = frame.rect.width;
+        if (fw !== want) {
             if (!this._warned.has(def.id)) {
                 this._warned.add(def.id);
-                console.warn(`[BuildingLayer] ${def.id}.png 宽 ${frame.texture.width}，等距 ${def.width}×${def.height} 应为 ${want}，先用色块`);
+                console.warn(`[BuildingLayer] ${def.id}.png 宽 ${fw}，等距 ${def.width}×${def.height} 应为 ${want}，先用色块`);
             }
             return null;
         }
@@ -160,7 +161,7 @@ export class BuildingLayer extends Component {
         if (frame) {
             const ui = node.getComponent(UITransform)!;
             ui.setAnchorPoint(new Vec2(0.5, 0));
-            ui.setContentSize(frame.texture.width, frame.texture.height);
+            ui.setContentSize(frame.rect.width, frame.rect.height);
             const sprite = node.addComponent(Sprite);
             sprite.sizeMode = Sprite.SizeMode.CUSTOM;
             sprite.type = Sprite.Type.SIMPLE;

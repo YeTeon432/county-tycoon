@@ -1,16 +1,20 @@
-import { ImageAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resources } from 'cc';
+import { ImageAsset, JsonAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resources } from 'cc';
 
 /**
  * 贴图仓库：建筑图按 id 找，地面图按帧号找；找不到返回 null，由调用方回退到色块。
  *
- * 目录约定（D013 / D014）：
- *   - art/buildings/<id>.png  建筑，文件名 = buildings.json 里的 id，宽必须是 (w+h)·16
+ * 目录约定（D013 / D014 / D016）：
+ *   - art/atlas.png + art/atlas-frames.json  全部建筑图打成的一张图集（docs/art/gen/pack.py 生成），
+ *     帧名 = 建筑 id（朝右的版本是 <id>_r），宽必须是 (w+h)·16
+ *   - art/buildings/<id>.png  可选：散图，同名时覆盖图集里的那帧，方便手改一张图直接试
  *   - art/ground/ground.png   地面图集，每帧 32×16 横排：0~3 草地，4+mask 马路（mask 见 GridMap）
  *
  * 像素锐利由代码保证：加载原始 ImageAsset，自建 Texture2D 并强制最近邻 / 无 mipmap / Clamp，
  * 也不进动态合图（合图纹理是线性过滤）。导入面板里的 Filter Mode 改不改都不影响游戏。
  */
 const BUILDING_DIR = 'art/buildings';
+const BUILDING_ATLAS = 'art/atlas';
+const BUILDING_ATLAS_FRAMES = 'art/atlas-frames';
 const GROUND_ATLAS = 'art/ground/ground';
 
 export const GROUND_GRASS_FRAMES = 4;
@@ -48,7 +52,9 @@ export class ArtLibrary {
     load(onDone: () => void): void {
         const infos = resources.getDirWithPath(BUILDING_DIR, ImageAsset);
         const hasGround = !!resources.getInfoWithPath(GROUND_ATLAS, ImageAsset);
-        let pending = infos.length + (hasGround ? 1 : 0);
+        const hasAtlas = !!resources.getInfoWithPath(BUILDING_ATLAS, ImageAsset)
+            && !!resources.getInfoWithPath(BUILDING_ATLAS_FRAMES, JsonAsset);
+        let pending = infos.length + (hasGround ? 1 : 0) + (hasAtlas ? 1 : 0);
 
         const finish = () => {
             pending--;
@@ -62,6 +68,25 @@ export class ArtLibrary {
             pending = 1;
             finish();
             return;
+        }
+
+        // 先图集，散图后覆盖：散图回调里直接 set，图集回调里只补没有的
+        if (hasAtlas) {
+            resources.load(BUILDING_ATLAS_FRAMES, JsonAsset, (e1, json) => {
+                resources.load(BUILDING_ATLAS, ImageAsset, (e2, image) => {
+                    const frames = json && json.json ? (json.json as { frames?: Record<string, number[]> }).frames : null;
+                    if (e1 || e2 || !image || !frames) {
+                        console.warn('[ArtLibrary] 建筑图集加载失败，用色块代替', e1 || e2);
+                    } else {
+                        const tex = ArtLibrary.makePixelTexture(image);
+                        for (const id of Object.keys(frames)) {
+                            const [x, y, w, h] = frames[id];
+                            if (!this._buildings.has(id)) this._buildings.set(id, ArtLibrary.rectFrame(tex, x, y, w, h));
+                        }
+                    }
+                    finish();
+                });
+            });
         }
 
         for (const info of infos) {
@@ -94,18 +119,21 @@ export class ArtLibrary {
         const tex = ArtLibrary.makePixelTexture(image);
         const n = Math.floor(image.width / fw);
         const frames: SpriteFrame[] = [];
-        for (let i = 0; i < n; i++) {
-            const f = new SpriteFrame();
-            f.reset({
-                texture: tex,
-                rect: new Rect(i * fw, 0, fw, fh),
-                originalSize: new Size(fw, fh),
-                offset: new Vec2(0, 0),
-            });
-            f.packable = false;
-            frames.push(f);
-        }
+        for (let i = 0; i < n; i++) frames.push(ArtLibrary.rectFrame(tex, i * fw, 0, fw, fh));
         return frames;
+    }
+
+    /** 图集里的一块。坐标原点左上，和 PIL / pack.py 一致 */
+    private static rectFrame(tex: Texture2D, x: number, y: number, w: number, h: number): SpriteFrame {
+        const f = new SpriteFrame();
+        f.reset({
+            texture: tex,
+            rect: new Rect(x, y, w, h),
+            originalSize: new Size(w, h),
+            offset: new Vec2(0, 0),
+        });
+        f.packable = false;
+        return f;
     }
 
     /** 像素风专用纹理：最近邻、无 mipmap、边缘 Clamp */

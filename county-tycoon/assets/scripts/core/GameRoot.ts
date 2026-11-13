@@ -9,6 +9,8 @@ import { ZoomButtons } from '../ui/ZoomButtons';
 import { UiRoot } from '../ui/UiRoot';
 import { SimApi } from '../core/sim/SimApi';
 import { createSimulation, loadSimJson } from '../core/SimLoader';
+import { loadTerrain } from '../core/TerrainConfig';
+import { Terrain } from '../core/Terrain';
 import { WorldView } from '../world/WorldView';
 
 const { ccclass } = _decorator;
@@ -36,17 +38,23 @@ export class GameRoot extends Component {
     protected start(): void {
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
         Promise.all([loadWorldConfig(), loadBuildingConfig(), loadSimJson()])
-            .then(([world, buildings, [economy, names]]) => {
+            .then(([world, buildings, sim]) =>
+                loadTerrain(world.gridWidth, world.gridHeight).then((terrain) => ({ world, buildings, sim, terrain })))
+            .then(({ world, buildings, sim: [economy, names], terrain }) => {
                 this._config = world;
-                this.build(world, buildings, economy, names);
+                this.build(world, buildings, economy, names, terrain);
             })
             .catch((err) => {
                 console.error('[GameRoot] 启动失败', err);
             });
     }
 
-    private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any): void {
-        const model = new TownModel(world.gridWidth, world.gridHeight);
+    private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any, terrain: Terrain): void {
+        if (terrain.width !== world.gridWidth || terrain.height !== world.gridHeight) {
+            console.warn(`[GameRoot] map.json 是 ${terrain.width}×${terrain.height}，world.json 是 ${world.gridWidth}×${world.gridHeight}，以 map.json 为准`);
+        }
+        const model = new TownModel(terrain.width, terrain.height);
+        model.setTerrain(terrain);
         this._model = model;
 
         // 开局地块：一条土路 + 两栋自建房（PRD 第 2 节）。要在建模拟之前放，模拟层会把它们登记成开局的家
@@ -55,6 +63,7 @@ export class GameRoot extends Component {
         this._sim = sim;
 
         this.buildWorld(world, model);
+        if (this._view && model.terrain) this._view.focusCell(model.terrain.spawn.col + 4, model.terrain.spawn.row);
         this.buildBar(buildings);
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model);
@@ -71,7 +80,9 @@ export class GameRoot extends Component {
         const def = (id: string) => defs.find((d) => d.id === id);
         const road = def('dirt-road'), house = def('house');
         if (!road || !house) return;
-        const cx = Math.floor(model.width / 2), cy = Math.floor(model.height / 2);
+        // 开局放在地图的出生点（map.json 的 spawn），不是地图中心——64×64 的中心在河边
+        const sp = model.terrain ? model.terrain.spawn : { col: Math.floor(model.width / 2), row: Math.floor(model.height / 2) };
+        const cx = sp.col + 4, cy = sp.row;
         for (let c = cx - 4; c <= cx + 4; c++) model.place(road, c, cy);
         model.place(house, cx - 1, cy - 1);
         model.place(house, cx + 1, cy - 1);

@@ -41,8 +41,8 @@ export interface WorldConfig {
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
     tileWidth: 32,
     tileHeight: 16,
-    gridWidth: 40,
-    gridHeight: 40,
+    gridWidth: 64,
+    gridHeight: 64,
     zoomLevels: [2, 3, 4, 5],
     defaultZoomIndex: 2,
     palette: {

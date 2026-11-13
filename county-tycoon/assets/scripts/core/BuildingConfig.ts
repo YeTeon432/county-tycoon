@@ -21,6 +21,8 @@ export interface BuildingDef {
     road: RoadKind | null;
     /** 城镇等级到几级解锁（0 = 村口，2 = 县城，见 PRD 第 7 节）。等级系统做好之前只记录不生效 */
     unlockLevel: number;
+    /** 地形要求（T321）：桥要在河上、港口贴河、矿场在矿点；其他为 null */
+    terrain?: 'river' | 'riverbank' | 'ore' | null;
 }
 
 export type RoadKind = 'dirt' | 'city';
@@ -52,6 +54,7 @@ function sanitize(def: BuildingDef, index: number): BuildingDef | null {
         flat: def.flat === true,
         road: def.road === 'dirt' || def.road === 'city' ? def.road : null,
         unlockLevel: typeof def.unlockLevel === 'number' ? Math.max(0, Math.floor(def.unlockLevel)) : 0,
+        terrain: def.terrain === 'river' || def.terrain === 'riverbank' || def.terrain === 'ore' ? def.terrain : null,
     };
 }
 

@@ -136,3 +136,11 @@
   - 待验证：画面（编辑器在 B 手上）。`ground-frames.json.meta` 需要编辑器开一次才会生成。
 
 - **集成：合并 lane/ui T308**（建筑详情 + 居民档案面板），无冲突，tsc 通过。B 要的「空手点建筑开详情、换朝向挪进面板」主线上一轮已经接好；面板里的「换朝向」按钮还要 B 在 UiRoot 声明 `requestToggleFacing` 后加。
+- **集成：合并支线 D（lane/platform：T104 平台适配层、T320 存档、T321 地图数据）**，TASKS 冲突手动合。按 D 的「需要集成」：
+  - world.json 与兜底值改 64×64；GameRoot 读 `map.json`，`TownModel.setTerrain()`；`BuildingDef` 加 `terrain` 字段。
+  - 开局土路和两栋自建房改放在地图出生点（col 8, row 6，开局区），不再放地图中心——64×64 的中心挨着河。镜头开局对准出生点（`WorldView.focusCell`）。
+  - 验证：tsc 通过；node 下用真地图：出生点 9 格土路 + 2 栋自建房全部放下；河上不能盖房、能放桥；草地上不能放桥。
+  - 存档（SaveGame）还没接进 GameRoot：要等界面上有「继续游戏 / 新游戏」入口再接，先不自动读档，免得测试时被旧档干扰。
+  - 风险（D 提的）：64×64 = 4096 个地面 Sprite 节点，需要真机测帧率；再放大地图前要改成按视野裁剪。
+  - 地面目前仍按草地 / 道路画，河山树要等 T322（按 ground-frames.json 取帧）。
+

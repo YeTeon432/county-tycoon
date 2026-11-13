@@ -335,6 +335,15 @@ export class WorldView extends Component {
         if (this.onTownChanged) this.onTownChanged();
     }
 
+    /** 镜头对准某一格（开局对准出生点用） */
+    focusCell(col: number, row: number): void {
+        const world = this._world, iso = this._iso;
+        if (!world || !iso) return;
+        const p = iso.toLocal(col + 0.5, row + 0.5);
+        world.setPosition(-p.x * this._zoom, -p.y * this._zoom, 0);
+        this.clampPosition();
+    }
+
     /** 按钮用：放大 / 缩小一档 */
     zoomStep(delta: number): void {
         const config = this._config;

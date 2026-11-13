@@ -1,8 +1,8 @@
 {
   "tileWidth": 32,
   "tileHeight": 16,
-  "gridWidth": 40,
-  "gridHeight": 40,
+  "gridWidth": 64,
+  "gridHeight": 64,
   "zoomLevels": [
     2,
     3,

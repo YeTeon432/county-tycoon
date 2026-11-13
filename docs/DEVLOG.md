@@ -129,4 +129,9 @@
   - WorldView 加 `onBuilt` / `onDemolished` / `onPlaceRejected`：盖楼扣建设资金，钱不够就撤销放置；拆楼把住户和员工清出去。
   - 验证：tsc 通过；node 下用真 TownModel + 真 Simulation 跑同一套流程：开局 5 人住进两栋自建房；盖早餐铺和小作坊后一年 5 人全部就业，资金 50000 → 45898，月账单有营业税、企业税、个税；资金只剩 10 时盖火锅店被拒，地图上也撤掉了。
   - 待验证：画面上还没跑过（编辑器归支线 B），等 B 下次合并时一起看。时间推进（每 20 秒一个月）是 B 的 T307，在那之前模拟不会自己走。
+- **集成：合并支线 C（lane/art，T230～T232）和支线 B（lane/ui，T307）**
+  - C：11 栋新建筑等距图 + 地形地块 + `ground-frames.json`（老帧号没动）；`__pycache__` 从仓库删掉并加进 .gitignore。
+  - B：顶栏 + 时间推进（暂停 / 1× / 2×）。和主线只在 TASKS.md 状态行冲突，手动合并。
+  - 按 B 的「需要集成」：删掉 GameRoot 旧的占位标题栏（和顶栏重叠）；空手点建筑不再直接换朝向，改为 `WorldView.onBuildingTapped(uid)` → `UiRoot.onBuildingTapped(uid)` 打开详情；换朝向留给详情面板按钮，入口 `WorldView.toggleFacingByUid(uid)`，GameRoot 赋给 `UiRoot.requestToggleFacing`（这个字段需要 B 在 UiRoot 里声明）。
+  - 待验证：画面（编辑器在 B 手上）。`ground-frames.json.meta` 需要编辑器开一次才会生成。
 

@@ -1,5 +1,5 @@
 import {
-    _decorator, Component, Node, Label, UITransform, Layers, Color, Graphics, view,
+    _decorator, Component, Node, UITransform, Layers,
 } from 'cc';
 import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
@@ -29,7 +29,6 @@ export class GameRoot extends Component {
     private _model: TownModel | null = null;
     private _view: WorldView | null = null;
     private _bar: BuildingBar | null = null;
-    private _zoomLabel: Label | null = null;
     /** 模拟层。支线 A 做好 Simulation 后把 MockSim 换掉（只改这一处） */
     private _sim: SimApi | null = null;
     private _ui: UiRoot | null = null;
@@ -56,10 +55,16 @@ export class GameRoot extends Component {
         this._sim = sim;
 
         this.buildWorld(world, model);
-        this.buildHud();
         this.buildBar(buildings);
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model);
+        // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView（UiRoot 加上 requestToggleFacing 字段后生效）
+        const view = this._view, ui = this._ui;
+        if (view) {
+            view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
+            (ui as unknown as { requestToggleFacing?: (uid: number) => boolean }).requestToggleFacing =
+                (uid) => view.toggleFacingByUid(uid);
+        }
     }
 
     private placeOpening(model: TownModel, defs: BuildingDef[]): void {
@@ -85,47 +90,10 @@ export class GameRoot extends Component {
         worldView.create(config, model);
 
         // 放置/拆除之后刷新 HUD 上的计数
-        worldView.onTownChanged = () => this.updateZoomLabel(worldView.zoom);
         // 接模拟层：盖楼扣钱、拆楼清人
         worldView.onBuilt = (b) => (this._sim ? this._sim.onBuilt(b.uid, b.def.id) : true);
         worldView.onDemolished = (uid) => { if (this._sim) this._sim.onDemolished(uid); };
         worldView.onPlaceRejected = (d, why) => console.log(`[GameRoot] ${d.name} 没盖成：${why}`);
-    }
-
-    /** 顶部 HUD：标题、倍率、建筑数 */
-    private buildHud(): void {
-        const visible = view.getVisibleSize();
-        const barHeight = 120;
-
-        const bar = new Node('Hud');
-        bar.layer = Layers.Enum.UI_2D;
-        const barTrans = bar.addComponent(UITransform);
-        barTrans.setContentSize(visible.width, barHeight);
-        bar.setPosition(0, visible.height / 2 - barHeight / 2, 0);
-        this.node.addChild(bar);
-
-        // 半透明底，便于在浅色地面上看清文字
-        const bg = bar.addComponent(Graphics);
-        bg.fillColor = new Color(0, 0, 0, 150);
-        bg.rect(-visible.width / 2, -barHeight / 2, visible.width, barHeight);
-        bg.fill();
-
-        // 两行：第一行是标题+倍率，第二行是操作提示。
-        // 竖屏只有 720 宽，单行塞不下，字号也得给手机留余地。
-        const labelNode = new Node('ZoomLabel');
-        labelNode.layer = Layers.Enum.UI_2D;
-        labelNode.addComponent(UITransform);
-        const label = labelNode.addComponent(Label);
-        label.fontSize = 30;
-        label.lineHeight = 38;
-        label.color = new Color().fromHEX('#f4f4f4');
-        label.horizontalAlign = Label.HorizontalAlign.CENTER;
-        label.verticalAlign = Label.VerticalAlign.CENTER;
-        labelNode.setPosition(0, 0, 0);
-        bar.addChild(labelNode);
-
-        this._zoomLabel = label;
-        this.updateZoomLabel(this._view ? this._view.zoom : 1);
     }
 
     /** 底部建筑选择栏 */
@@ -140,11 +108,9 @@ export class GameRoot extends Component {
 
         bar.onSelect = (def) => {
             if (this._view) this._view.selectBuilding(def);
-            this.updateZoomLabel(this._view ? this._view.zoom : 1);
         };
         bar.onDemolishToggle = (on) => {
             if (this._view) this._view.setDemolishMode(on);
-            this.updateZoomLabel(this._view ? this._view.zoom : 1);
         };
 
         // 右侧缩放按钮
@@ -161,22 +127,8 @@ export class GameRoot extends Component {
         refreshZoom();
 
         if (this._view) {
-            this._view.onZoomChanged = (zoom) => { this.updateZoomLabel(zoom); refreshZoom(); };
-            this._view.onCellTapped = () => this.updateZoomLabel(this._view ? this._view.zoom : 1);
+            this._view.onZoomChanged = () => refreshZoom();
         }
     }
 
-    private updateZoomLabel(zoom: number): void {
-        if (!this._zoomLabel) return;
-
-        const count = this._model ? this._model.buildingCount : 0;
-        const mode = this._view?.demolishing
-            ? '拆除模式：点建筑移除'
-            : (this._view?.selectedBuilding
-                ? `放置：${this._view.selectedBuilding.name}`
-                : '选建筑点地块放置；点已有建筑换朝向');
-
-        this._zoomLabel.string =
-            `《我在县城当县长》  ×${zoom.toFixed(1)}  建筑 ${count}\n${mode}`;
-    }
 }

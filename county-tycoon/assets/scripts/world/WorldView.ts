@@ -90,6 +90,8 @@ export class WorldView extends Component {
     onDemolished: ((uid: number) => void) | null = null;
     /** 放置失败（资金不够等）时的提示 */
     onPlaceRejected: ((def: BuildingDef, reason: string) => void) | null = null;
+    /** 空手点了一栋建筑（道路除外） */
+    onBuildingTapped: ((uid: number) => void) | null = null;
     /** 放置/拆除之后的通知，给 HUD 刷新计数用 */
     onTownChanged: (() => void) | null = null;
 
@@ -273,10 +275,18 @@ export class WorldView extends Component {
         } else if (this._selected) {
             this.doPlace(this._selected, col, row);
         } else {
-            // 没选建筑也没开拆除：点中建筑就换朝向，点空地什么都不做
-            if (!this.toggleFacing(col, row)) return;
+            // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做
+            const b = this._model ? this._model.getAt(col, row) : null;
+            if (b && !b.def.flat && this.onBuildingTapped) this.onBuildingTapped(b.uid);
+            return;
         }
         this.refreshGhost();
+    }
+
+    /** 按 uid 换朝向（建筑详情面板的按钮用）。没有两个朝向的建筑返回 false */
+    toggleFacingByUid(uid: number): boolean {
+        const b = this._model ? this._model.allBuildings().find((x) => x.uid === uid) : null;
+        return b ? this.toggleFacing(b.col, b.row) : false;
     }
 
     /** 手动换朝向；只有画了两个朝向的建筑才有意义（行道树、广场只有一张图） */

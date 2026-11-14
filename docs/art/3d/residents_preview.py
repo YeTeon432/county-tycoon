@@ -15,7 +15,7 @@ SKINS = [('boy0', '男孩'), ('boy1', '男孩'), ('girl0', '女孩'), ('girl1', 
          ('man0', '青年男'), ('man1', '青年男'), ('man2', '青年男'),
          ('woman0', '青年女'), ('woman1', '青年女'), ('woman2', '青年女'),
          ('oldman0', '老爷爷'), ('oldman1', '老爷爷'), ('oldwoman0', '老奶奶'), ('oldwoman1', '老奶奶')]
-SETTLE = 5            # 和 actors.py 的 SETTLE['ped'] 一致
+SETTLE = 6            # 和 actors.py 的 SETTLE['ped'] 一致
 BG = (246, 243, 236, 255); CARD = (255, 255, 255, 255); LINE = (226, 220, 208, 255)
 INK = (60, 52, 46, 255); SUB = (140, 128, 116, 255)
 

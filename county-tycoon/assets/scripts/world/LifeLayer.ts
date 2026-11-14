@@ -42,7 +42,7 @@ const DEFAULT_TRAFFIC: TrafficConfig = {
 };
 /** 影子帧（支线 C）和它在各类图里的着地点高度（贴图像素，图底边往上；actors.py 的 SETTLE） */
 const SHADOW: Record<Kind, { frame: string; settle: number }> = {
-    ped: { frame: 'shadow-s', settle: 5 },
+    ped: { frame: 'shadow-s', settle: 6 },
     scoot: { frame: 'shadow-m', settle: 8 },
     moto: { frame: 'shadow-m', settle: 10 },
     car: { frame: 'shadow-l', settle: 17 },
@@ -267,7 +267,7 @@ export class LifeLayer extends Component {
             const ss = sn.addComponent(Sprite);
             ss.sizeMode = Sprite.SizeMode.CUSTOM;
             ss.spriteFrame = sh;
-            // D023 起所有行人皮肤（含老人）统一 SETTLE = 5
+            // D023 起所有行人皮肤（含老人）统一 SETTLE = 6
             const settle = SHADOW[kind].settle;
             sn.setPosition(0, settle / this._art!.scale, 0);
             node.addChild(sn);

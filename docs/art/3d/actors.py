@@ -49,7 +49,7 @@ MOTOS = [
 ]
 
 # 每类固定的「抬到底边」平移量（px，画面向上）。None = 自动（打印出来再填）。
-SETTLE = {'ped': 5, 'scoot': 8, 'moto': 10, 'car': 17, 'coin': 0}
+SETTLE = {'ped': 6, 'scoot': 8, 'moto': 10, 'car': 17, 'coin': 0}
 
 
 # ---------------------------------------------------------------- 工具
@@ -549,47 +549,206 @@ def basket(h):
         seg((bx, by + 0.045 * s, bz + 0.055), (h.x, h.y + 0.012 * s, h.z - 0.005), 0.005, '#8d6430', 6)
 
 
-# ---------------------------------------------------------------- 行人（D023：6 种体型 × 2～3 套 = 14 套）
-# 体型：s 腿长倍率、k 粗细倍率、hr 头半径、th 上身高、wx/wy 上身前后厚 / 左右宽、ly 两腿间距、shy 肩宽、
-#       ua/la 大 / 小臂长、amp 腿摆幅、sw 手摆幅、lean 前倾、eye 眼睛倍率
+# ---------------------------------------------------------------- 行人（D023 + 风格 C：小比例写实，借一点 Q 版）
+# 用户看了 A / B / C 三个样稿（style_test.py）选了 C：成人头身约 1:4、修长；小孩约 1:3、老人约 1:3.5，
+# 头和五官比写实大一号；不用卡通描边，改用材质把轮廓边缘压暗一点（rim_darken）。头像借 Q 版的可爱：大头大眼双高光。
+
+# ---- 几何工具：变截面管子、椭球、发束
+def spline(keys, steps=4):
+    """Catmull-Rom 插值：keys = [(点, rx, ry)]，返回加密后的列表。"""
+    K = [(Vector(p), rx, ry) for p, rx, ry in keys]
+    n = len(K); out = []
+    for i in range(n - 1):
+        p0 = K[max(i - 1, 0)][0]; p1 = K[i][0]; p2 = K[i + 1][0]; p3 = K[min(i + 2, n - 1)][0]
+        for s in range(steps):
+            t = s / steps
+            pos = 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t
+                         + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3)
+            out.append((pos, K[i][1] + (K[i + 1][1] - K[i][1]) * t, K[i][2] + (K[i + 1][2] - K[i][2]) * t))
+    out.append(K[-1])
+    return out
+
+
+def tube(keys, m, ring=16, steps=4, round_ends=(True, True), up=Vector((0, 1, 0))):
+    """沿一串点的变截面管子（椭圆截面：rx 在 X 一侧、ry 在 Y 一侧），两头可以是半球圆头。"""
+    import bmesh
+    P = spline(keys, steps) if steps > 1 else [(Vector(p), rx, ry) for p, rx, ry in keys]
+    def tan(i):
+        return (P[min(i + 1, len(P) - 1)][0] - P[max(i - 1, 0)][0]).normalized()
+    ext = []
+    if round_ends[0]:
+        c, rx, ry = P[0]; t = tan(0); r = min(rx, ry)
+        for th in (80, 60, 35):
+            a = math.radians(th); ext.append((c - t * r * math.sin(a), rx * math.cos(a), ry * math.cos(a)))
+    ext += P
+    if round_ends[1]:
+        c, rx, ry = P[-1]; t = tan(len(P) - 1); r = min(rx, ry)
+        for th in (35, 60, 80):
+            a = math.radians(th); ext.append((c + t * r * math.sin(a), rx * math.cos(a), ry * math.cos(a)))
+    P = ext
+    me = bpy.data.meshes.new('tube'); o = bpy.data.objects.new('tube', me)
+    bpy.context.collection.objects.link(o)
+    bm = bmesh.new(); rings = []
+    for i, (c, rx, ry) in enumerate(P):
+        t = tan(i)
+        a = up - t * up.dot(t)
+        if a.length < 1e-4:
+            a = Vector((1, 0, 0)) - t * t.x
+        a.normalize(); b = t.cross(a)
+        rings.append([bm.verts.new(c + a * (ry * math.sin(2 * math.pi * k / ring)) + b * (rx * math.cos(2 * math.pi * k / ring)))
+                      for k in range(ring)])
+    for i in range(len(P) - 1):
+        for k in range(ring):
+            bm.faces.new([rings[i][k], rings[i][(k + 1) % ring], rings[i + 1][(k + 1) % ring], rings[i + 1][k]])
+    for idx in (0, len(P) - 1):
+        c = sum((v.co for v in rings[idx]), Vector()) / ring
+        pole = bm.verts.new(c)
+        for k in range(ring):
+            bm.faces.new([rings[idx][k], rings[idx][(k + 1) % ring], pole])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:
+        f.smooth = True
+    bm.to_mesh(me); bm.free()
+    o.data.materials.append(M(m) if isinstance(m, str) else m)
+    return o
+
+
+def ellip(C, r, sc, m, sub=4, keep=None, grow=1.0, bump=None):
+    """椭球（半径 r × sc）。keep(dir) 只留部分顶点（头发壳），bump(dir) 半径起伏（发束的沟）。"""
+    import bmesh
+    me = bpy.data.meshes.new('el'); o = bpy.data.objects.new('el', me)
+    bpy.context.collection.objects.link(o)
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=sub, radius=1.0)
+    if keep:
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not keep(v.co.normalized())], context='VERTS')
+    for v in bm.verts:
+        d = v.co.normalized()
+        k = grow * (bump(d) if bump else 1.0)
+        v.co = Vector(C) + Vector((d.x * sc[0], d.y * sc[1], d.z * sc[2])) * r * k
+    for f in bm.faces:
+        f.smooth = True
+    bm.to_mesh(me); bm.free()
+    o.data.materials.append(M(m) if isinstance(m, str) else m)
+    return o
+
+
+def blob(p, r, sc, m, d=None, sub=3):
+    """朝 d 方向摆的椭球（局部 Z 对准 d）：手掌、发束、鞋。"""
+    o = ball(p[0], p[1], p[2], r, m, sub, scale=sc)
+    if d is not None:
+        o.rotation_mode = 'QUATERNION'
+        o.rotation_quaternion = Vector(d).normalized().to_track_quat('Z', 'Y')
+    return o
+
+
+def cone(p, d, L, r, m, verts=10):
+    """尖发束：底面在 p，尖朝 d，长 L。"""
+    d = Vector(d).normalized()
+    o = cyl(0, 0, 0, r, L, m, verts, r2=0.0)
+    o.rotation_mode = 'QUATERNION'; o.rotation_quaternion = d.to_track_quat('Z', 'Y')
+    o.location = Vector(p) + d * (L / 2)
+    return o
+
+
+def ridges(n, depth, sharp=1.0):
+    """沿方位角的发束起伏（从头顶放射出来的沟）。"""
+    def f(d):
+        v = abs(math.sin(math.atan2(d.y, d.x) * n / 2)) ** sharp
+        return 1 + depth * v * max(0.0, 1 - max(0.0, d.z) ** 4)
+    return f
+
+
+def curtain(C, hr, sc, m, az_half, top, length, prof, n=36, rows=12, solid=0.1, front=False):
+    """绕头垂下的发帘（齐肩短发 / 长直发 / 整片齐刘海），和 _curtain 一样，只是跟着椭球头 sc 走。"""
+    import bmesh
+    me = bpy.data.meshes.new('curtain'); o = bpy.data.objects.new('curtain', me)
+    bpy.context.collection.objects.link(o)
+    bm = bmesh.new(); grid = []
+    for i in range(n + 1):
+        az = (-az_half + 2 * az_half * i / n) if front else (az_half + (2 * math.pi - 2 * az_half) * i / n)
+        L = length(az); row = []
+        for j in range(rows + 1):
+            t = j / rows; z = top - L * t
+            r = prof(t, z)
+            row.append(bm.verts.new((C.x + math.cos(az) * r * hr * sc[0], C.y + math.sin(az) * r * hr * sc[1], C.z + z * hr * sc[2])))
+        grid.append(row)
+    for i in range(n):
+        for j in range(rows):
+            f = bm.faces.new([grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]); f.smooth = True
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me); bm.free()
+    o.data.materials.append(M(m) if isinstance(m, str) else m)
+    s = o.modifiers.new('sd', 'SOLIDIFY'); s.thickness = hr * solid; s.offset = 0
+    return o
+
+
+# ---- 材质后处理：半哑光 + 轮廓边缘压暗（代替描边）
+def rim_darken(k=0.55, power=2.2, rough=0.62, spec=0.3):
+    """每个材质：Layer Weight(Facing) 越靠轮廓越往深色混，32 宽里人物边缘自然更深、和地面分得开。"""
+    for m in bpy.data.materials:
+        if not m.node_tree:
+            continue
+        nt = m.node_tree
+        p = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if not p or p.inputs['Emission Strength'].default_value > 0.9:
+            continue
+        p.inputs['Roughness'].default_value = max(rough, p.inputs['Roughness'].default_value * 0 + rough)
+        p.inputs['Metallic'].default_value = 0.0
+        if 'Specular IOR Level' in p.inputs:
+            p.inputs['Specular IOR Level'].default_value = spec
+        col = tuple(p.inputs['Base Color'].default_value)
+        lw = nt.nodes.new('ShaderNodeLayerWeight'); lw.inputs['Blend'].default_value = 0.4
+        pw = nt.nodes.new('ShaderNodeMath'); pw.operation = 'POWER'; pw.inputs[1].default_value = power
+        mx = nt.nodes.new('ShaderNodeMixRGB'); mx.blend_type = 'MIX'
+        mx.inputs['Color1'].default_value = col
+        mx.inputs['Color2'].default_value = (col[0] * k, col[1] * k, col[2] * k, 1)
+        nt.links.new(lw.outputs['Facing'], pw.inputs[0])
+        nt.links.new(pw.outputs[0], mx.inputs['Fac'])
+        nt.links.new(mx.outputs[0], p.inputs['Base Color'])
+
+
+# ---- 体型（风格 C）。th 上身高，torso = [(高度比例, 前后半径, 左右半径)]，hs 头椭球比例
 BODIES = {
-    'adult': dict(s=1.0, k=1.0, hr=0.103, th=0.15, wx=0.12, wy=0.19, ly=0.042, shy=0.112, ua=0.065, la=0.06,
-                  amp=0.38, sw=0.5, lean=0.0, eye=1.0),
-    'elder': dict(s=0.95, k=1.0, hr=0.103, th=0.1425, wx=0.12, wy=0.19, ly=0.042, shy=0.112, ua=0.065, la=0.06,
-                  amp=0.3, sw=0.35, lean=0.03, eye=0.95),
-    # 小孩：总高约成人 0.75，头只小一点 → 头身比更大
-    'kid': dict(s=0.6, k=0.8, hr=0.095, th=0.1, wx=0.1, wy=0.152, ly=0.032, shy=0.088, ua=0.046, la=0.042,
-                amp=0.42, sw=0.55, lean=0.0, eye=1.15),
+    'adult': dict(thigh=0.128, shin=0.122, ankle=0.026, leg_r=0.023, ly=0.03, th=0.2, ua=0.098, la=0.09, arm_r=0.018,
+                  hr=0.078, hs=(0.96, 0.88, 1.05), neck=0.028, amp=0.36, sw=0.45, lean=0.0, eye=1.0, shoe=0.8,
+                  torso=[(0.0, 0.05, 0.068), (0.25, 0.046, 0.063), (0.55, 0.052, 0.074), (0.8, 0.055, 0.082),
+                         (0.93, 0.045, 0.072), (1.0, 0.02, 0.026)]),
+    'elder': dict(thigh=0.115, shin=0.11, ankle=0.026, leg_r=0.024, ly=0.03, th=0.19, ua=0.092, la=0.085, arm_r=0.018,
+                  hr=0.088, hs=(0.96, 0.9, 1.02), neck=0.022, amp=0.28, sw=0.3, lean=0.035, eye=1.08, shoe=0.8,
+                  torso=[(0.0, 0.054, 0.07), (0.3, 0.056, 0.07), (0.6, 0.055, 0.076), (0.82, 0.053, 0.08),
+                         (0.94, 0.044, 0.07), (1.0, 0.02, 0.026)]),
+    # 小孩：总高约成人 0.75，头身约 1:3
+    'kid': dict(thigh=0.082, shin=0.078, ankle=0.022, leg_r=0.02, ly=0.026, th=0.128, ua=0.064, la=0.058, arm_r=0.016,
+                hr=0.08, hs=(0.97, 0.92, 1.0), neck=0.014, amp=0.4, sw=0.5, lean=0.0, eye=1.2, shoe=0.66,
+                torso=[(0.0, 0.042, 0.056), (0.4, 0.042, 0.056), (0.75, 0.043, 0.062), (0.92, 0.036, 0.055),
+                       (1.0, 0.016, 0.02)]),
 }
 
 # 皮肤（D023 / DESIGN 14.2）。legs: pants 长裤 / shorts 短裤 / skirt 裙子；pose: swing 摆手 / cane 拄拐 /
 # behind 背着手 / basket 挎菜篮；pack 书包颜色；fem 画睫毛。
 SKINS = {
-    # 男孩：背书包
     'boy0': dict(body='kid', hair=HAIR_DARK, style='short', top='#f6f6f2', sleeve='long', collar='#2f6fd0',
                  extra='jacket', pants='#2f4f9a', legs='pants', shoe='#f3efe6', sole='#2f6fd0', pack='#e8453c',
                  cn='男孩', desc='深色锅盖短发，蓝白校服外套 + 藏青长裤，背红书包'),
     'boy1': dict(body='kid', hair='#5a3a22', style='spiky', top='#3fae5a', sleeve='short', collar='#f6f2ea',
                  extra='hem', pants='#d6b27a', legs='shorts', shoe='#2f74db', sole='#f3efe6', pack='#f6a020',
                  cn='男孩', desc='棕色翘翘碎发，绿 T 恤 + 卡其短裤 + 白袜蓝鞋，背橙书包'),
-    # 女孩：两个小辫
     'girl0': dict(body='kid', hair=HAIR_DARK, style='braids', tie='#e0334f', top='#ff7f6a', sleeve='short',
                   collar='#ffffff', extra='hem', pants='#3d64a8', legs='skirt', shoe='#e0334f', sole='#f8f3e8',
                   fem=True, cn='女孩', desc='黑发齐刘海 + 两根耳后小麻花辫（红头绳），珊瑚色上衣 + 牛仔蓝短裙'),
     'girl1': dict(body='kid', hair='#7a4422', style='twintails', tie='#f6c938', top='#7cc8ec', sleeve='short',
-                  collar='#ffffff', extra='hem', pants='#7cc8ec', legs='skirt', shoe='#f8f3e8', sole='#f07a96',
+                  collar='#ffffff', extra='dress', pants='#7cc8ec', legs='skirt', shoe='#f8f3e8', sole='#f07a96',
                   fem=True, cn='女孩', desc='棕发 + 头两侧高高的两个小揪（黄头绳），天蓝连衣裙 + 白鞋'),
-    # 男青壮（ped0 / ped1 / ped2 原样）
     'man0': dict(body='adult', hair=HAIR_DARK, top='#e4402e', pants='#27407a', shoe='#f3efe6', sole='#d9463b',
                  style='short', collar='#f6f2ea', sleeve='short', extra='hem',
                  cn='青年男', desc='深棕黑短发齐刘海，红 T 恤 + 藏青裤 + 白鞋'),
     'man1': dict(body='adult', hair='#6a3f22', top='#2f74db', pants='#8d8f95', shoe='#6b3d22', sole='#3a2a20',
                  style='side', collar='#f6f2ea', sleeve='short', extra='belt',
-                 cn='青年男', desc='棕色偏分，蓝 Polo 束腰带 + 灰裤 + 棕皮鞋'),
+                 cn='青年男', desc='棕色偏分，蓝 Polo（白领）束腰带 + 灰裤 + 棕皮鞋'),
     'man2': dict(body='adult', hair='#3d2c22', top='#f8c62c', pants='#76502e', shoe='#d23a2e', sole='#f3efe6',
                  style='buzz', collar='#e0a81c', sleeve='short', extra='pocket',
                  cn='青年男', desc='寸头，黄 T 恤带胸袋 + 棕裤 + 红鞋'),
-    # 女青壮：马尾（ped4 原样）/ 齐肩短发 / 长直发
     'woman0': dict(body='adult', hair='#83451f', top='#fba8b8', pants='#f8f3e8', shoe='#f07a96', sole='#f8f3e8',
                    style='ponytail', collar='#ffffff', sleeve='short', extra='hem', tie='#e0334f', fem=True,
                    cn='青年女', desc='焦棕高马尾（红头绳），粉上衣 + 白裤 + 粉鞋'),
@@ -599,14 +758,12 @@ SKINS = {
     'woman2': dict(body='adult', hair='#5a3424', top='#9a72d8', pants='#34323c', legs='skirt', shoe='#2e2a28',
                    sole='#f8f3e8', style='long', collar='#ffffff', sleeve='long', extra='hem', fem=True,
                    cn='青年女', desc='深棕长直发中分到背，紫色长袖 + 黑色及膝裙 + 黑鞋'),
-    # 老爷爷：灰白稀疏 + 拄拐（ped3 原样，拐杖收进来）/ 光头 + 白色老头衫、背着手
     'oldman0': dict(body='elder', hair='#c8c3ba', top='#7f97b8', pants='#5f5672', shoe='#2e2a28', sole='#f3efe6',
                     style='elder', collar='#6a82a4', sleeve='long', extra='jacket', pose='cane',
-                    cn='老爷爷', desc='灰白稀疏头发，灰蓝夹克 + 紫灰裤，拄木拐'),
+                    cn='老爷爷', desc='灰白稀疏头发往后梳，灰蓝夹克 + 紫灰裤，拄木拐'),
     'oldman1': dict(body='elder', hair='#e2ded6', top='#f7f6f0', pants='#4a4d57', shoe='#2e2a28', sole='#f3efe6',
                     style='bald', collar='#f7f6f0', sleeve='none', extra='tank', pose='behind',
                     cn='老爷爷', desc='光头（耳后一圈白茬），白色老头衫 + 深灰裤 + 黑布鞋，背着手'),
-    # 老奶奶：灰白短卷 + 碎花衫 / 灰发盘髻 + 开衫 + 挎菜篮
     'oldwoman0': dict(body='elder', hair='#d6d1c8', top='#c8476a', pants='#3f3a55', shoe='#2e2a28', sole='#f3efe6',
                       style='curly', collar='#e8a0b4', sleeve='short', extra='floral', fem=True,
                       cn='老奶奶', desc='灰白小短卷，玫红碎花衫 + 深紫灰裤 + 黑布鞋'),
@@ -624,93 +781,450 @@ RESIDENTS = ['boy0', 'boy1', 'girl0', 'girl1', 'man0', 'man1', 'man2', 'woman0',
 LEGACY = {'ped0': 'man0', 'ped1': 'man1', 'ped2': 'man2', 'ped3': 'oldman0', 'ped4': 'woman0'}
 
 
-def person(name, frame, turn, hi=False, do_settle=True):
-    """frame = 0 / 1 走路两帧，'idle' 站直（头像用）。返回 {'C': 头心, 'hr': 头半径}。"""
+def _lerp_prof(T, zf):
+    """上身截面在高度比例 zf 处的 (rx, ry)。"""
+    for (z0, a0, b0), (z1, a1, b1) in zip(T, T[1:]):
+        if z0 <= zf <= z1:
+            t = (zf - z0) / max(1e-6, z1 - z0)
+            return a0 + (a1 - a0) * t, b0 + (b1 - b0) * t
+    return T[-1][1], T[-1][2]
+
+
+def palm(wrist, d, r):
+    """小手掌：沿小臂方向的扁椭球 + 拇指。"""
+    d = Vector(d).normalized()
+    c = Vector(wrist) + d * r * 0.8
+    blob(c, r, (0.6, 0.9, 1.1), SKIN, d)
+    blob(c + Vector((r * 0.65, 0, r * 0.3)), r * 0.42, (1, 1, 1.4), SKIN, d + Vector((0.8, 0, 0)), 2)
+
+
+def basket2(h, k=0.8):
+    """菜篮（按体型缩）：挂在手下。"""
+    bx, by, bz = h.x + 0.004, h.y - 0.004, h.z - 0.1 * k
+    cyl(bx, by, bz, 0.04 * k, 0.055 * k, M('#b88a4a', rough=0.85), 16, r2=0.05 * k)
+    for i in range(3):
+        cyl(bx, by, bz + (0.008 + i * 0.016) * k, (0.042 + i * 0.003) * k, 0.004, M('#8d6430', rough=0.9), 16)
+    cyl(bx, by, bz + 0.052 * k, 0.051 * k, 0.008, M('#8d6430', rough=0.9), 16)
+    for dx, dy, r, c in [(0.012, 0.01, 0.024, '#5fae3c'), (-0.015, -0.01, 0.022, '#7cc44c'), (0.0, -0.022, 0.02, '#4c9a34')]:
+        ball(bx + dx * k, by + dy * k, bz + 0.06 * k, r * k, c, 2, scale=(1, 1, 0.7))
+    seg((bx - 0.01 * k, by + 0.015 * k, bz + 0.05 * k), (bx - 0.05 * k, by + 0.03 * k, bz + 0.13 * k), 0.006, '#f4f1e2', 6)
+    seg((bx - 0.05 * k, by + 0.03 * k, bz + 0.13 * k), (bx - 0.07 * k, by + 0.035 * k, bz + 0.17 * k), 0.006, '#4cae4c', 6)
+    for s in (1, -1):
+        seg((bx, by + 0.045 * s * k, bz + 0.055 * k), (h.x, h.y + 0.01 * s, h.z - 0.005), 0.0045, '#8d6430', 6)
+
+
+def person(name, frame, turn, cute=False, do_settle=True):
+    """frame = 0 / 1 走路两帧（0 帧步子小一点，可当站姿），'idle' 站直（头像用）。
+    cute=True：头像用，头放大 1.3 倍、Q 版大眼、发束更多层次。返回 {'C': 头心, 'hr': 头半径（含比例最大轴）}。"""
     warm()
-    p = SKINS[name]
-    B = BODIES[p['body']]
-    s, k, lean = B['s'], B['k'], B['lean']
-    amp = B['amp']
-    sign = 0 if frame == 'idle' else (1 if frame == 0 else -1)   # frame0 = 迈左腿（左 = +Y），frame1 = 迈右腿；手臂反向
-    thigh, shin = 0.075 * s, 0.07 * s
-    ankle = 0.03 if k == 1 else 0.026
-    hip = ankle + (thigh + shin) * (math.cos(amp) if sign else 1.0)
+    p = SKINS[name]; B = BODIES[p['body']]
+    kid = p['body'] == 'kid'
+    lean = B['lean']
+    sign = 0 if frame == 'idle' else (1 if frame == 0 else -1)
+    amp = B['amp'] * (0.85 if frame == 0 else 1.0)
+    thigh, shin, ank, lr = B['thigh'], B['shin'], B['ankle'], B['leg_r']
+    hip = ank + (thigh + shin) * (math.cos(amp) if sign else 0.99)
     legs = p.get('legs', 'pants')
+    pants = p['pants']; skin_leg = legs in ('skirt', 'shorts')
     sock = '#f6f4ee'
     for side in (1, -1):
-        a = -amp * sign * side                   # 负 = 往前
+        a = -amp * sign * side
         y = B['ly'] * side
         hp = Vector((0, y, hip))
         kn = hp + Vector((-math.sin(a), 0, -math.cos(a))) * thigh
-        b = a + (0.42 if a > 0 else 0.0)         # 后腿屈膝、脚跟抬起
+        b = a + (0.45 if a > 0 else 0.1 if sign else 0.05)          # 后腿屈膝抬脚跟，前腿也微屈
         an = kn + Vector((-math.sin(b), 0, -math.cos(b))) * shin
-        up_c = p['pants'] if legs != 'skirt' else SKIN
-        lo_c = p['pants'] if legs == 'pants' else SKIN
-        seg(hp, kn, 0.03 * k, up_c, 12, r2=0.028 * k)
-        seg(kn, an, 0.028 * k, lo_c, 12, r2=0.026 * k)
-        ball(kn.x, kn.y, kn.z, 0.028 * k, lo_c, 2)
-        if legs == 'shorts':                     # 短裤裤脚
-            seg(hp + (kn - hp) * 0.55, hp + (kn - hp) * 0.72, 0.034 * k, shade(p['pants'], 0.88), 12)
-        if legs == 'pants':
-            seg(an + Vector((0, 0, 0.012)), an + Vector((0, 0, 0.028)), 0.03 * k, shade(p['pants'], 0.85), 12)   # 裤脚
-        else:
-            seg(an + Vector((0, 0, 0.004)), an + Vector((0, 0, 0.03 * k)), 0.028 * k, sock, 12)                  # 白袜
-        shoe(an.x, y, an.z - ankle, p['shoe'], p['sole'], pitch=(0.35 if a > 0 else 0.0), k=(1.0 if k == 1 else 0.82))
-    # 胯 / 裙子
-    box(-0.055 * k, -0.072 * k, hip - 0.04 * k, 0.11 * k, 0.144 * k, 0.06 * k, p['pants'], bevel=0.025 * k)
-    if legs == 'skirt':
-        L = 0.085 if k == 1 else 0.058
-        o = cyl(lean * 0.3, 0, hip - L, (0.105 if k == 1 else 0.08), L + 0.03 * k, p['pants'], 24,
-                r2=B['wy'] / 2 + 0.004)
-        o.scale = (0.78, 1, 1)
-        cyl(lean * 0.3, 0, hip - L - 0.002, (0.106 if k == 1 else 0.081), 0.012, shade(p['pants'], 0.82), 24).scale = (0.78, 1, 1)
-    tz0 = hip - 0.012
-    sh = torso(lean * 0.3, tz0, B['th'], p['top'], p['collar'], p['extra'], p['sleeve'], B['wx'], B['wy'], k,
-               inner=p.get('inner'))
+        if skin_leg:
+            tube([(hp + Vector((0, 0, 0.015)), lr * 1.05, lr * 1.0), (kn, lr * 0.9, lr * 0.9),
+                  (an + Vector((0, 0, 0.012)), lr * 0.78, lr * 0.78)], SKIN, 12)
+            cyl(an.x, an.y, an.z - 0.002, lr * 0.92, 0.024 if not kid else 0.02, sock, 12)          # 白袜
+            if legs == 'shorts':                                                                     # 短裤到膝上
+                tube([(hp + Vector((0, 0, 0.02)), lr * 1.35, lr * 1.3), (hp + (kn - hp) * 0.62, lr * 1.25, lr * 1.22)],
+                     pants, 14, 3, (True, False))
+                q = hp + (kn - hp) * 0.62
+                cyl(q.x, q.y, q.z - 0.004, lr * 1.28, 0.01, shade(pants, 0.85), 14)
+        else:      # 长裤有体积：大腿松、膝盖一道褶、裤脚堆一点
+            tube([(hp + Vector((0, 0, 0.02)), lr * 1.25, lr * 1.2), (kn, lr * 1.05, lr * 1.0),
+                  (an + Vector((0, 0, 0.018)), lr * 0.98, lr * 0.98)], pants, 14)
+            cyl(kn.x, kn.y, kn.z - 0.005, lr * 1.1, 0.007, shade(pants, 0.84), 14)
+            cyl(an.x, an.y, an.z + 0.004, lr * 1.08, 0.016, shade(pants, 0.86), 14)
+        shoe(an.x, y, an.z - ank, p['shoe'], p['sole'], pitch=(0.32 if a > 0 else 0.0), L=0.075, k=B['shoe'])
+    # 胯 + 上身
+    T = B['torso']; th = B['th']
+    x0 = lean * 0.3
+    z0 = hip - 0.012
+    tube([((x0, 0, hip - 0.03), T[0][1] * 0.95, T[0][2] * 0.95), ((x0, 0, hip + 0.02), T[0][1] * 0.95, T[0][2] * 0.95)],
+         pants if legs != 'skirt' else p['pants'], 16, 2, (True, False))
+    extra = p['extra']
+    top = p['top']; hem_c = shade(top, 0.84)
+    tube([((x0 + lean * zf, 0, z0 + th * zf), rx, ry) for zf, rx, ry in T], top, 20, 3)
+    surf = lambda zf, ang, out=0.001: Vector((x0 + lean * zf + (_lerp_prof(T, zf)[0] + out) * math.cos(ang),
+                                             (_lerp_prof(T, zf)[1] + out) * math.sin(ang), z0 + th * zf))
+    sh = z0 + th * 0.84
+    if legs == 'skirt':        # 裙子：腰到膝（小孩到大腿中间），下摆张开一点
+        L = (thigh * 0.75) if not kid else thigh * 0.62
+        sk = p['pants']
+        tube([((x0, 0, hip + 0.03), T[0][1] * 1.02, T[0][2] * 1.02), ((x0 - 0.002, 0, hip - L * 0.5), T[0][1] * 1.25, T[0][2] * 1.2),
+              ((x0 - 0.004, 0, hip - L), T[0][1] * 1.5, T[0][2] * 1.38)], sk, 20, 3, (False, False))
+        tube([((x0 - 0.004, 0, hip - L + 0.008), T[0][1] * 1.5, T[0][2] * 1.38), ((x0 - 0.004, 0, hip - L), T[0][1] * 1.52, T[0][2] * 1.4)],
+             shade(sk, 0.8), 20, 1, (False, False))
+    # 下摆 / 腰带
+    if extra in ('hem', 'pocket', 'floral', 'tank', 'jacket', 'cardigan'):
+        tube([((x0, 0, z0 - 0.003), T[0][1] * 1.07, T[0][2] * 1.05), ((x0, 0, z0 + 0.018), T[0][1] * 1.06, T[0][2] * 1.04)],
+             hem_c, 20, 1, (False, False))
+    if extra in ('belt', 'belt_pocket'):
+        tube([((x0, 0, z0 - 0.002), T[0][1] * 1.05, T[0][2] * 1.03), ((x0, 0, z0 + 0.014), T[0][1] * 1.05, T[0][2] * 1.03)],
+             '#4a3226', 20, 1, (False, False))
+        q = surf(0.02, 0.0, 0.004); box(q.x - 0.003, -0.01, q.z - 0.012, 0.006, 0.02, 0.012, M('#e0c060', metal=0.6, rough=0.3))
+    # 领口
+    if extra == 'tank':
+        q = surf(0.86, 0.0, -0.004); ball(q.x, 0, q.z + 0.008, 0.024, SKIN, 3, scale=(0.5, 1.35, 1.0))
+    elif extra == 'jacket':
+        tube([(surf(0.98, 1.2, 0.006), 0.009, 0.009), (surf(0.92, 0.0, 0.008), 0.009, 0.009),
+              (surf(0.98, -1.2, 0.006), 0.009, 0.009)], p['collar'], 10, 4)
+    else:
+        cyl(x0 + lean * 0.95, 0, z0 + th * 0.95, 0.026 if not kid else 0.022, 0.012, p['collar'], 16, r2=0.022)
+    if extra == 'belt':        # Polo：前襟两粒扣
+        for i in range(2):
+            q = surf(0.86 - i * 0.07, 0.0, 0.002); ball(q.x, 0, q.z, 0.004, '#f6f2ea', 1)
+    if extra in ('pocket', 'belt_pocket'):
+        q = surf(0.66, -0.45, 0.002); box(q.x - 0.004, q.y - 0.014, q.z - 0.012, 0.008, 0.028, 0.026, hem_c)
+    if extra in ('hem', 'pocket', 'dress'):      # T 恤腰上一道横褶
+        tube([(surf(0.3, -0.9, 0.002), 0.0028, 0.0028), (surf(0.27, 0.0, 0.003), 0.0028, 0.0028),
+              (surf(0.31, 0.9, 0.002), 0.0028, 0.0028)], shade(top, 0.8), 6, 3)
+    if extra == 'jacket':      # 夹克 / 校服：拉链 + 两个下口袋（校服再加两道红条）
+        for i in range(8):
+            q = surf(0.08 + i * 0.1, 0.0, 0.002); ball(q.x, 0, q.z, 0.0035, '#cfd3d8', 1)
+        for s in (1, -1):
+            q = surf(0.18, 0.75 * s, 0.002)
+            box(q.x - 0.004, q.y - 0.012, q.z - 0.01, 0.008, 0.024, 0.022, hem_c)
+        if name.startswith('boy'):
+            for s in (1, -1):
+                for i in range(6):
+                    q = surf(0.15 + i * 0.13, 0.42 * s, 0.003); ball(q.x, q.y, q.z, 0.0045, '#e8453c', 1)
+    if extra == 'cardigan':    # 开衫：前面露米白里衣 + 一排扣
+        inner = p.get('inner', '#f3ead8')
+        tube([(surf(0.04, 0.0, 0.0), 0.007, 0.024), (surf(0.96, 0.0, 0.0), 0.007, 0.018)], inner, 10, 2)
+        for i in range(3):
+            q = surf(0.2 + i * 0.22, 0.32, 0.003); ball(q.x, q.y, q.z, 0.004, M('#f3ead8', rough=0.3), 1)
+    if extra == 'floral':      # 碎花：一圈撒白 / 黄 / 粉小点
+        import random
+        rnd = random.Random(3)
+        cols = [M('#fff6e8', rough=0.6), M('#ffd95a', rough=0.6), M('#ffc2d0', rough=0.6)]
+        for i in range(70):
+            q = surf(rnd.uniform(0.05, 0.9), rnd.uniform(-math.pi, math.pi), 0.0015)
+            ball(q.x, q.y, q.z, 0.0055, cols[i % 3], 1)
+    if extra == 'dress':       # 连衣裙：腰上一圈白色腰带
+        tube([((x0, 0, z0 + 0.012), T[0][1] * 1.04, T[0][2] * 1.04), ((x0, 0, z0 + 0.024), T[0][1] * 1.04, T[0][2] * 1.04)],
+             '#ffffff', 20, 1, (False, False))
+    # 脖子
+    nz = z0 + th * 0.93
+    cyl(x0 + lean, 0, nz - 0.01, 0.018 if not kid else 0.016, B['neck'] + 0.02, SKIN, 12)
     if p.get('pack'):
-        backpack(lean * 0.3 - B['wx'] / 2, tz0 + 0.012, sh + 0.005, p['pack'], k, x_front=lean * 0.3 + B['wx'] / 2,
-                 shz=sh + 0.022)
+        rx0 = _lerp_prof(T, 0.5)[0]
+        backpack(x0 - rx0 + 0.006, z0 + 0.01, sh + 0.004, p['pack'], 0.78, x_front=x0 + rx0, shz=sh + 0.018)
+    # 手臂
     pose = p.get('pose', 'swing')
+    sleeve = p['sleeve']; ar = B['arm_r']
+    shy = _lerp_prof(T, 0.84)[1] - ar * 0.2
     hand = {}
     for side in (1, -1):
-        shp = (lean * 0.6, B['shy'] * side, sh)
-        if pose == 'behind':                     # 背着手：两只手在腰后握在一起
-            shv = Vector(shp)
-            up_c = SKIN if p['sleeve'] == 'none' else p['top']
-            el = Vector((lean * 0.6 - 0.04, (B['shy'] + 0.012) * side, sh - 0.062))
-            hd = Vector((-B['wx'] / 2 + lean * 0.3 - 0.03, 0.024 * side, sh - 0.105))
-            ball(shv.x, shv.y, shv.z, 0.03 * k, up_c, 2)
-            seg(shv, el, 0.027 * k, up_c, 12, r2=0.025 * k)
-            ball(el.x, el.y, el.z, 0.024 * k, SKIN, 2)
-            seg(el, hd, 0.021 * k, SKIN, 10)
-            ball(hd.x, hd.y, hd.z, 0.026 * k, SKIN, 2)
-            hand[side] = hd
-            continue
-        a = B['sw'] * sign * side                # 和同侧腿相反
-        lo = a - 0.3
-        if pose == 'cane' and side == -1:
-            a, lo = -0.15, -0.55                 # 拄拐那只手不摆
-        if pose == 'basket' and side == -1:
-            a, lo = 0.02, -0.05                  # 挎篮那只手垂着
-        hand[side] = arm(shp, a, lo, p['top'], p['sleeve'], B['ua'], B['la'], k)
-    hr = B['hr']
-    hx, hz = lean * 1.3, sh + 0.04 * k + hr * 0.92
-    elder = p['body'] == 'elder'
-    objs = head(hx, 0, hz, hr, p['hair'], p['style'], hair_rough=0.32 if p['style'] != 'buzz' else 0.9,
-                brow=('#cfc8bd' if elder else None), tie=p.get('tie'), hi=hi, eye=B['eye'],
-                lash=p.get('fem', False), bald=p['style'] == 'bald')
+        shp = Vector((x0 + lean * 0.7, shy * side, sh))
+        if pose == 'behind':
+            el = Vector((x0 - 0.03, (shy + ar * 0.8) * side, sh - B['ua'] * 0.95))
+            wr = Vector((x0 - _lerp_prof(T, 0.4)[0] - 0.016, 0.018 * side, sh - B['ua'] - B['la'] * 0.5))
+        else:
+            a = B['sw'] * sign * side
+            lo = a - 0.28
+            if pose == 'cane' and side == -1:
+                a, lo = -0.15, -0.5
+            if pose == 'basket' and side == -1:
+                a, lo = 0.02, -0.08
+            d1 = Vector((-math.sin(a), 0.1 * side, -math.cos(a))).normalized()
+            d2 = Vector((-math.sin(lo), 0.04 * side, -math.cos(lo))).normalized()
+            el = shp + d1 * B['ua']; wr = el + d2 * B['la']
+        tube([(shp, ar, ar), (el, ar * 0.88, ar * 0.88), (wr, ar * 0.75, ar * 0.75)], SKIN, 12)
+        if sleeve != 'none':
+            if sleeve == 'short':
+                end = shp + (el - shp) * 0.6; mid = shp + (end - shp) * 0.5
+            else:
+                end = wr - (wr - el).normalized() * 0.006; mid = el
+            tube([(shp + Vector((0, 0, 0.006)), ar * 1.3, ar * 1.3), (mid, ar * 1.18, ar * 1.18), (end, ar * 1.15, ar * 1.15)],
+                 top, 14, 3, (True, False))
+            dd = (end - mid).normalized()
+            tube([(end - dd * 0.005, ar * 1.2, ar * 1.2), (end + dd * 0.003, ar * 1.2, ar * 1.2)], shade(top, 0.8), 14, 1, (False, False))
+        else:
+            ball(shp.x, shp.y, shp.z, ar * 1.05, SKIN, 3)
+        palm(wr, wr - el, ar * 1.08)
+        hand[side] = wr + (wr - el).normalized() * ar * 0.9
+    # 头
+    hr = B['hr'] * (1.3 if cute else 1.0)
+    hs = (0.95, 0.93, 1.0) if cute else B['hs']
+    hx = x0 + lean * 1.3
+    hz = nz + B['neck'] + hr * hs[2] * 0.88
+    C = Vector((hx, 0, hz))
+    objs = head_c(name, C, hr, hs, cute, B['eye'])
     turn_about(objs, hx, 0, -0.35)               # 五官、头发往镜头偏 20°，正面多露点脸
-    if pose == 'cane':                           # 拐杖：靠镜头那只手（-Y），杖头略往里收，不比脚低（SETTLE 统一）
+    if pose == 'cane':                           # 拐杖：靠镜头那只手（-Y），杖尖收在脚的范围里（SETTLE 统一）
         e = hand[-1]
-        tip = Vector((e.x - 0.03, e.y + 0.02, 0.0))
-        seg(tip, Vector((e.x + 0.005, e.y - 0.008, e.z + 0.01)), 0.012, 'brown', 8)
-        seg((e.x - 0.02, e.y - 0.01, e.z + 0.012), (e.x + 0.035, e.y - 0.01, e.z + 0.012), 0.013, 'brown', 8)
-        cyl(tip.x, tip.y, 0, 0.015, 0.012, 'black', 8)
+        tip = Vector((e.x - 0.02, e.y + 0.016, 0.0))
+        seg(tip, Vector((e.x + 0.004, e.y - 0.004, e.z + 0.008)), 0.008, 'brown', 8)
+        seg((e.x - 0.014, e.y - 0.004, e.z + 0.01), (e.x + 0.026, e.y - 0.004, e.z + 0.01), 0.009, 'brown', 8)
+        cyl(tip.x, tip.y, 0, 0.011, 0.01, 'black', 8)
     if pose == 'basket':
-        basket(hand[-1])
+        basket2(hand[-1], 0.78)
+    rim_darken(0.6 if not cute else 0.75, 2.4 if not cute else 3.0, 0.62 if not cute else 0.55)
     if do_settle:
         settle('ped', turn)
-    return {'C': Vector((hx, 0, hz)), 'hr': hr}
+    return {'C': C, 'hr': hr * max(hs)}
+
+
+def head_c(name, C, hr, hs, cute, eye_k):
+    before = set(bpy.context.scene.objects)
+    p = SKINS[name]
+    sub = 5 if cute else 4
+    rx, ry, rz = hr * hs[0], hr * hs[1], hr * hs[2]
+    P = lambda az, el, kk=1.0: C + Vector((math.cos(az) * math.cos(el) * rx, math.sin(az) * math.cos(el) * ry,
+                                          math.sin(el) * rz)) * kk
+    ellip(C, hr, hs, M(SKIN, rough=0.6), sub)
+    for s in (1, -1):                                   # 耳朵
+        e = P(1.5 * s, -0.1, 0.97)
+        ball(e.x, e.y, e.z, hr * 0.18, SKIN, 2, scale=(0.7, 0.45, 1.0))
+    elder = p['body'] == 'elder'
+    hair = p['hair']
+    brow = '#d8d2c8' if elder else shade(hair, 0.8)
+    ek = eye_k
+    eye_el = -0.1 if cute else -0.02
+    for s in (1, -1):
+        e = P(0.36 * s, eye_el, 1.0)
+        if cute:   # Q 版大眼：深色眼仁 + 棕色下半 + 两个高光 + 上眼线（女性外眼角带一撇睫毛）
+            ball(e.x, e.y, e.z, hr * 0.2 * ek, EYE, 3, scale=(0.32, 0.72, 1.18))
+            ball(e.x + 0.003, e.y, e.z - hr * 0.07 * ek, hr * 0.14 * ek, '#6e4430', 2, scale=(0.32, 0.8, 0.75))
+            ball(e.x + 0.006, e.y - 0.004 * s - 0.003, e.z + hr * 0.075 * ek, hr * 0.07 * ek, M('#ffffff', emit=1.3), 2)
+            ball(e.x + 0.006, e.y + 0.006 * s, e.z - hr * 0.09 * ek, hr * 0.032 * ek, M('#ffffff', emit=1.3), 1)
+            l = P(0.36 * s, eye_el + 0.24 * ek, 1.0)
+            box(l.x - 0.004, l.y - hr * 0.12, l.z - 0.003, 0.008, hr * 0.24, hr * 0.05, EYE, rot=(-0.15 * s, 0, 0))
+            if p.get('fem'):
+                q = P(0.52 * s, eye_el + 0.2, 1.0)
+                box(q.x - 0.003, q.y - hr * 0.05, q.z - 0.002, 0.007, hr * 0.1, hr * 0.045, EYE, rot=(-0.7 * s, 0, 0))
+        else:      # 街上：比写实大一号的小眼睛 + 高光
+            ball(e.x, e.y, e.z, hr * 0.13 * ek, EYE, 2, scale=(0.4, 0.78, 1.0))
+            ball(e.x + 0.003, e.y - 0.002, e.z + hr * 0.04 * ek, hr * 0.04 * ek, M('#ffffff', emit=1.0), 1)
+        b = P(0.37 * s, eye_el + (0.42 if cute else 0.3), 1.02)
+        box(b.x - 0.004, b.y - hr * 0.14, b.z - 0.003, 0.008, hr * 0.28, hr * (0.08 if not elder else 0.11), brow,
+            rot=(0.15 * s, 0, 0))
+        c = P(0.64 * s, eye_el - 0.26, 0.99)
+        ball(c.x, c.y, c.z, hr * (0.16 if cute else 0.13), M(BLUSH, rough=0.9), 2, scale=(0.4, 1, 0.6))
+    mz = -0.44 if cute else -0.36
+    for i in range(5):
+        t = (i - 2) / 2
+        m = P(t * 0.1, mz + t * t * 0.05, 1.0)
+        ball(m.x, m.y, m.z, hr * (0.035 if cute else 0.032), MOUTH, 2)
+    n = P(0.0, (mz + eye_el) / 2 - 0.02, 1.0)
+    ball(n.x, n.y, n.z, hr * 0.075, SKIN_SHADE, 2, scale=(0.9, 0.8, 1.2))
+    HAIRS[p['style']](C, hr, hs, P, p, sub, cute)
+    return new_objs(before)
+
+
+# ---- 发型（风格 C：贴头、自然；cute=True 时多一层亮色发束和更深的发沟）
+def _hm(p, cute):
+    h = p['hair']
+    return M(h, rough=0.5), M(shade(h, 1.35) if sum(int(h[i:i + 2], 16) for i in (1, 3, 5)) < 450 else '#fbfaf6', rough=0.45)
+
+
+def _shine(C, hr, hs, hl, sub, cute, lo=0.58, hi=0.74):
+    """头顶一圈亮色发带（发束层次）；街上只留一小段。"""
+    if cute:
+        ellip(C, hr, hs, hl, sub, lambda d: lo < d.z < hi and d.x < 0.55 and abs(math.sin(math.atan2(d.y, d.x) * 5)) > 0.25, 1.075)
+    else:
+        ellip(C, hr, hs, hl, sub, lambda d: lo + 0.02 < d.z < hi and d.x < 0.3 and d.y < 0.3 and d.y > -0.6, 1.055)
+
+
+def _fringe(P, hr, hm, n, el, k, r, sc, span=0.85, cute=False):
+    for i in range(n):
+        az = -span + i * 2 * span / max(1, n - 1)
+        q = P(az, el, k)
+        blob(q, hr * r * (1.08 if cute and i % 2 else 1.0), sc, hm, Vector((math.cos(az), math.sin(az), -0.25)))
+
+
+def h_short(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.42, -0.12, -0.55), 1.06, ridges(16, 0.03 if cute else 0.02))
+    _fringe(P, hr, hm, 6 if cute else 5, 0.4, 1.04, 0.24, (0.45, 1.0, 0.85), 0.85, cute)
+    for s in (1, -1):
+        blob(P(1.25 * s, -0.1, 1.02), hr * 0.15, (0.5, 0.6, 1.3), hm, Vector((0, s, 0)))
+    for az in (math.pi - 0.5, math.pi, math.pi + 0.5):
+        blob(P(az, -0.3, 1.03), hr * 0.3, (0.5, 1.0, 0.75), hm, Vector((math.cos(az), math.sin(az), 0)))
+    _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_side(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.5, -0.1, -0.5), 1.07, ridges(16, 0.03 if cute else 0.02))
+    for i in range(4):                                   # 偏分：从 +Y 一侧扫向 -Y 的大刘海
+        az = 0.6 - i * 0.38
+        blob(P(az, 0.52 - i * 0.05, 1.05), hr * (0.34 - i * 0.02), (0.45, 1.25, 0.6), hm, Vector((0.5, -1, 0.3)))
+    blob(P(0.2, 0.75, 1.06), hr * 0.42, (0.85, 1.35, 0.5), hm)          # 头顶蓬起
+    for s in (1, -1):
+        blob(P(1.25 * s, -0.08, 1.02), hr * 0.14, (0.5, 0.6, 1.2), hm, Vector((0, s, 0)))
+    ellip(C, hr, hs, hl, sub, lambda d: 0.6 < d.z < 0.8 and d.y > 0.05 and d.x < 0.6, 1.085)   # 分缝那侧亮
+    if cute:
+        _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_buzz(C, hr, hs, P, p, sub, cute):
+    hm = M(p['hair'], rough=0.95)
+    ellip(C, hr, hs, hm, sub, _hairline(0.6, 0.02, -0.4), 1.03)
+    ellip(C, hr, hs, M(shade(p['hair'], 1.3), rough=0.9), sub, lambda d: d.z > 0.85 and d.x < 0.2, 1.035)
+
+
+def h_elder(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, lambda d: (d.x < 0.25 and -0.5 < d.z < 0.35 and not (d.x > 0 and abs(d.y) < 0.6)), 1.04,
+          ridges(20, 0.03))
+    for i in range(7):                                   # 头顶几缕往后梳
+        y = -0.6 + i * 0.2
+        b = C + Vector((0.15 * hr * hs[0], y * 0.55 * hr * hs[1], 0.97 * hr * hs[2]))
+        blob((b.x - hr * 0.25, b.y, b.z), hr * 0.1, (0.45, 0.4, 3.0), hm, Vector((1, 0, 0)))
+    for s in (1, -1):
+        blob(P(1.3 * s, 0.05, 1.03), hr * 0.2, (0.6, 0.7, 1.1), hm, Vector((0, s, 0)))
+
+
+def h_bald(C, hr, hs, P, p, sub, cute):
+    wm = M(p['hair'], rough=0.8)
+    ellip(C, hr, hs, wm, sub, lambda d: d.x < 0.1 and -0.45 < d.z < 0.18 and not (d.x > -0.25 and abs(d.y) < 0.7),
+          1.035, ridges(20, 0.03))
+    for s in (1, -1):
+        blob(P(1.42 * s, 0.05, 1.03), hr * 0.16, (0.6, 0.7, 1.0), wm, Vector((0, s, 0)))
+    ellip(C, hr, hs, M('#fff1e0', emit=0.25, rough=0.25), sub, lambda d: d.z > 0.82 and d.x > -0.2 and -0.4 < d.y < 0.1, 1.005)
+
+
+def h_ponytail(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.45, -0.45, -0.6), 1.05, ridges(16, 0.03 if cute else 0.015))
+    blob(P(-0.25, 0.52, 1.04), hr * (0.38 if cute else 0.45), (0.38, 1.0, 0.42), hm, Vector((0.7, 0.6, 0.5)))      # 斜刘海
+    if cute:
+        blob(P(0.32, 0.55, 1.04), hr * 0.26, (0.38, 0.8, 0.45), hm, Vector((0.7, -0.4, 0.4)))
+    for s in (1, -1):
+        tube([(P(1.2 * s, 0.25, 1.02), hr * 0.06, hr * 0.07), (P(1.25 * s, -0.4, 1.03), hr * 0.04, hr * 0.05)], hm, 10)
+    back = P(math.pi, 0.45, 1.04)
+    ball(back.x, back.y, back.z, hr * 0.12, p.get('tie', '#e0334f'), 2)
+    tube([(back, hr * 0.15, hr * 0.17), (back + Vector((-hr * 0.38, 0, -hr * 0.3)), hr * 0.2, hr * 0.21),
+          (back + Vector((-hr * 0.42, 0, -hr * 1.0)), hr * 0.14, hr * 0.15), (back + Vector((-hr * 0.3, 0, -hr * 1.5)), hr * 0.04, hr * 0.05)],
+         hm, 12, 4)
+    _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_bob(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.3, -0.2, -0.4), 1.07, ridges(16, 0.02))
+    curtain(C, hr, hs, hm, 1.05, 0.7, lambda az: 1.65, _hair_prof(0.12, 0.05, 0.8, 0.15), rows=14, solid=0.12)
+    curtain(C, hr, hs, hm, 1.15, 0.78, lambda az: 0.46, lambda t, z: math.sqrt(max(0, 1 - z * z)) + 0.14, solid=0.1, front=True)
+    ball(*P(-0.8, 0.5, 1.15), hr * 0.09, M(p.get('tie', '#f6c938'), rough=0.3), 2, scale=(0.5, 1.7, 0.6))
+    _shine(C, hr, hs, hl, sub, cute, 0.6, 0.78)
+
+
+def h_long(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.55, -0.2, -0.4), 1.07, ridges(16, 0.02))
+    curtain(C, hr, hs, hm, 1.0, 0.7, lambda az: 2.5 + 0.7 * (1 - math.cos(az)) / 2, _hair_prof(0.11, 0.1, 1.1, 0.0),
+            rows=16, solid=0.12)
+    for s2 in (1, -1):                                   # 中分：额前两片斜下
+        ellip(C, hr, hs, hm, sub, (lambda d, s2=s2: d.z > 0.25 and d.x > 0.2 and d.y * s2 > 0.04 and d.z < 0.9 - 0.4 * abs(d.y)),
+              1.09)
+    _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_curly(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.48, -0.15, -0.55), 1.05)
+    import random
+    rnd = random.Random(11)
+    for i in range(52 if cute else 40):
+        az = rnd.uniform(-math.pi, math.pi); el = rnd.uniform(-0.25, 1.35)
+        if math.cos(az) > 0.4 and el < 0.5:
+            el = 0.5 + rnd.random() * 0.2
+        if math.cos(az) > -0.2 and el < 0.1:
+            el = 0.1 + rnd.random() * 0.3
+        ball(*P(az, el, 1.07), hr * rnd.uniform(0.17, 0.23), hl if i % 5 == 0 else hm, 2, scale=(1, 1, 0.9))
+
+
+def h_bun(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.48, -0.15, -0.55), 1.05, ridges(22, 0.025))
+    for i in range(7):
+        y = -0.6 + i * 0.2
+        b = C + Vector((0.5 * hr * hs[0], y * 0.7 * hr * hs[1], 0.82 * hr * hs[2]))
+        blob((b.x - hr * 0.3, b.y, b.z), hr * 0.09, (0.45, 0.4, 3.0), hl if i % 3 == 1 else hm, Vector((1, 0, -0.3)))
+    t = P(math.pi, 0.85, 1.05)
+    bm_ = M(shade(p['hair'], 0.72), rough=0.5)
+    ball(t.x - hr * 0.12, t.y, t.z + hr * 0.12, hr * 0.44, bm_, 3, scale=(1.0, 1.05, 0.9))
+    cyl(t.x - hr * 0.12, t.y, t.z - hr * 0.16, hr * 0.36, hr * 0.1, M(shade(p['hair'], 0.45), rough=0.5), 20)
+    for a2 in range(0, 360, 60):
+        r2_ = math.radians(a2)
+        ball(t.x - hr * 0.12 + math.cos(r2_) * hr * 0.24, t.y + math.sin(r2_) * hr * 0.24, t.z + hr * 0.3,
+             hr * 0.14, hl if a2 % 120 == 0 else bm_, 1, scale=(1, 1, 0.6))
+    seg((t.x - hr * 0.1, t.y - hr * 0.7, t.z + hr * 0.2), (t.x - hr * 0.1, t.y + hr * 0.7, t.z + hr * 0.02),
+        hr * 0.04, M(p.get('tie', '#c8323c'), rough=0.3), 8)
+    ball(t.x - hr * 0.1, t.y - hr * 0.72, t.z + hr * 0.2, hr * 0.07, M('#f6c938', metal=0.6, rough=0.3), 2)
+
+
+def h_spiky(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.45, -0.1, -0.5), 1.06, ridges(14, 0.04))
+    for i in range(5):                                   # 碎刘海
+        az = -0.7 + i * 0.35
+        cone(P(az, 0.5, 1.02), Vector((math.cos(az), math.sin(az) * 0.5, -0.5)), hr * 0.32, hr * 0.13, hm)
+    for az, el in [(0.3, 0.95), (-0.4, 0.9), (2.4, 0.85), (-2.4, 0.85), (1.1, 0.7), (-1.1, 0.75), (math.pi, 0.6),
+                   (0.0, 1.3), (2.0, 0.35), (-2.0, 0.35), (math.pi, 0.1)]:
+        q = P(az, el, 1.02)
+        d = Vector((math.cos(az + 0.25) * math.cos(min(1.5, el + 0.35)), math.sin(az + 0.25) * math.cos(min(1.5, el + 0.35)),
+                    math.sin(min(1.5, el + 0.35))))
+        cone(q, d, hr * 0.36, hr * 0.15, hm)
+    for s in (1, -1):
+        blob(P(1.25 * s, -0.1, 1.02), hr * 0.15, (0.5, 0.6, 1.3), hm, Vector((0, s, 0)))
+    _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_braids(C, hr, hs, P, p, sub, cute, twin=False):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.32, -0.4, -0.6), 1.06, ridges(16, 0.025))
+    _fringe(P, hr, hm, 6, 0.34, 1.04, 0.24, (0.45, 1.0, 0.9), 0.85, cute)
+    tc = M(p.get('tie', '#e0334f'), rough=0.3)
+    for s in (1, -1):
+        if not twin:      # 耳后两根小麻花辫
+            t = P(1.75 * s, -0.3, 1.06)
+            ball(t.x, t.y, t.z, hr * 0.13, tc, 2)
+            for j in range(4):
+                ball(t.x - hr * 0.06 * j, t.y + s * hr * 0.1 * j, t.z - hr * (0.26 + 0.28 * j), hr * (0.18 - 0.015 * j),
+                     hm, 2, scale=(0.9, 0.9, 1.25))
+            e = (t.x - hr * 0.2, t.y + s * hr * 0.38, t.z - hr * 1.3)
+            ball(*e, hr * 0.11, tc, 2)
+            ball(e[0], e[1], e[2] - hr * 0.15, hr * 0.1, hm, 2, scale=(1, 1, 1.4))
+        else:             # 头两侧高揪
+            t = P(1.45 * s, 0.6, 1.08)
+            ball(t.x, t.y, t.z, hr * 0.14, tc, 2)
+            ball(t.x - hr * 0.08, t.y + s * hr * 0.34, t.z - hr * 0.05, hr * 0.28, hm, 2, scale=(0.85, 1.0, 1.0))
+            ball(t.x - hr * 0.12, t.y + s * hr * 0.52, t.z - hr * 0.4, hr * 0.22, hm, 2, scale=(0.8, 0.9, 1.4))
+            ball(t.x - hr * 0.14, t.y + s * hr * 0.58, t.z - hr * 0.74, hr * 0.14, hm, 2, scale=(0.8, 0.9, 1.4))
+    _shine(C, hr, hs, hl, sub, cute)
+
+
+def h_fluffy(C, hr, hs, P, p, sub, cute):
+    hm, hl = _hm(p, cute)
+    ellip(C, hr, hs, hm, sub, _hairline(0.45, -0.1, -0.5), 1.05)
+    import random
+    rnd = random.Random(7)
+    for i in range(26):
+        az = rnd.uniform(-math.pi, math.pi); el = rnd.uniform(0.15, 1.3)
+        if math.cos(az) > 0.4 and el < 0.5:
+            el = 0.5 + rnd.random() * 0.2
+        ball(*P(az, el, 1.08), hr * rnd.uniform(0.22, 0.3), hm, 2, scale=(1, 1, 0.9))
+
+
+HAIRS = {'short': h_short, 'side': h_side, 'buzz': h_buzz, 'elder': h_elder, 'bald': h_bald, 'ponytail': h_ponytail,
+         'bob': h_bob, 'long': h_long, 'curly': h_curly, 'bun': h_bun, 'spiky': h_spiky, 'braids': h_braids,
+         'twintails': lambda *a: h_braids(*a, twin=True), 'fluffy': h_fluffy}
 
 
 for _n in RESIDENTS + ['ped5']:
@@ -721,25 +1235,17 @@ for _n in RESIDENTS + ['ped5']:
 
 # ---------------------------------------------------------------- 头像（D023）：同一模型的胸像，128×128 透明底
 FACE_PX = 128
-FACE_AZ = 0.0                 # 相机方位：身体正前方；头本来就往 -Y 偏了 20°，脸自然略侧
-FACE_EL = math.radians(14)    # 略带俯视
-FACE_HEAD = 0.58              # 头（含头发）占画面高度
-FACE_LIFT = 0.05              # 画面中心比头心高多少（× 画面），头就落在偏下
+FACE_EL = math.radians(14)    # 略带俯视；头本来就往镜头偏了 20°，脸自然略侧
+FACE_HEAD = 0.6               # 头（含头发）占画面
+FACE_LIFT = 0.03              # 画面中心比头心高多少（× 画面），头就落在偏下
 
 
 def face_shot(name, out_dir):
     from lib import _reset
     _reset()
-    info = person(name, 'idle', False, hi=True, do_settle=False)
+    info = person(name, 'idle', False, cute=True, do_settle=False)
     C, hr = info['C'], info['hr']
     sc = bpy.context.scene
-    for o in _model_objects():                 # 胸像离得近：倒角多几段、平滑着色，衣服不显得一格一格的
-        bv = o.modifiers.get('bv')
-        if bv:
-            bv.segments = 5; bv.harden_normals = True
-            for poly in o.data.polygons:
-                poly.use_smooth = True
-    # 灯：主光从镜头左上前方来（暖白），补光由 warm() 给，再加一盏背后轮廓光把头发边勾出来
     sun = bpy.data.objects['_sun']
     sun.rotation_mode = 'QUATERNION'
     sun.rotation_quaternion = Vector((0.7, -0.75, 0.85)).normalized().to_track_quat('Z', 'Y')
@@ -749,22 +1255,20 @@ def face_shot(name, out_dir):
     rim.rotation_mode = 'QUATERNION'
     rim.rotation_quaternion = Vector((-0.9, 0.5, 0.5)).normalized().to_track_quat('Z', 'Y')
     rim.data.energy = 1.4; rim.data.color = (1.0, 0.92, 0.8); rim.data.use_shadow = False
-    dc = Vector((math.cos(FACE_EL) * math.cos(FACE_AZ), math.cos(FACE_EL) * math.sin(FACE_AZ), math.sin(FACE_EL)))
+    dc = Vector((math.cos(FACE_EL), 0, math.sin(FACE_EL)))
     S = hr * 2.3 / FACE_HEAD
     bpy.ops.object.camera_add()
     cam = bpy.context.object; sc.camera = cam
     cam.data.type = 'ORTHO'; cam.data.ortho_scale = S
     q = dc.to_track_quat('Z', 'Y')
     cam.rotation_mode = 'QUATERNION'; cam.rotation_quaternion = q
-    up = q @ Vector((0, 1, 0))
-    cam.location = C + up * (S * FACE_LIFT) + dc * 5
+    cam.location = C + (q @ Vector((0, 1, 0))) * (S * FACE_LIFT) + dc * 5
     cam.data.clip_start = 0.1; cam.data.clip_end = 20
     sc.render.resolution_x = sc.render.resolution_y = FACE_PX
     sc.render.resolution_percentage = 100
     sc.render.filter_size = 1.5
     sc.eevee.taa_render_samples = 128
-    path = os.path.join(out_dir, f'face-{name}.png')
-    sc.render.filepath = path
+    sc.render.filepath = os.path.join(out_dir, f'face-{name}.png')
     bpy.ops.render.render(write_still=True)
     print(f'[ok] face-{name}.png {FACE_PX}×{FACE_PX}')
 

@@ -104,7 +104,7 @@ A = [('man0-front0', 7.5, 2.2), ('woman1-back1', 7.85, 3.4), ('oldman0-front1', 
      ('oldwoman1-front1', 12.8, 10.3), ('boy0-back0', 9.2, 10.6), ('woman2-front0', 8.6, 2.6), ('car1', 7.6, 12.0),
      ('moto0-front', 3.2, 5.5), ('moto2-back', 7.55, 7.4), ('moto1-front', 11.4, 10.6)]
 # T405：影子（图心 = 着地中心 = 人车图底边中点往上 SETTLE 像素，SETTLE 见 actors.py）
-SETTLE = {'ped': 5, 'scoot': 8, 'moto': 10, 'car': 17}   # D023：行人皮肤统一 5
+SETTLE = {'ped': 6, 'scoot': 8, 'moto': 10, 'car': 17}   # D023 风格 C：行人皮肤统一 6
 def shadow_of(n):
     if n.startswith('scoot'): return 'shadow-m', SETTLE['scoot']
     if n.startswith('moto'): return 'shadow-m', SETTLE['moto']

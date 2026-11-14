@@ -57,10 +57,10 @@ B = [
     ('school-house', 5, 6, False), ('tutoring', 6, 8, True), ('clinic', 6, 9, True), ('police', 6, 10, True),
     ('center', 8, 6, True), ('school', 8, 8, True), ('bbq', 3, 6, False), ('parcel', 4, 6, False),
     ('workshop', 11, 6, False), ('textile', 11, 8, False), ('food-factory', 8, 11, False), ('electronics', 10, 11, False),
-    ('plaza', 10, 6, False), ('tree', 12, 6, False), ('tree', 13, 7, False), ('port', 0, 6, False), ('mine', 0, 0, False),
+    ('plaza', 10, 6, False), ('moto-factory', 3, 8, False), ('car-factory', 0, 10, True), ('tree', 12, 6, False), ('tree', 13, 7, False), ('port', 0, 6, False), ('mine', 0, 0, False),
 ]
 SIZE = {'apartment': 2, 'school-house': 2, 'hotpot': 2, 'supermarket': 2, 'textile': 2, 'food-factory': 2,
-        'electronics': 2, 'center': 2, 'school': 2, 'port': 2, 'mine': 2, 'plaza': 2}
+        'electronics': 2, 'center': 2, 'school': 2, 'port': 2, 'mine': 2, 'plaza': 2, 'moto-factory': 2, 'car-factory': 2}
 
 def scr(gx, gy):
     return (gx - gy) * HW, (gx + gy) * HH
@@ -101,10 +101,23 @@ for c in range(N):
 # 人车：放在路上（锚点 = 底边中点）
 A = [('ped0-front0', 7.5, 2.2), ('ped4-back1', 7.85, 3.4), ('ped3-front1', 4.3, 5.85), ('ped1-front0', 9.5, 5.15),
      ('scoot0-front', 7.3, 9.5), ('scoot1-back', 12.2, 5.3), ('car0', 5.5, 5.4), ('car2', 10.6, 5.6),
-     ('ped5-front1', 12.8, 10.3), ('ped2-back0', 9.2, 10.6), ('car1', 7.6, 12.0)]
+     ('ped5-front1', 12.8, 10.3), ('ped2-back0', 9.2, 10.6), ('car1', 7.6, 12.0),
+     ('moto0-front', 3.2, 5.5), ('moto2-back', 7.55, 7.4), ('moto1-front', 11.4, 10.6)]
+# T405：影子（图心 = 着地中心 = 人车图底边中点往上 SETTLE 像素，SETTLE 见 actors.py）
+SETTLE = {'ped': 5, 'ped3': 8, 'scoot': 8, 'moto': 10, 'car': 17}
+def shadow_of(n):
+    if n.startswith('ped'): return 'shadow-s', SETTLE['ped3' if n.startswith('ped3') else 'ped']
+    if n.startswith('scoot'): return 'shadow-m', SETTLE['scoot']
+    if n.startswith('moto'): return 'shadow-m', SETTLE['moto']
+    if n.startswith('car'): return 'shadow-l', SETTLE['car']
+    return None, 0
 for n, gx, gy in A:
     if n in AF: objs.append((gx + gy, n, gx, gy))
 for _, n, gx, gy in sorted(objs):
+    sh, st = shadow_of(n) if n in dict((a[0], 1) for a in A) else (None, 0)
+    if sh and sh in AF:
+        si = sprite(sh); x, y = scr(gx, gy)
+        img.alpha_composite(si, (int(OX + x - si.width // 2), int(OY + y - st - si.height // 2)))
     im = sprite(n)
     if n == 'car1':   # 沿 gy 走的车：左右翻转（和游戏一样）
         im = im.transpose(Image.FLIP_LEFT_RIGHT)

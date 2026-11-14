@@ -1,7 +1,7 @@
 {
   "_说明": "模拟层经营数值（支线 A 维护）。改这里不用改代码；单位是元，时间以「游戏月」计。规则见 docs/DESIGN.md 2～4 节。",
   "secondsPerMonth": 20,
-  "startFunds": 50000,
+  "startFunds": 100000,
   "taxRate": { "business": 0.1, "industry": 0.15, "income": 0.05 },
 
   "tuning": {
@@ -45,6 +45,18 @@
     }
   },
 
+  "vehicles": {
+    "_说明": "交通工具（DESIGN 11）。factory = 县里要有这种厂才能买；savingsRatio = 储蓄 ≥ 价格 × 它；chance = 满足条件时每月概率；range = 消费半径 / 上班舒适距离的倍率（找工作的通勤惩罚 ÷ 它）；mood = 每月心情加成；fuel = 每月油费",
+    "minAge": 18,
+    "maxAge": 65,
+    "types": {
+      "walk":  { "price": 0,     "factory": "",             "savingsRatio": 0,   "minSalary": 0,    "chance": 0,    "range": 1.0, "mood": 0, "fuel": 0 },
+      "ebike": { "price": 3000,  "factory": "moto-factory", "savingsRatio": 1.5, "minSalary": 0,    "chance": 0.015, "range": 1.5, "mood": 3, "fuel": 0 },
+      "moto":  { "price": 8000,  "factory": "moto-factory", "savingsRatio": 1.5, "minSalary": 3000, "chance": 0.01, "range": 1.7, "mood": 3, "fuel": 0 },
+      "car":   { "price": 40000, "factory": "car-factory",  "savingsRatio": 1.2, "minSalary": 4500, "chance": 0.008, "range": 2.2, "mood": 5, "fuel": 300 }
+    }
+  },
+
   "buildings": [
     { "id": "house", "cost": 3000, "upkeep": 10, "housing": 3, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 0, "unlock": "village", "publicJob": false },
     { "id": "apartment", "cost": 22000, "upkeep": 120, "housing": 12, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 0, "unlock": "town", "publicJob": false },
@@ -65,6 +77,8 @@
     { "id": "textile", "cost": 38000, "upkeep": 400, "housing": 0, "jobs": [{ "title": "车间工人", "count": 18, "salary": 3200, "edu": 0 }, { "title": "班组长", "count": 2, "salary": 4500, "edu": 1 }], "demand": null, "capacity": 900, "price": 16, "env": -2, "unlock": "town", "publicJob": false },
     { "id": "food-factory", "cost": 34000, "upkeep": 360, "housing": 0, "jobs": [{ "title": "车间工人", "count": 15, "salary": 3100, "edu": 0 }, { "title": "质检员", "count": 2, "salary": 3800, "edu": 1 }], "demand": null, "capacity": 800, "price": 18, "env": -2, "unlock": "town", "publicJob": false },
     { "id": "electronics", "cost": 62000, "upkeep": 620, "housing": 0, "jobs": [{ "title": "装配工", "count": 26, "salary": 3300, "edu": 1 }, { "title": "技术员", "count": 4, "salary": 5200, "edu": 2 }], "demand": null, "capacity": 1200, "price": 22, "env": -2, "unlock": "county", "publicJob": false },
+    { "id": "moto-factory", "cost": 42000, "upkeep": 420, "housing": 0, "jobs": [{ "title": "装配工", "count": 12, "salary": 3300, "edu": 0 }, { "title": "质检员", "count": 2, "salary": 3900, "edu": 1 }], "demand": null, "capacity": 600, "price": 28, "env": -1, "unlock": "town", "publicJob": false },
+    { "id": "car-factory", "cost": 110000, "upkeep": 950, "housing": 0, "jobs": [{ "title": "装配工", "count": 18, "salary": 3600, "edu": 1 }, { "title": "技术员", "count": 4, "salary": 5200, "edu": 2 }, { "title": "工程师", "count": 2, "salary": 6800, "edu": 3 }], "demand": null, "capacity": 1200, "price": 30, "env": -2, "unlock": "county", "publicJob": false },
     { "id": "mine", "cost": 50000, "upkeep": 500, "housing": 0, "jobs": [{ "title": "矿工", "count": 10, "salary": 3600, "edu": 0 }, { "title": "安全员", "count": 2, "salary": 4200, "edu": 1 }], "demand": null, "capacity": 700, "price": 30, "env": -3, "unlock": "county", "publicJob": false },
     { "id": "port", "cost": 45000, "upkeep": 450, "housing": 0, "jobs": [{ "title": "装卸工", "count": 10, "salary": 3400, "edu": 0 }], "demand": null, "capacity": 600, "price": 26, "env": 1, "unlock": "county", "publicJob": false },
 

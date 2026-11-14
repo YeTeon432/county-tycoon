@@ -1,10 +1,14 @@
-import { _decorator, Color, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, Color, Node } from 'cc';
 import { SimApi } from '../core/sim/SimApi';
 import { BuildingSim, Resident } from '../core/sim/types';
 import { PlacedBuilding, TownModel } from '../core/TownModel';
 import { Panel } from './Panel';
+import { buildPersonRow } from './PersonRow';
 import { ListRow, ScrollList } from './ScrollList';
-import { formatNumber, makeLabel, makePill, UI_COLOR, UI_FONT } from './UiTheme';
+import {
+    formatMoney, formatNumber, makeButton, makeLabel, makeLabelRight, makeSectionTitle, makeStatTile,
+    moodColor, UI_COLOR, UI_FONT, UI_PALETTE,
+} from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -12,20 +16,20 @@ const { ccclass } = _decorator;
 export type ResidentTapHandler = (residentId: number) => void;
 
 /**
- * 建筑详情（T308）。
+ * 建筑详情（T308，T406 改成白色抽屉）。
  *
- * 住宅：住几人 / 容量 + 住户名单（名字 · 年龄 · 工作）
- * 店铺 / 工厂 / 公共：员工名单 + 上月营业额、服务人次、上交税款
- * 点名单里的人 → 打开他的档案（由外面接）。
+ * 顶部一排数值格：
+ *   住宅：住户人数 / 平均心情 / 有工作的人数
+ *   店铺 / 工厂 / 公共：上月营业额 / 服务人次 / 上交税款
+ * 下面是名单（住户或员工），一行 = 名字（蓝，可点）· 年龄 · 工作 · 心情。
+ * 标题行右侧（关闭按钮左边）是「换朝向」按钮。
  *
- * 数据来源两种：
- *   - 建筑的名称、类别、占格：TownModel 里的 PlacedBuilding（一定有）
- *   - 住的是谁、赚了多少：SimApi.building(uid)（现在是 MockSim，可能没有这一栋）
- * 模拟层没有这栋的数据时，上半部分照样显示建筑信息，下半部分显示"暂无经营数据"，
- * 不能让玩家点了没反应。
+ * 模拟层没有这栋的数据时，数值格显示 0，名单处写「暂无经营数据」，不能让玩家点了没反应。
  */
 @ccclass('BuildingPanel')
 export class BuildingPanel extends Panel {
+    protected cardH = 760;
+
     private _sim: SimApi | null = null;
     private _placed: PlacedBuilding | null = null;
     private _onResidentTap: ResidentTapHandler | null = null;
@@ -33,8 +37,8 @@ export class BuildingPanel extends Panel {
     private _toggleFacing: ((uid: number) => boolean) | null = null;
     /** 往顶栏第二行打一句提示（UiRoot 给） */
     private _onHint: ((text: string) => void) | null = null;
-    private _facingBtnLabel: Label | null = null;
-    private _facingPill: { setActive: (on: boolean) => void } | null = null;
+    private _facingBtn: ReturnType<typeof makeButton> | null = null;
+    private _list: ScrollList | null = null;
 
     /** 打开某栋建筑；找不到返回 null（比如 uid 已过期） */
     static show(
@@ -68,66 +72,61 @@ export class BuildingPanel extends Panel {
 
         const b = sim.building(placed.uid);
         const isHome = placed.def.category === '住宅';
-        const staff = this.collectStaff(b);
-        const residents = this.collectResidents(b);
+        const people = isHome ? this.collect(b, 'home') : this.collect(b, 'work');
+        const W = this.contentW;
+        let y = this.contentTop;
 
-        let y = 300;
-        const W = content.getComponent(UITransform)!.width;
-
-        // ── 上半：经营数字 ──
+        // ── 数值格 ──
+        const tileH = 108, gap = 16;
+        const tileW = (W - gap * 2) / 3;
+        const tiles: [string, string, Color][] = [];
         if (isHome) {
-            y = this.statLine(content, y, `住户 ${residents.length} 人`, UI_COLOR.text);
+            const avgMood = people.length > 0 ? people.reduce((s, r) => s + r.mood, 0) / people.length : 0;
+            const working = people.filter((r) => r.jobId !== null).length;
+            tiles.push(['住户', `${people.length} 人`, UI_PALETTE.blue]);
+            tiles.push(['平均心情', people.length > 0 ? `${Math.round(avgMood)}` : '—', people.length > 0 ? moodColor(avgMood) : UI_COLOR.textDim]);
+            tiles.push(['有工作', `${working} 人`, UI_PALETTE.green]);
         } else {
-            const rev = b ? b.lastRevenue : 0;
-            const cust = b ? b.lastCustomers : 0;
-            const tax = b ? b.lastTax : 0;
-            y = this.statLine(content, y, `上月营业额 ¥${formatNumber(rev)}`, UI_COLOR.gold);
-            y = this.statLine(content, y, `服务 ${formatNumber(cust)} 人次　上交 ¥${formatNumber(tax)}`, UI_COLOR.textDim);
+            tiles.push(['上月营业额', formatMoney(b ? b.lastRevenue : 0), UI_COLOR.gold]);
+            tiles.push(['服务人次', formatNumber(b ? b.lastCustomers : 0), UI_PALETTE.blue]);
+            tiles.push(['上交税款', formatMoney(b ? b.lastTax : 0), UI_PALETTE.green]);
         }
-
-        // 备注：模拟层还没这栋的数据
-        if (!b) {
-            const note = makeLabel(content, 'Note', '暂无经营数据（模拟层未接入这栋建筑）', UI_FONT.small, UI_COLOR.textDim, W);
-            note.node.setPosition(0, y, 0);
-            y -= 40;
+        for (let i = 0; i < tiles.length; i++) {
+            const t = makeStatTile(content, tileW, tileH, tiles[i][0], tiles[i][1], tiles[i][2]);
+            t.node.setPosition(-W / 2 + tileW / 2 + i * (tileW + gap), y - tileH / 2, 0);
         }
+        y -= tileH + 36;
 
-        // ── 下半：名单 ──
-        const listTitle = isHome ? '住户名单' : '员工名单';
-        const head = makeLabel(content, 'ListTitle', listTitle, UI_FONT.body, UI_COLOR.text, W);
-        head.node.setPosition(0, y, 0);
-        // 标题本身有半个行高（约 15），再留 34 才够第一行不贴着标题
-        y -= 52;
+        // ── 名单 ──
+        makeSectionTitle(content, W, y, isHome ? '住户名单' : '员工名单');
+        const count = makeLabelRight(content, 'Count', `${people.length} 人`, UI_FONT.small, UI_COLOR.textDim, 160);
+        count.node.setPosition(W / 2, y, 0);
+        y -= 30;
 
-        // 列表占掉标题以下的全部空间。content 是 (cardH-120) 高、原点在中间（见 Panel.buildShell），
-        // 所以它的底边是 -(cardH-120)/2；留 8 给圆角。
-        const contentH = content.getComponent(UITransform)!.height;
-        const bottom = -contentH / 2 + 8;
+        const bottom = -this.contentH / 2;
         const listH = Math.max(120, y - bottom);
         const list = ScrollList.mount(content, 'List', W, listH);
         list.node.setPosition(0, y - listH / 2, 0);
+        this._list = list;
 
-        const people = isHome ? residents : staff;
         if (people.length === 0) {
-            const empty = makeLabel(content, 'Empty', isHome ? '暂时没有住户' : '暂时没有员工', UI_FONT.body, UI_COLOR.textDim, W);
-            empty.node.setPosition(0, y - listH / 2, 0);
+            const text = !b ? '暂无经营数据' : (isHome ? '暂时没有住户' : '暂时没有员工');
+            const empty = makeLabel(content, 'Empty', text, UI_FONT.body, UI_COLOR.textDim, W);
+            empty.node.setPosition(0, y - Math.min(listH, 160) / 2, 0);
             list.node.active = false;
             return;
         }
 
         const rows: ListRow[] = people.map((r) => ({
-            height: 64,
+            height: 76,
             build: (row) => this.buildPersonRow(row, r),
         }));
         list.setRows(rows);
     }
 
     /**
-     * 「换朝向」按钮：原来「空手点一下就转」的交互，现在收到详情面板里。
-     *
-     * 位置在卡片标题行、关闭按钮左边。不占内容区，名单不会因为它少一行。
-     * 行道树、广场这类只有一个朝向的建筑，点了会返回 false —— 按钮变灰并提示一句，
-     * 不让玩家反复点却没反应。
+     * 「换朝向」按钮：标题行、关闭按钮左边。
+     * 行道树、广场这类只有一个朝向的，点了返回 false —— 按钮变灰改字，不让玩家反复点却没反应。
      */
     private buildFacingButton(): void {
         const card = this.card;
@@ -135,22 +134,15 @@ export class BuildingPanel extends Panel {
         if (!card || !placed) return;
         // 贴地的（马路、桥）没有门面，没有朝向可换
         if (placed.def.flat) return;
+        const head = card.getChildByName('Header');
+        if (!head) return;
 
-        const cw = card.getComponent(UITransform)!.width;
-        const ch = card.getComponent(UITransform)!.height;
-        const W = 108;
-        const H = 40;
-
-        const btn = makePill(card, 'FacingBtn', '换朝向', W, H, () => {
-            this.toggleFacing();
-        }, this);
-        btn.node.setPosition(cw / 2 - 60 - W / 2 - 10, ch / 2 - 46, 0);
-        // 类别小字往左让出按钮的位置，否则两个会叠在一起
-        if (this.subtitleLabel) {
-            this.subtitleLabel.node.setPosition(cw / 2 - 60 - W - 22, ch / 2 - 46, 0);
-        }
-        this._facingBtnLabel = btn.label;
-        this._facingPill = btn;
+        const cw = this.cardW;
+        const W = 148, H = 52;
+        const btn = makeButton(head, 'FacingBtn', '换朝向', W, H, 'secondary', () => this.toggleFacing(), 'rotate');
+        // 关闭按钮中心在 cw/2 - PAD_X - 28 + 8，半径 28
+        btn.node.setPosition(cw / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
+        this._facingBtn = btn;
     }
 
     private toggleFacing(): void {
@@ -161,68 +153,29 @@ export class BuildingPanel extends Panel {
             if (this._onHint) this._onHint(`已换朝向：${placed.def.name}`);
             return;
         }
-        // 没有第二个朝向（行道树、广场只有一张图）：按钮变灰并改字，别让玩家反复点却没反应
-        if (this._facingBtnLabel) this._facingBtnLabel.string = '只有一个朝向';
-        if (this._facingPill) this._facingPill.setActive(false);
+        if (this._facingBtn) {
+            this._facingBtn.label.string = '只有一个朝向';
+            this._facingBtn.setEnabled(false);
+        }
         if (this._onHint) this._onHint(`${placed.def.name} 没有第二个朝向`);
     }
 
-    /** 住户：住在这里的居民 */
-    private collectResidents(b: BuildingSim | null): Resident[] {
+    /** 住户 / 员工 */
+    private collect(b: BuildingSim | null, kind: 'home' | 'work'): Resident[] {
         const sim = this._sim;
         if (!sim || !b) return [];
+        const ids = kind === 'home' ? b.residentIds : b.workerIds;
         const out: Resident[] = [];
-        for (const id of b.residentIds) {
+        for (const id of ids) {
             const r = sim.resident(id);
             if (r) out.push(r);
         }
         return out;
     }
 
-    /** 员工：在这里上班的居民 */
-    private collectStaff(b: BuildingSim | null): Resident[] {
-        const sim = this._sim;
-        if (!sim || !b) return [];
-        const out: Resident[] = [];
-        for (const id of b.workerIds) {
-            const r = sim.resident(id);
-            if (r) out.push(r);
-        }
-        return out;
-    }
-
-    /** 一行数字，返回下一行的 y */
-    private statLine(parent: Node, y: number, text: string, color: Color): number {
-        const W = parent.getComponent(UITransform)!.width;
-        const label = makeLabel(parent, 'Stat', text, UI_FONT.body, color, W);
-        label.node.setPosition(0, y, 0);
-        return y - 34;
-    }
-
-    /** 名单一行：名字（可点）· 年龄 · 工作 */
+    /** 名单一行：头像 · 名字 · 年龄工作 · 心情 */
     private buildPersonRow(row: Node, r: Resident): void {
-        const W = row.getComponent(UITransform)!.width;
-
-        // 隔一行一条淡底色，长名单不容易看串行
-        if (row.parent && (row.getSiblingIndex() % 2 === 0)) {
-            const g = row.addComponent(Graphics);
-            g.fillColor = new Color(255, 255, 255, 12);
-            g.rect(-W / 2, -32, W, 64);
-            g.fill();
-        }
-
-        const name = makeLabel(row, 'Name', r.name, UI_FONT.body, UI_COLOR.gold, 150);
-        name.node.setPosition(-W / 2 + 85, 0, 0);
-
-        const job = r.jobTitle ? r.jobTitle : (r.age >= 18 && r.age < 60 ? '待业' : '—');
-        const info = makeLabel(row, 'Info', `${r.age} 岁　${job}`, UI_FONT.small, UI_COLOR.textDim, W - 190);
-        info.node.setPosition(20, 0, 0);
-        info.horizontalAlign = Label.HorizontalAlign.LEFT;
-        info.node.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
-
-        // 整行可点，比只点名字好按（手机上一行 64 高，够手指了）
-        row.on(Node.EventType.TOUCH_END, () => {
-            if (this._onResidentTap) this._onResidentTap(r.id);
-        }, this);
+        buildPersonRow(row, r, this._list, this._onResidentTap,
+            { caption: '心情', value: `${Math.round(r.mood)}`, color: moodColor(r.mood) });
     }
 }

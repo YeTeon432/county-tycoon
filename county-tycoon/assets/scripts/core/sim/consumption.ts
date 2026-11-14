@@ -80,6 +80,8 @@ export function consumeForResident(
     r: Resident,
     budget: number,
     ctx: ConsumptionCtx,
+    /** 这个人的"附近"半径（serviceRadius × 交通倍率，DESIGN 11.2）；不传用 serviceRadius */
+    radius?: number,
 ): ConsumptionResult {
     const cfg = ctx.cfg.economy;
     const result: ConsumptionResult = { spent: 0, missed: 0 };
@@ -89,7 +91,7 @@ export function consumeForResident(
     for (const demand of demands) {
         const amount = budget * cfg.demandWeight[demand];
         if (amount <= 0.5) continue;
-        const shops = reachableShops(ctx, r.homeId, demand, cfg.serviceRadius);
+        const shops = reachableShops(ctx, r.homeId, demand, radius ?? cfg.serviceRadius);
         if (!shops.length) {
             result.missed++;
             continue;

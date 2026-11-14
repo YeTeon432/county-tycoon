@@ -1,4 +1,4 @@
-import { BuildingEcon, Demand, Education, JobSlot, TownLevel } from './types';
+import { BuildingEcon, Demand, Education, JobSlot, TownLevel, Vehicle } from './types';
 
 /**
  * 模拟层的配置读取（收 economy.json + names.json 的原始 JSON，转成强类型）。
@@ -54,7 +54,39 @@ export interface EconomyConfig {
     /** 居民日志最多留几条 */
     logLimit: number;
     residents: ResidentTuning;
+    /** 交通工具（DESIGN 11，economy.json: vehicles） */
+    vehicles: VehicleConfig;
 }
+
+/** 一种交通工具的数值（DESIGN 11.1 / 11.2） */
+export interface VehicleTier {
+    /** 价格（从储蓄扣，算进对应工厂的产值） */
+    price: number;
+    /** 县里要有这种厂才能买（建筑 id）；walk 为 '' */
+    factory: string;
+    /** 储蓄 ≥ 价格 × 这个数才买 */
+    savingsRatio: number;
+    /** 月薪门槛 */
+    minSalary: number;
+    /** 满足条件时每月买的概率 */
+    chance: number;
+    /** 交通倍率：消费半径、上班舒适距离 ×，找工作的通勤惩罚 ÷ */
+    range: number;
+    /** 每月心情目标加成 */
+    mood: number;
+    /** 每月油费（从可支配收入扣，不进财政） */
+    fuel: number;
+}
+
+export interface VehicleConfig {
+    /** 买车的年龄范围（含两端），还要有工作 */
+    minAge: number;
+    maxAge: number;
+    tiers: Record<Vehicle, VehicleTier>;
+}
+
+/** 从差到好，只往上换 */
+export const VEHICLE_ORDER: Vehicle[] = ['walk', 'ebike', 'moto', 'car'];
 
 export interface ResidentTuning {
     startSavings: number;
@@ -181,7 +213,7 @@ const DEFAULT_ECONOMY: EconomyConfig = {
     leaveMonths: 3,
     unemployedLeaveMonths: 6,
     immigrationRate: 0.6,
-    startFunds: 50000,
+    startFunds: 100000,
     bailout: 8000,
     taxRange: { min: 0.02, max: 0.3 },
     maxEducationWithSchool: 3,
@@ -206,7 +238,42 @@ const DEFAULT_ECONOMY: EconomyConfig = {
         crowdRatio: 1,
         moodDrift: 0,
     },
+    vehicles: {
+        minAge: 18,
+        maxAge: 65,
+        tiers: {
+            walk: { price: 0, factory: '', savingsRatio: 0, minSalary: 0, chance: 0, range: 1, mood: 0, fuel: 0 },
+            ebike: { price: 3000, factory: 'moto-factory', savingsRatio: 1.5, minSalary: 0, chance: 0.015, range: 1.5, mood: 3, fuel: 0 },
+            moto: { price: 8000, factory: 'moto-factory', savingsRatio: 1.5, minSalary: 3000, chance: 0.01, range: 1.7, mood: 3, fuel: 0 },
+            car: { price: 40000, factory: 'car-factory', savingsRatio: 1.2, minSalary: 4500, chance: 0.008, range: 2.2, mood: 5, fuel: 300 },
+        },
+    },
 };
+
+function parseVehicles(raw: any, d: VehicleConfig): VehicleConfig {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const types = (src.types && typeof src.types === 'object' ? src.types : {}) as Record<string, any>;
+    const tiers = {} as Record<Vehicle, VehicleTier>;
+    for (const v of VEHICLE_ORDER) {
+        const t = types[v] ?? {};
+        const def = d.tiers[v];
+        tiers[v] = {
+            price: Math.max(0, Math.round(num(t.price, def.price))),
+            factory: v === 'walk' ? '' : (typeof t.factory === 'string' && t.factory ? t.factory : def.factory),
+            savingsRatio: Math.max(0, num(t.savingsRatio, def.savingsRatio)),
+            minSalary: Math.max(0, num(t.minSalary, def.minSalary)),
+            chance: v === 'walk' ? 0 : clamp01(t.chance, def.chance),
+            range: Math.max(0.1, num(t.range, def.range)),
+            mood: num(t.mood, def.mood),
+            fuel: Math.max(0, num(t.fuel, def.fuel)),
+        };
+    }
+    return {
+        minAge: num(src.minAge, d.minAge),
+        maxAge: num(src.maxAge, d.maxAge),
+        tiers,
+    };
+}
 
 const DEFAULT_NAMES: NameConfig = {
     surnames: ['王', '李', '张', '刘', '陈', '杨', '赵', '黄', '周', '吴'],
@@ -225,6 +292,8 @@ interface EconomyJson {
     buildings?: Array<Record<string, unknown> & { id?: string }>;
     /** 全局参数放在 tuning 里，和 buildings 分开，读起来清楚 */
     tuning?: Record<string, unknown>;
+    /** 交通工具（DESIGN 11） */
+    vehicles?: unknown;
 }
 
 export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfig {
@@ -293,6 +362,7 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         studentsPerTeacher: Math.max(1, num(t.studentsPerTeacher, d.studentsPerTeacher)),
         logLimit: Math.max(1, Math.floor(num(t.logLimit, d.logLimit))),
         residents: residentTuning,
+        vehicles: parseVehicles(src.vehicles, d.vehicles),
     };
 }
 

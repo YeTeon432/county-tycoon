@@ -1,5 +1,5 @@
 import { SimApi, SimSummary } from './SimApi';
-import { SimConfig } from './config';
+import { SimConfig, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { TownView } from './townView';
 import { assignJob, clearJob, openingsFor, staffing, totalPositions, Opening } from './labor';
@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel,
+    BuildingEcon, BuildingSim, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -40,14 +40,25 @@ export class Simulation implements SimApi {
     private _events: LifeEvent[] = [];
     /** 沿路距离缓存，每月清一次 */
     private readonly _distCache = new Map<string, number>();
-    /** 每个家能覆盖到哪几类消费，每月清一次 */
-    private readonly _homeCoverage = new Map<number, Set<Demand>>();
+    /** 每个家（按消费半径）能覆盖到哪几类消费，每月清一次。key = `uid:半径` */
+    private readonly _homeCoverage = new Map<string, Set<Demand>>();
     /** 每个家周围的环境分，每月清一次 */
     private readonly _homeEnv = new Map<number, number>();
 
-    constructor(cfg: SimConfig, town: TownView, opts?: { seed?: number; opening?: boolean }) {
+    /**
+     * 新游戏：`new Simulation(cfg, town, { seed })`。
+     * 读档：`new Simulation(cfg, town, { state: save.sim })`——直接接管这份 SimState（原地归一化，
+     * 补上旧存档缺的字段），随机数从 `state.rngState` 接着算，不再登记开局建筑和开局居民。
+     */
+    constructor(cfg: SimConfig, town: TownView, opts?: { seed?: number; opening?: boolean; state?: SimState }) {
         this._cfg = cfg;
         this._town = town;
+        if (opts?.state) {
+            this.state = normalizeSimState(opts.state, cfg);
+            this._rng = { state: (this.state.rngState >>> 0) || 1 };
+            this.syncRng();
+            return;
+        }
         const seed = opts?.seed ?? 20260101;
         this._rng = rngFromSeed(seed);
         this.state = {
@@ -91,7 +102,7 @@ export class Simulation implements SimApi {
         this.payWages(world);                     // 1. 上班领工资
         this.runConsumption(world);               // 2. 消费
         const { income, expense } = this.settleFinance(world);  // 3. 交租交税、财政支出
-        this.updateResidents(world);              // 4. 心情、找工作、结婚生子、搬走
+        this.updateResidents(world, income);      // 4. 心情、找工作、买车、结婚生子、搬走
         this.assessBuildings(world);              //    店铺口碑
         this.runImmigration(world);               // 5. 迁入
         this.updateLevel();                       //    城镇等级
@@ -178,6 +189,7 @@ export class Simulation implements SimApi {
             avgSalary: paid.length ? Math.round(paid.reduce((a, p) => a + p.salary, 0) / paid.length) : 0,
             avgSavings: Math.round(ps.reduce((a, p) => a + p.savings, 0) / n),
             avgMood: Math.round(ps.reduce((a, p) => a + p.mood, 0) / n),
+            vehicles: ps.filter((p) => p.vehicle !== 'walk').length,
         };
     }
 
@@ -322,9 +334,15 @@ export class Simulation implements SimApi {
         for (const r of this.state.residents) {
             // 孩子不自己花钱（DESIGN 2.2：算进家庭开销）
             if (r.age < cfg.residents.workMinAge) continue;
-            const budget = r.salary * cfg.spendRate + Math.max(0, r.savings) * cfg.savingsSpendRate;
+            let budget = r.salary * cfg.spendRate + Math.max(0, r.savings) * cfg.savingsSpendRate;
+            // 汽车油费：先从可支配收入里扣，钱流出县外，不进财政（DESIGN 11.1）
+            const fuel = Math.min(this.tier(r).fuel, Math.max(0, r.savings));
+            if (fuel > 0) {
+                r.savings -= fuel;
+                budget -= fuel;
+            }
             if (budget <= 0) continue;
-            const res = consumeForResident(r, budget, ctx);
+            const res = consumeForResident(r, budget, ctx, this.serviceRadiusOf(r));
             r.savings -= res.spent;
             this._missed.set(r.id, res.missed);
         }
@@ -417,7 +435,7 @@ export class Simulation implements SimApi {
     }
 
     /** 4. 居民自己的状态 */
-    private updateResidents(world: World): void {
+    private updateResidents(world: World, income: MonthlyReport['income']): void {
         const s = this.state;
         const cfg = this._cfg.economy;
         const rt = cfg.residents;
@@ -434,6 +452,9 @@ export class Simulation implements SimApi {
                 if (s.month % 12 + 1 === r.birthMonth) this.maybeHopJob(r, world);
             }
         }
+
+        // 买车（DESIGN 11.1）：放在心情前面，买了当月就有心情加成
+        this.buyVehicles(income);
 
         // 心情
         for (const r of s.residents) r.mood = this.nextMood(r, world);
@@ -575,7 +596,7 @@ export class Simulation implements SimApi {
             savings: Math.round(this._cfg.economy.residents.startSavings * (0.3 + nextFloat(this._rng))),
             spouseId: null, parentIds: [], childIds: [],
             mood: 60, education: edu as 0 | 1 | 2 | 3,
-            monthsUnemployed: 0, arrivedMonth: s.month, log: [],
+            monthsUnemployed: 0, arrivedMonth: s.month, vehicle: 'walk', log: [],
         };
         this.log(r, '来到县城');
         return r;
@@ -592,14 +613,18 @@ export class Simulation implements SimApi {
             if (r.jobId !== null) target += 12;
             else target -= Math.min(25, 8 + r.monthsUnemployed * 2);
         }
-        // 通勤
+        // 通勤：有车的人能接受的距离更远（DESIGN 11.2）
+        const tier = this.tier(r);
         if (r.jobId !== null && r.homeId !== null) {
             const d = this.distance(r.homeId, r.jobId);
-            if (isFinite(d) && d > cfg.commuteComfort) target -= Math.min(15, (d - cfg.commuteComfort) * 2.5);
+            const comfort = cfg.commuteComfort * tier.range;
+            if (isFinite(d) && d > comfort) target -= Math.min(15, (d - comfort) * 2.5);
         }
-        // 家附近店铺齐不齐
+        // 有车心情好
+        target += tier.mood;
+        // 家附近店铺齐不齐（按自己的交通工具算"附近"）
         if (r.homeId !== null) {
-            const cover = this.homeCoverage(r.homeId, world);
+            const cover = this.homeCoverage(r.homeId, world, this.serviceRadiusOf(r));
             target += cover.size * 3;
             if (cover.size === 0) target -= 8;
         } else {
@@ -627,11 +652,11 @@ export class Simulation implements SimApi {
         return clamp(0, 100, r.mood + (target - r.mood) * 0.3);
     }
 
-    private homeCoverage(homeUid: number, world: World): Set<Demand> {
-        const cached = this._homeCoverage.get(homeUid);
+    private homeCoverage(homeUid: number, world: World, radius: number): Set<Demand> {
+        const key = `${homeUid}:${radius}`;
+        const cached = this._homeCoverage.get(key);
         if (cached) return cached;
         const set = new Set<Demand>();
-        const radius = this._cfg.economy.serviceRadius;
         for (const demand of ['food', 'daily', 'fun', 'other'] as Demand[]) {
             const shops = world.shopsByDemand.get(demand);
             if (!shops) continue;
@@ -640,7 +665,7 @@ export class Simulation implements SimApi {
                 if (isFinite(d) && d <= radius) { set.add(demand); break; }
             }
         }
-        this._homeCoverage.set(homeUid, set);
+        this._homeCoverage.set(key, set);
         return set;
     }
 
@@ -775,7 +800,8 @@ export class Simulation implements SimApi {
     private bestJobFor(r: Resident, world: World): Opening | null {
         const openings = openingsFor(r, this.state.buildings, (uid) => this.econOfUid(uid), world.residentsById);
         if (!openings.length) return null;
-        const penalty = this._cfg.economy.residents.commutePenalty;
+        // 有车的人不怕远：通勤惩罚 ÷ 交通倍率（DESIGN 11.2）
+        const penalty = this._cfg.economy.residents.commutePenalty / this.tier(r).range;
         let best: Opening | null = null;
         let bestScore = -Infinity;
         for (const o of openings) {
@@ -819,6 +845,79 @@ export class Simulation implements SimApi {
         this.log(r, `离开 ${old ? this.buildingName(old.defId) : '原来的工作'}`);
         clearJob(r, old);
         this.takeJob(r, best);
+    }
+
+    // ───────────────────────────── 交通工具（DESIGN 11） ─────────────────────────────
+
+    private tier(r: Resident): VehicleTier {
+        const tiers = this._cfg.economy.vehicles.tiers;
+        return tiers[r.vehicle] ?? tiers.walk;
+    }
+
+    /** 这个人的"附近"有多远：serviceRadius × 交通倍率 */
+    private serviceRadiusOf(r: Resident): number {
+        return this._cfg.economy.serviceRadius * this.tier(r).range;
+    }
+
+    /**
+     * 每月买车：18～65 岁、有工作；县里有对应工厂；储蓄、月薪够；只往上换。
+     * 同时满足几档只看最好的那档，按那档的概率掷一次。
+     * 车钱从储蓄扣，算进最近一座对应工厂的产值，企业税当月入账。
+     */
+    private buyVehicles(income: MonthlyReport['income']): void {
+        const s = this.state;
+        const vc = this._cfg.economy.vehicles;
+        const factories = new Map<string, BuildingSim[]>();
+        for (const b of s.buildings) {
+            const list = factories.get(b.defId);
+            if (list) list.push(b); else factories.set(b.defId, [b]);
+        }
+        const hasFactory = (v: Vehicle) => {
+            const id = vc.tiers[v].factory;
+            return !!id && (factories.get(id)?.length ?? 0) > 0;
+        };
+        if (!VEHICLE_ORDER.some((v) => v !== 'walk' && hasFactory(v))) return;
+
+        for (const r of s.residents) {
+            if (r.age < vc.minAge || r.age > vc.maxAge || r.jobId === null) continue;
+            const current = VEHICLE_ORDER.indexOf(r.vehicle);
+            let pick: Vehicle | null = null;
+            for (let i = VEHICLE_ORDER.length - 1; i > current; i--) {
+                const v = VEHICLE_ORDER[i];
+                const t = vc.tiers[v];
+                if (!hasFactory(v)) continue;
+                if (r.savings < t.price * t.savingsRatio) continue;
+                if (r.salary < t.minSalary) continue;
+                pick = v;
+                break;
+            }
+            if (!pick) continue;
+            const t = vc.tiers[pick];
+            if (!chance(this._rng, t.chance)) continue;
+
+            const factory = this.nearestOf(r.homeId, factories.get(t.factory)!);
+            r.savings -= t.price;
+            r.vehicle = pick;
+            const tax = Math.round(t.price * s.finance.taxRate.industry);
+            factory.lastRevenue += t.price;
+            factory.lastTax += tax;
+            income.industry += tax;
+            s.finance.funds += tax;
+            const name = VEHICLE_NAME[pick];
+            this.log(r, `买了一辆${name}`);
+            this.event(`${r.name}买了一辆${name}`);
+        }
+    }
+
+    /** 离家沿路最近的一座；都走不到（或没家）就取 uid 最小的那座 */
+    private nearestOf(homeUid: number | null, list: BuildingSim[]): BuildingSim {
+        let best = list[0];
+        let bestD = Infinity;
+        for (const b of list) {
+            const d = homeUid === null ? Infinity : this.distance(homeUid, b.uid);
+            if (d < bestD || (d === bestD && b.uid < best.uid)) { best = b; bestD = d; }
+        }
+        return best;
     }
 
     // ───────────────────────────── 住房 / 岗位 ─────────────────────────────
@@ -953,7 +1052,36 @@ const DEF_NAMES: Record<string, string> = {
     workshop: '小作坊', textile: '纺织厂', 'food-factory': '食品厂', electronics: '电子厂',
     center: '发展中心', school: '学校', clinic: '卫生院', police: '派出所', bank: '银行',
     bridge: '桥', port: '港口', mine: '矿场', plaza: '广场', tree: '行道树',
+    'moto-factory': '摩托车厂', 'car-factory': '汽车厂',
 };
+
+const VEHICLE_NAME: Record<Vehicle, string> = {
+    walk: '', ebike: '电动车', moto: '摩托车', car: '汽车',
+};
+
+const VEHICLES: Vehicle[] = ['walk', 'ebike', 'moto', 'car'];
+
+/**
+ * 读档时把旧存档补齐（原地改，返回同一份对象）。不改 SaveGame.ts，迁移放在进模拟层的这一步：
+ *   - 居民缺 `vehicle`（D022 之前的存档）或者是认不得的值 → 'walk'
+ *   - 缺 log / parentIds / childIds 的补空数组
+ */
+export function normalizeSimState(state: SimState, cfg?: SimConfig): SimState {
+    if (!Array.isArray(state.residents)) state.residents = [];
+    if (!Array.isArray(state.buildings)) state.buildings = [];
+    for (const r of state.residents) {
+        if (VEHICLES.indexOf(r.vehicle) < 0) r.vehicle = 'walk';
+        if (!Array.isArray(r.log)) r.log = [];
+        if (!Array.isArray(r.parentIds)) r.parentIds = [];
+        if (!Array.isArray(r.childIds)) r.childIds = [];
+    }
+    if (typeof state.nextResidentId !== 'number') {
+        state.nextResidentId = state.residents.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+    }
+    if (typeof state.rngState !== 'number') state.rngState = (state.seed >>> 0) || 1;
+    if (cfg && state.finance && !state.finance.taxRate) state.finance.taxRate = { ...cfg.economy.taxRate };
+    return state;
+}
 
 const LEVEL_NAME: Record<TownLevel, string> = {
     village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县',

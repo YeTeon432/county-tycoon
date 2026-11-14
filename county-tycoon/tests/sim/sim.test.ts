@@ -4,6 +4,9 @@ import { buildWorld } from '../../assets/scripts/core/sim/world';
 import { staffing, positionsOf, openingsFor } from '../../assets/scripts/core/sim/labor';
 import { parseEconomy, parseNames, makeSimConfig } from '../../assets/scripts/core/sim/config';
 import { Simulation } from '../../assets/scripts/core/sim/Simulation';
+import { SimConfig } from '../../assets/scripts/core/sim/config';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { basicTown, loadConfig, MapBuilder } from './fixtures';
 import { eq, inRange, near, ok, report, suite, test } from './harness';
 
@@ -491,6 +494,193 @@ suite('Simulation：迁移与人生', () => {
         for (let i = 0; i < 120; i++) sim.stepMonth();
         eq(sim.state.residents.filter((r) => elderIds.indexOf(r.id) >= 0).length, 0, '老人应当陆续离世');
         ok(sim.state.residents.length > 0, '空出来的房和岗会有新人来');
+    });
+});
+
+// ───────────────────────── 交通工具（DESIGN 11） ─────────────────────────
+/** 真实配置，但把买车概率改成 1，方便断言 */
+function sureBuyConfig(): SimConfig {
+    const root = join(process.cwd(), 'assets/resources/config');
+    const economy = JSON.parse(readFileSync(join(root, 'economy.json'), 'utf8'));
+    const names = JSON.parse(readFileSync(join(root, 'names.json'), 'utf8'));
+    for (const k of ['ebike', 'moto', 'car']) economy.vehicles.types[k].chance = 1;
+    return makeSimConfig(economy, names);
+}
+
+/** 一条路 + 三栋自建房 + 早餐铺 + 指定的厂；塞 n 个有钱的成年人 */
+function vehicleTown(cfg: SimConfig, factories: string[], n = 4, savings = 50000, seed = 7) {
+    const m = new MapBuilder(30, 10);
+    m.hRoad(0, 25, 0);
+    m.build('house', 0, 1); m.build('house', 1, 1); m.build('house', 2, 1);
+    m.build('breakfast', 3, 1);
+    const uids: number[] = [];
+    let x = 5;
+    for (const f of factories) { uids.push(m.build(f, x, 1, 2, 2)); x += 3; }
+    const sim = new Simulation(cfg, m.view(), { seed, opening: false });
+    for (let i = 0; i < n; i++) {
+        const r = (sim as any).createResident(null, i % 2 ? 'F' : 'M', 30);
+        r.savings = savings;
+        r.education = 1;
+        sim.state.residents.push(r);
+    }
+    (sim as any).assignHomes(sim.state.residents);
+    (sim as any).fillVacancies((sim as any).refreshWorld());
+    return { sim, factories: uids };
+}
+
+suite('交通工具', () => {
+    test('配置读进来了：startFunds 10 万、四档交通工具', () => {
+        const cfg = loadConfig();
+        eq(cfg.economy.startFunds, 100000);
+        eq(cfg.economy.vehicles.tiers.car.price, 40000);
+        eq(cfg.economy.vehicles.tiers.moto.factory, 'moto-factory');
+        eq(cfg.economy.vehicles.tiers.walk.range, 1);
+        ok(cfg.building('moto-factory') !== null && cfg.building('car-factory') !== null, '两座新厂有经营数据');
+        eq(parseEconomy(null).vehicles.tiers.ebike.price, 3000, '没写 vehicles 段时用默认值');
+    });
+
+    test('新居民都是步行', () => {
+        const cfg = loadConfig();
+        const { view } = basicTown(cfg);
+        const sim = new Simulation(cfg, view, { seed: 1 });
+        for (const r of sim.state.residents) eq(r.vehicle, 'walk');
+        eq(sim.summary().vehicles, 0);
+    });
+
+    test('县里没有车厂：再有钱也不买车', () => {
+        const cfg = sureBuyConfig();
+        const { sim } = vehicleTown(cfg, ['workshop'], 4, 200000);
+        for (let i = 0; i < 24; i++) sim.stepMonth();
+        for (const r of sim.state.residents) eq(r.vehicle, 'walk', r.name);
+        eq(sim.summary().vehicles, 0);
+    });
+
+    test('有摩托车厂、有钱有工作：买最好的那档，钱进工厂产值', () => {
+        const cfg = sureBuyConfig();
+        const { sim, factories } = vehicleTown(cfg, ['moto-factory'], 4, 50000);
+        const fundsBefore = sim.state.finance.funds;
+        const rep = sim.stepMonth();
+        const buyers = sim.state.residents.filter((r) => r.vehicle !== 'walk');
+        ok(buyers.length >= 4, `应当都买了，实际 ${buyers.length}`);
+        for (const r of buyers) {
+            eq(r.vehicle, 'moto', `${r.name} 月薪 ${r.salary} 够摩托车，应当直接买摩托`);
+            ok(r.log.some((e) => e.text === '买了一辆摩托车'), '个人日志');
+        }
+        ok(rep.events.some((e) => /买了一辆摩托车$/.test(e.text)), '大事记');
+        const f = sim.building(factories[0])!;
+        const econ = cfg.building('moto-factory')!;
+        const extra = f.lastRevenue - 8000 * buyers.length;
+        ok(extra > 0 && extra <= econ.capacity * econ.price, `产值 = 生产 + 车款：${f.lastRevenue}`);
+        ok(rep.income.industry >= Math.round(8000 * buyers.length * sim.state.finance.taxRate.industry), '企业税照收');
+        eq(sim.summary().vehicles, buyers.length);
+        ok(isFinite(sim.state.finance.funds) && sim.state.finance.funds !== fundsBefore);
+    });
+
+    test('月薪不到 3000 只能买电动车', () => {
+        const cfg = sureBuyConfig();
+        // 小作坊 2600 元；摩托车厂只当"县里有厂"，岗位占满不让人进
+        const { sim, factories } = vehicleTown(cfg, ['workshop', 'moto-factory'], 3, 50000);
+        const moto = sim.building(factories[1])!;
+        for (const r of sim.state.residents) {
+            if (r.jobId === moto.uid) { moto.workerIds = moto.workerIds.filter((id) => id !== r.id); r.jobId = factories[0]; r.salary = 2600; r.jobTitle = '作坊工'; }
+        }
+        (sim as any).buyVehicles({ business: 0, industry: 0, income: 0, land: 0, investment: 0 });
+        for (const r of sim.state.residents) if (r.jobId !== null) eq(r.vehicle, 'ebike', r.name);
+    });
+
+    test('只往上换，不会降级', () => {
+        const cfg = sureBuyConfig();
+        const { sim } = vehicleTown(cfg, ['moto-factory'], 4, 50000);
+        sim.state.residents[0].vehicle = 'car';
+        for (let i = 0; i < 24; i++) sim.stepMonth();
+        const r0 = sim.resident(sim.state.residents[0].id);
+        if (r0) eq(r0.vehicle, 'car', '有汽车的人还是汽车（汽车厂没有，也不会换成摩托）');
+        for (const r of sim.state.residents) ok(r.vehicle !== 'ebike' || r.salary < 3000, '月薪够的人不会停在电动车');
+    });
+
+    test('有汽车厂、高薪：买汽车', () => {
+        const cfg = sureBuyConfig();
+        const { sim } = vehicleTown(cfg, ['car-factory'], 3, 100000);
+        const r = sim.state.residents[0];
+        r.salary = 6800; r.education = 3;
+        (sim as any).buyVehicles({ business: 0, industry: 0, income: 0, land: 0, investment: 0 });
+        eq(r.vehicle, 'car');
+        eq(r.savings, 100000 - cfg.economy.vehicles.tiers.car.price);
+    });
+
+    test('汽车每月油费从可支配收入扣', () => {
+        const cfg = loadConfig();
+        // 没房没店没岗：每月只剩油费在动
+        const make = (vehicle: 'walk' | 'car') => {
+            const m = new MapBuilder(10, 10);
+            m.hRoad(0, 5, 0);
+            const sim = new Simulation(cfg, m.view(), { seed: 11, opening: false });
+            const r = (sim as any).createResident(null, 'M', 30);
+            r.savings = 10000;
+            r.vehicle = vehicle;
+            sim.state.residents.push(r);
+            sim.stepMonth();
+            return r.savings as number;
+        };
+        const walk = make('walk');
+        const car = make('car');
+        near(walk - car, cfg.economy.vehicles.tiers.car.fuel, 1e-6, '差额 = 油费');
+    });
+
+    test('旧存档缺 vehicle：读档时补成 walk，能接着跑', () => {
+        const cfg = loadConfig();
+        const a = basicTown(cfg);
+        const s1 = new Simulation(cfg, a.view, { seed: 9 });
+        for (let i = 0; i < 12; i++) s1.stepMonth();
+        const raw = JSON.parse(JSON.stringify(s1.state));
+        for (const r of raw.residents) delete r.vehicle;
+        const s2 = new Simulation(cfg, basicTown(cfg).view, { state: raw });
+        eq(s2.state.residents.length, s1.state.residents.length, '人没丢');
+        for (const r of s2.state.residents) eq(r.vehicle, 'walk');
+        eq(s2.state.rngState, s1.state.rngState, '随机数接着算');
+        eq(s2.state.month, 12);
+        for (let i = 0; i < 12; i++) s2.stepMonth();
+        eq(s2.state.month, 24);
+        ok(s2.summary().population > 0);
+    });
+
+    test('读档后接着跑和不存档结果一致（12 个月内）', () => {
+        const cfg = loadConfig();
+        const s1 = new Simulation(cfg, basicTown(cfg).view, { seed: 21 });
+        for (let i = 0; i < 6; i++) s1.stepMonth();
+        const s2 = new Simulation(cfg, basicTown(cfg).view, { state: JSON.parse(JSON.stringify(s1.state)) });
+        for (let i = 0; i < 6; i++) { s1.stepMonth(); s2.stepMonth(); }
+        eq(JSON.stringify(s2.state), JSON.stringify(s1.state));
+    });
+
+    test('有车厂时同种子可复现', () => {
+        const cfg = loadConfig();
+        const a = vehicleTown(cfg, ['moto-factory'], 6, 30000, 33).sim;
+        const b = vehicleTown(cfg, ['moto-factory'], 6, 30000, 33).sim;
+        for (let i = 0; i < 60; i++) eq(JSON.stringify(a.stepMonth()), JSON.stringify(b.stepMonth()), `第 ${i} 月`);
+        eq(JSON.stringify(a.state), JSON.stringify(b.state));
+        ok(a.summary().vehicles > 0, `5 年里应当有人买车，实际 ${a.summary().vehicles}`);
+    });
+
+    test('有车的人消费半径更大', () => {
+        const cfg = loadConfig();
+        const m = new MapBuilder(40, 6);
+        m.hRoad(0, 35, 0);
+        const house = m.build('house', 0, 1);
+        const shop = m.build('breakfast', 10, 1); // 步行 8 格够不着，电动车 12 格够得着
+        const run = (v: 'walk' | 'ebike') => {
+            const sim = new Simulation(cfg, m.view(), { seed: 2, opening: false });
+            const r = (sim as any).createResident(null, 'M', 30);
+            r.savings = 20000; r.vehicle = v;
+            sim.state.residents.push(r);
+            (sim as any).assignHomes(sim.state.residents);
+            sim.stepMonth();
+            return sim.building(shop)!.lastCustomers;
+        };
+        const d = m.view().roadDistance(house, shop);
+        ok(d > cfg.economy.serviceRadius && d <= cfg.economy.serviceRadius * 1.5, `距离 ${d} 要落在 8～12 之间`);
+        eq(run('walk'), 0, '步行够不着');
+        ok(run('ebike') > 0, '骑电动车能去');
     });
 });
 

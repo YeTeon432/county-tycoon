@@ -1,10 +1,11 @@
-import { _decorator, Color, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, Color, Label, Node, UITransform } from 'cc';
 import { SimApi } from '../core/sim/SimApi';
 import { Resident } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
-import { formatNumber, makeLabel, makePill, moodColor, moodLabel, UI_COLOR, UI_FONT } from './UiTheme';
+import { buildPersonRow } from './PersonRow';
+import { formatMoney, makeLabelLeft, makePill, makeStatTile, moodColor, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -45,7 +46,7 @@ export class ResidentListPanel extends Panel {
     private _onResidentTap: ((id: number) => void) | null = null;
 
     /** 总览比建筑详情高一些：名单长，要一屏看到更多人 */
-    protected cardH = 940;
+    protected cardH = 1140;
 
     private _sortPills: { key: SortKey; setActive: (on: boolean) => void }[] = [];
     private _filterPills: { key: FilterKey; setActive: (on: boolean) => void }[] = [];
@@ -70,60 +71,56 @@ export class ResidentListPanel extends Panel {
         const sim = this._sim;
         const content = this.content;
         if (!sim || !content) return;
-        const W = content.getComponent(UITransform)!.width;
+        const W = this.contentW;
+        let y = this.contentTop;
 
-        let y = content.getComponent(UITransform)!.height / 2 - 10;
-
-        // ── 汇总 ──
+        // ── 汇总：两排数值格 ──
         const sum = sim.summary();
         const rate = sum.workingAge > 0 ? Math.round((sum.employed / sum.workingAge) * 100) : 0;
-        y = this.summaryLine(content, W, y, `人口 ${sum.population}`, `就业率 ${rate}%`);
-        y = this.summaryLine(content, W, y, `平均工资 ¥${formatNumber(sum.avgSalary)}`, `平均储蓄 ¥${formatNumber(sum.avgSavings)}`);
-        y = this.summaryLine(content, W, y, `平均心情 ${Math.round(sum.avgMood)} 分（${moodLabel(sum.avgMood)}）`, '');
+        const carRate = sum.population > 0 ? Math.round(((sum.vehicles ?? 0) / sum.population) * 100) : 0;
+        const tiles: [string, string, Color][] = [
+            ['人口', `${sum.population}`, UI_PALETTE.blue],
+            ['就业率', `${rate}%`, rate >= 60 ? UI_PALETTE.green : UI_COLOR.down],
+            ['平均心情', sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—', sum.population > 0 ? moodColor(sum.avgMood) : UI_COLOR.textDim],
+            ['平均工资', formatMoney(sum.avgSalary), UI_COLOR.gold],
+            ['平均储蓄', formatMoney(sum.avgSavings), UI_COLOR.gold],
+            ['有车率', `${carRate}%`, UI_PALETTE.blue],
+        ];
+        const tileH = 96, gap = 14;
+        const tileW = (W - gap * 2) / 3;
+        for (let i = 0; i < tiles.length; i++) {
+            const col = i % 3, rowI = Math.floor(i / 3);
+            const t = makeStatTile(content, tileW, tileH, tiles[i][0], tiles[i][1], tiles[i][2]);
+            t.node.setPosition(-W / 2 + tileW / 2 + col * (tileW + gap), y - tileH / 2 - rowI * (tileH + gap), 0);
+        }
+        y -= tileH * 2 + gap + 34;
 
-        y -= 16;
-
-        // ── 排序 ──
+        // ── 排序 / 筛选 ──
         y = this.pillRow(content, W, y, '排序', SORTS, this._sort, (k) => {
             this._sort = k;
             this.refreshSelection();
             this.rebuildList();
         }, this._sortPills);
-
-        y -= 10;
-
-        // ── 筛选 ──
+        y -= 4;
         y = this.pillRow(content, W, y, '筛选', FILTERS, this._filter, (k) => {
             this._filter = k;
             this.refreshSelection();
             this.rebuildList();
         }, this._filterPills);
-
-        y -= 20;
+        y -= 6;
 
         // ── 列表 ──
-        this._countLabel = makeLabel(content, 'Count', '', UI_FONT.small, UI_COLOR.textDim, W);
-        this._countLabel.node.setPosition(0, y, 0);
-        y -= 26;
+        this._countLabel = makeLabelLeft(content, 'Count', '', UI_FONT.small, UI_COLOR.textDim, W);
+        this._countLabel.node.setPosition(-W / 2, y, 0);
+        y -= 24;
 
-        const bottom = -content.getComponent(UITransform)!.height / 2 + 8;
+        const bottom = -this.contentH / 2;
         const listH = Math.max(120, y - bottom);
         this._list = ScrollList.mount(content, 'List', W, listH);
         this._list.node.setPosition(0, y - listH / 2, 0);
 
         this.refreshSelection();
         this.rebuildList();
-    }
-
-    /** 一屏两列数字 */
-    private summaryLine(parent: Node, W: number, y: number, left: string, right: string): number {
-        const l = makeLabel(parent, 'SumL', left, UI_FONT.body, UI_COLOR.text, W / 2 - 8);
-        l.node.setPosition(-W / 4, y, 0);
-        if (right) {
-            const r = makeLabel(parent, 'SumR', right, UI_FONT.body, UI_COLOR.text, W / 2 - 8);
-            r.node.setPosition(W / 4, y, 0);
-        }
-        return y - 36;
     }
 
     /** 一行药丸按钮：左边一个小标题，右边依次排开 */
@@ -135,21 +132,21 @@ export class ResidentListPanel extends Panel {
         onPick: (k: K) => void,
         out: { key: K; setActive: (on: boolean) => void }[],
     ): number {
-        const tw = 56;
-        const t = makeLabel(parent, 'RowTitle', title, UI_FONT.small, UI_COLOR.textDim, tw);
-        t.node.setPosition(-W / 2 + tw / 2, y, 0);
+        const PH = 48;
+        const t = makeLabelLeft(parent, 'RowTitle', title, UI_FONT.small, UI_COLOR.textDim, 60);
+        t.node.setPosition(-W / 2, y - PH / 2, 0);
 
-        const PW = 78;
-        const PH = 40;
-        const GAP = 8;
-        let x = -W / 2 + tw + GAP + PW / 2;
+        const left = -W / 2 + 64;
+        const GAP = 10;
+        const PW = (W / 2 - left - GAP * (items.length - 1)) / items.length;
+        let x = left + PW / 2;
         for (const it of items) {
             const pill = makePill(parent, `Pill_${it.key}`, it.label, PW, PH, () => onPick(it.key), this);
-            pill.node.setPosition(x, y, 0);
+            pill.node.setPosition(x, y - PH / 2, 0);
             out.push({ key: it.key, setActive: pill.setActive });
             x += PW + GAP;
         }
-        return y - PH - 10;
+        return y - PH - 12;
     }
 
     private refreshSelection(): void {
@@ -189,7 +186,7 @@ export class ResidentListPanel extends Panel {
 
         const W = list.node.getComponent(UITransform)!.width;
         const rows: ListRow[] = filtered.map((r) => ({
-            height: 60,
+            height: 76,
             build: (row) => this.buildRow(row, W, r),
         }));
         list.setRows(rows);
@@ -206,33 +203,11 @@ export class ResidentListPanel extends Panel {
         }
     }
 
-    /** 一行：名字 · 年龄 · 工作 · 收入 · 心情 */
+    /** 一行：头像 · 名字 / 年龄工作心情 · 右侧月薪 */
     private buildRow(row: Node, W: number, r: Resident): void {
-        const idx = row.getSiblingIndex();
-        if (idx % 2 === 0) {
-            const g = row.addComponent(Graphics);
-            g.fillColor = new Color(255, 255, 255, 12);
-            g.rect(-W / 2, -30, W, 60);
-            g.fill();
-        }
-
-        const name = makeLabel(row, 'Name', r.name, UI_FONT.body, UI_COLOR.gold, 120);
-        name.node.setPosition(-W / 2 + 68, 0, 0);
-
-        const age = makeLabel(row, 'Age', `${r.age}`, UI_FONT.small, UI_COLOR.textDim, 56);
-        age.node.setPosition(-W / 2 + 156, 0, 0);
-
-        const job = makeLabel(row, 'Job', r.jobTitle || (r.age >= 18 && r.age < 60 ? '待业' : '—'), UI_FONT.small, UI_COLOR.text, 190);
-        job.node.setPosition(-W / 2 + 286, 0, 0);
-
-        const pay = makeLabel(row, 'Pay', r.salary > 0 ? `¥${formatNumber(r.salary)}` : '—', UI_FONT.small, UI_COLOR.text, 110);
-        pay.node.setPosition(-W / 2 + 436, 0, 0);
-
-        const mood = makeLabel(row, 'Mood', `${Math.round(r.mood)}`, UI_FONT.body, moodColor(r.mood), 60);
-        mood.node.setPosition(W / 2 - 42, 0, 0);
-
-        row.on(Node.EventType.TOUCH_END, () => {
-            if (this._onResidentTap) this._onResidentTap(r.id);
-        }, this);
+        const job = r.jobTitle || (r.age >= 18 && r.age < 60 ? '待业' : '—');
+        buildPersonRow(row, r, this._list, this._onResidentTap,
+            { caption: '月薪', value: r.salary > 0 ? formatMoney(r.salary) : '—', color: r.salary > 0 ? UI_COLOR.gold : UI_COLOR.textDim },
+            `${r.age} 岁 · ${job} · 心情 ${Math.round(r.mood)}`);
     }
 }

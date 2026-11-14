@@ -173,3 +173,44 @@ DESIGN 第 1 节写的是「账单弹出」，但一个月只有 20 秒（1× �
 **下一步**
 - 界面这条线（T307～T310 + 接线）到这里闭环。等支线 A 修完迁出逻辑，我再验一次「有店、有人上班、有税收」的账单。
 - 还需要用户/集成决定：`docs/ui-acceptance/` 这四张图要不要留在仓库（现在已提交，共约 330KB）。
+
+---
+
+## 2026-11-14　T406 界面改版（明亮风）+ T407 开局（界面部分）
+
+**做了什么**
+- `UiTheme.ts` 换成 DESIGN 8.2 明亮风：白卡片 + 叠层柔和投影，正文 `#33363d` / 次要 `#8a8f99`，主色草绿 / 天蓝 / 暖黄 / 珊瑚红（`UI_PALETTE`），字号 32 / 26 / 22。旧导出（`UI_COLOR` 键名、`UI_FONT`、`UI_RADIUS`、`makeLabel`、`drawPanel`、`makePanelNode`、`makePill`、`formatNumber`、`moodLabel`、`moodColor`）签名不变。新增：`drawShadow` `drawCard` `makeButton`（胶囊，primary/secondary/danger/white，可带图标）`makeRoundButton`（圆形图标按钮）`makeIcon` / `loadIcon` / `setIcon` `makeTag` `makeStatTile` `makeSectionTitle` `makeDivider` `makeLabelLeft/Right` `formatMoney`。
+- 图标：`docs/ui/gen_icons.py`（PIL 8 倍超采样）→ `assets/resources/ui/icons/*.png` 共 19 个：彩色 calendar coin people smile bill home shop；白色单色（代码里染色）pause play fast close cross check rotate lock demolish arrow-down plus minus。代码按 ImageAsset 读、自己建纹理，不依赖导入类型，新图不用改 .meta。
+- 顶栏 `TopBar.ts`：四个白胶囊（日历 2年3月 / 硬币 ¥ / 人 / 笑脸），人口胶囊点开居民总览；第二行左边半透明白提示条（放置提示或就业情况），右边三个圆按钮：播放·暂停 / 快进（两倍）/ 账单（红点）。没有整条底色，InputGuard 只登记胶囊和按钮，空隙能点地图。没居民时心情显示「—」。
+- 底栏 `BuildingBar.ts`：白色底板 + 类别页签（住宅 / 店铺 / 工业 / 公共〔含金融〕/ 道路·设施）+ 横向滚动卡片（132×172）。卡片 = 缩略图（ArtLibrary 里那张，等比缩进 116×96 贴底；马路用地面图集 `dirt-5` / `city-5`，桥用 `bridge-gx`；没贴图画等距色块）+ 名字 + 价格（economy.json 的 cost）。选中：蓝框浅蓝底上浮 + 对勾；买不起：缩略图变灰、价格变红；未解锁（economy.json 的 unlock 高于 `sim.state.level`）：灰图 + 锁 +「镇上解锁」，点了不选中，顶栏提示解锁条件。拆除改成底板左上方浮着的圆按钮。
+- `ZoomButtons.ts` 同风格：白色圆按钮 + 倍率小胶囊。
+- 面板 `Panel.ts` 改成底部滑上来的白色抽屉：全屏宽、顶部圆角 28、拖动条（标题区往下拖 >120 关闭）、右上圆形关闭、类别做成蓝色小标签；遮罩改浅色，点遮罩关。进出场都有动画。四个面板全部按新规范重排：
+  - 建筑详情：三个数值格（营业额 / 服务人次 / 上交税款；住宅是住户 / 平均心情 / 有工作）+ 名单；「换朝向」是标题行的胶囊按钮（带循环箭头图标）。
+  - 居民档案：月薪 / 储蓄 / 心情三格 + 浅灰信息卡（学历、住处、工作、家庭、出行、来县）+ 人生记录时间线。
+  - 居民总览：两排六格（人口、就业率、平均心情、平均工资、平均储蓄、有车率）+ 排序 / 筛选药丸 + 名单。
+  - 月账单：收入 / 支出 / 结余三格 + 两列明细 + 人口变化条 + 大事记。
+  - 名单行抽成 `PersonRow.ts`（姓的圆头像 + 蓝色名字 + 灰色信息 + 右侧数值），列表拖动时不误触。
+- 帧率统计：`UiRoot.build` 里 `profiler.hideStats()`；`UiRoot.setStatsVisible(true)` 能打开。
+- 资金不再只在月底刷新：UiRoot 每 0.5 秒刷新一次顶栏（盖楼扣钱马上能看到）。
+- **T407 开局**：新增 `IntroCards.ts`，3 张白卡片（图标 + 文案，第 2 张大字金额读 `economy.json: startFunds`），点任意处翻页、右上「跳过」（放在顶栏下方，不压资金胶囊）。播放期间时间暂停、顶栏资金定格 ¥0；关掉后恢复速度、资金 1 秒从 0 滚到当前值并弹一下，「店铺」页签上出跳动的珊瑚色箭头。第一次盖**非道路**建筑后箭头消失（UiRoot 每 0.5 秒数一次 `model.allBuildings()` 的非 flat 数量；也提供 `notifyBuilt()`）。
+- 示意图：`docs/ui/mockup.py` 按代码里的尺寸常量画，地图背景用真贴图拼。`docs/ui/mockup.png`（主界面）、`mockup-drawer.png`（建筑详情抽屉）、`mockup-intro.png`（开场第 2 张）、`mockup-all.png`（三张并排）。
+
+**问题**
+- 编辑器开的是另一个 worktree，本次改动没在游戏里看过，**截图待集成验证**。尤其要看：图标 png 第一次导入后能否 `resources.load` 到（ImageAsset）、`Sprite.grayscale` 的效果、抽屉动画、真机 safe area（刘海屏顶栏可能要再往下挪）。
+- 未解锁是界面这边拦的（模拟层 `canAfford` / `onBuilt` 只看钱，不看等级）。开局是「村口」，镇上级的建筑（商品房、火锅店、超市、网吧、手机店、补习班、纺织厂、食品厂、学校、派出所、银行、城市道路……）会锁住，要人口 20 + 有工业才升「镇上」。如果测试时嫌锁，`BuildingBar.isLocked` 直接 return null 即可。建议模拟层 `onBuilt` 也检查等级，两边一致。
+- 字体用系统默认字体，粗体靠 `Label.isBold`。
+
+**下一步**
+- 集成接线后开编辑器截图（真机分辨率），按截图微调间距。
+- 放置确认（D022 两步放置）的按钮由集成的 `world/PlaceControls.ts` 做，可以直接用 `makeButton(..., 'primary' / 'danger', ..., 'check' / 'cross')` 保持风格一致。
+
+**需要集成**（GameRoot / WorldView，越少越好，不接也能跑，只是走兜底）
+1. 新档 / 读档信号（必须，否则读档也会播开场）：GameRoot 里
+   `this._ui = UiRoot.create(this.node, this._sim, model, { newGame: this._newGame });`
+2. 缩略图贴图（建议）：WorldView 加 `get art(): ArtLibrary { return this._art; }`，GameRoot 在建好 UiRoot 之后加
+   `if (this._bar && this._view) this._bar.setArt(this._view.art);`
+   不加也行：UiRoot 现在按节点名找到 `WorldRoot` 上的 WorldView，先认 `art` 再退到私有 `_art`（过渡做法）。
+3. 建造栏交给界面（可选，现在按节点名 'BuildingBar' 自动找）：`this._ui.attachBuildingBar(this._bar!);`——会 `bindSim`（买不起 / 未解锁）并接 `onNotice` 到顶栏提示。
+4. 盖楼成功后（可选，现在靠轮询）：在 `worldView.onBuilt` 返回 true 的分支里调 `this._ui?.notifyBuilt()`，箭头和资金立即刷新。
+5. `BuildingBar.BAR_HEIGHT` 从 200 变 274、`TopBar.HEIGHT` 从 120 变 158：用到这两个值摆东西的地方（ZoomButtons 已自动跟随、PlaceControls）注意一下。
+6. 放好一栋后如果要退出选中，调 `bar.clearSelection()`；外部退出拆除模式调 `bar.clearDemolish()`（不触发回调）。

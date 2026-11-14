@@ -3,7 +3,7 @@ import {
 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
-import { PlacedBuilding, TownModel } from '../core/TownModel';
+import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
@@ -32,6 +32,20 @@ const { ccclass } = _decorator;
  *    手指按下时记下起点，松手时如果移动距离小于阈值就算点击，否则算拖动。
  *    没有直接监听 MOUSE_UP 是因为真机上只有触摸，一套代码三端通用。
  */
+/** 放置预览（D022）：等玩家按「确定」的那一栋 */
+export interface PendingPlace {
+    def: BuildingDef;
+    col: number;
+    row: number;
+    facing: Facing;
+    /** 能不能盖下（位置合法 + 钱够） */
+    ok: boolean;
+    /** 不能盖时的原因，给确认条显示 */
+    reason: string;
+    /** 有没有第二个朝向的图 */
+    canRotate: boolean;
+}
+
 @ccclass('WorldView')
 export class WorldView extends Component {
     private _config: WorldConfig | null = null;
@@ -68,6 +82,8 @@ export class WorldView extends Component {
     /** 鼠标/手指当前指到哪一格，-1 表示不在图上 */
     private _hoverCol = -1;
     private _hoverRow = -1;
+    /** 放置预览：点了地块、还没按「确定」（D022，DESIGN 12）。道路不走预览 */
+    private _pending: PendingPlace | null = null;
 
     /** 判定"点击"的最大位移，单位是 UI 像素。手指在真机上抖一两个像素很正常 */
     private static readonly TAP_SLOP = 12;
@@ -96,6 +112,10 @@ export class WorldView extends Component {
     onBuildingTapped: ((uid: number) => void) | null = null;
     /** 放置/拆除之后的通知，给 HUD 刷新计数用 */
     onTownChanged: (() => void) | null = null;
+    /** 钱够不够（预览里提前把「确定」灰掉）；不接就当够 */
+    canAfford: ((def: BuildingDef) => boolean) | null = null;
+    /** 预览出现 / 挪动 / 换朝向 / 消失时通知（确认条据此显示） */
+    onPendingChanged: ((p: PendingPlace | null) => void) | null = null;
 
     /** 建好地图并接管输入 */
     create(config: WorldConfig, model: TownModel): void {
@@ -157,6 +177,11 @@ export class WorldView extends Component {
         if (this._life) this._life.onTownChanged();
     }
 
+    /** 贴图仓库（底栏缩略图用） */
+    get art(): ArtLibrary {
+        return this._art;
+    }
+
     get model(): TownModel | null {
         return this._model;
     }
@@ -173,6 +198,7 @@ export class WorldView extends Component {
     selectBuilding(def: BuildingDef | null): void {
         this._selected = def;
         this._demolishing = false;
+        this.setPending(null);
         this.refreshGhost();
     }
 
@@ -180,6 +206,7 @@ export class WorldView extends Component {
     setDemolishMode(on: boolean): void {
         this._demolishing = on;
         if (on) this._selected = null;
+        this.setPending(null);
         this.refreshGhost();
     }
 
@@ -288,7 +315,9 @@ export class WorldView extends Component {
         if (this._demolishing) {
             this.doDemolish(col, row);
         } else if (this._selected) {
-            this.doPlace(this._selected, col, row);
+            // 道路一点就铺；其他建筑先出预览，按「确定」才盖（D022）
+            if (this._selected.flat) this.doPlace(this._selected, col, row);
+            else this.previewAt(this._selected, col, row);
         } else {
             // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做
             const b = this._model ? this._model.getAt(col, row) : null;
@@ -316,25 +345,94 @@ export class WorldView extends Component {
         return true;
     }
 
-    /** 在当前手指/鼠标位置放一栋建筑 */
-    private doPlace(def: BuildingDef, col: number, row: number): void {
+    // ---------------- 放置预览（D022） ----------------
+    get pending(): PendingPlace | null {
+        return this._pending;
+    }
+
+    /** 在某格出预览：默认朝向按四周的路选（和 settleFacings 同一规则），没路朝 L */
+    private previewAt(def: BuildingDef, col: number, row: number): void {
+        const model = this._model;
+        if (!model) return;
+        // 同一格再点一次：保留玩家已经换过的朝向
+        const keep = this._pending && this._pending.def === def && this._pending.col === col && this._pending.row === row;
+        const facing = keep ? this._pending!.facing : (model.facingByRoads(def, col, row) ?? 'L');
+        this.setPending(this.evalPending(def, col, row, facing));
+    }
+
+    private evalPending(def: BuildingDef, col: number, row: number, facing: Facing): PendingPlace {
+        const model = this._model!;
+        let reason = '';
+        if (!model.canPlace(def, col, row)) reason = '这里放不下';
+        else if (this.canAfford && !this.canAfford(def)) reason = '建设资金不够';
+        return { def, col, row, facing, ok: reason === '', reason, canRotate: !!this._art.get(`${def.id}_r`) };
+    }
+
+    private setPending(p: PendingPlace | null): void {
+        this._pending = p;
+        const layer = this._buildings;
+        if (layer) {
+            if (p) layer.showPreview(p.def, p.col, p.row, p.facing, p.ok);
+            else layer.clearGhost();
+        }
+        if (this.onPendingChanged) this.onPendingChanged(p);
+    }
+
+    /** 预览换朝向（没有 _r 图的建筑不动） */
+    rotatePending(): void {
+        const p = this._pending;
+        if (!p || !p.canRotate) return;
+        this.setPending(this.evalPending(p.def, p.col, p.row, p.facing === 'R' ? 'L' : 'R'));
+    }
+
+    /** 按「确定」：按预览的位置和朝向盖下。成功后保持选中，方便接着盖同一种 */
+    confirmPending(): boolean {
+        const p = this._pending;
+        if (!p) return false;
+        const fresh = this.evalPending(p.def, p.col, p.row, p.facing);   // 资金可能刚变过
+        if (!fresh.ok) { this.setPending(fresh); return false; }
+        const ok = this.doPlace(p.def, p.col, p.row, p.facing);
+        this.setPending(null);
+        return ok;
+    }
+
+    cancelPending(): void {
+        this.setPending(null);
+    }
+
+    /** 预览上方在 UI 坐标里的位置（确认条跟着它）；没有预览返回 null */
+    pendingAnchorUI(out: Vec3): Vec3 | null {
+        const p = this._pending, iso = this._iso, world = this._world;
+        const trans = this.node.getComponent(UITransform);
+        if (!p || !iso || !world || !trans) return null;
+        const foot = iso.footBottom(p.col, p.row, p.def.width, p.def.height);
+        const frame = this._art.get(p.facing === 'R' ? `${p.def.id}_r` : p.def.id) ?? this._art.get(p.def.id);
+        const h = frame ? this._art.worldSize(frame).height : (p.def.width + p.def.height) * iso.hh;
+        const wp = world.position;
+        out.set(wp.x + foot.x * this._zoom, wp.y + (foot.y + h) * this._zoom, 0);
+        return trans.convertToWorldSpaceAR(out, out);
+    }
+
+    /** 盖一栋（道路点一下直接走这里；其他建筑由 confirmPending 调） */
+    private doPlace(def: BuildingDef, col: number, row: number, facing: Facing | null = null): boolean {
         const model = this._model;
         const layer = this._buildings;
-        if (!model || !layer) return;
+        if (!model || !layer) return false;
 
-        const placed = model.place(def, col, row);
+        const placed = model.place(def, col, row, facing);
         if (!placed) {
             // 放不下（越界或已占用）：给一点反馈，但不弹窗打断操作
             console.log(`[WorldView] ${def.name} 放不下：(${col}, ${row})`);
-            return;
+            return false;
         }
         if (this.onBuilt && !this.onBuilt(placed)) {
             model.removeAt(col, row);
             if (this.onPlaceRejected) this.onPlaceRejected(def, '建设资金不够');
-            return;
+            return false;
         }
         this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
+        return true;
     }
 
     /** 拆掉点中的那一栋 */
@@ -409,7 +507,11 @@ export class WorldView extends Component {
     private refreshGhost(): void {
         const layer = this._buildings;
         if (!layer) return;
-        if (this._selected && this._hoverCol >= 0) {
+        if (this._pending) {
+            // 资金、地块可能变了：按现状重算一遍
+            const p = this._pending;
+            this.setPending(this.evalPending(p.def, p.col, p.row, p.facing));
+        } else if (this._selected && this._hoverCol >= 0) {
             layer.showGhost(this._selected, this._hoverCol, this._hoverRow);
         } else {
             layer.clearGhost();
@@ -419,6 +521,7 @@ export class WorldView extends Component {
     private clearGhost(): void {
         this._hoverCol = -1;
         this._hoverRow = -1;
+        if (this._pending) return;           // 有预览时不清（鼠标移出地图不该把预览弄没）
         if (this._buildings) this._buildings.clearGhost();
     }
 

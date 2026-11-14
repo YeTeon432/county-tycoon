@@ -761,6 +761,207 @@ def mine():
             hcyl(dx0 + dx, dy0 + dy + 0.01, Z0 + 0.045, 0.045, 0.03, 'black', 'y', 12)
 
 
+# ---------------------------------------------------------------- T403：摩托车厂 / 汽车厂
+def mini_moto(x, y, color, z=Z0, scooter=False):
+    """门口摆的小摩托 / 电动车（建筑比例），车头朝 -Y，(x,y) 是车中心。"""
+    for dy in (-0.075, 0.075):
+        hcyl(x, y + dy, z + 0.035, 0.035, 0.018, 'black', 'x', 14)
+        hcyl(x, y + dy, z + 0.035, 0.016, 0.022, 'steel', 'x', 10)
+    if scooter:
+        box(x - 0.022, y + 0.0, z + 0.04, 0.044, 0.1, 0.05, color, bevel=0.012)
+        box(x - 0.018, y - 0.06, z + 0.03, 0.036, 0.07, 0.016, color)
+        box(x - 0.02, y - 0.1, z + 0.04, 0.04, 0.035, 0.1, color, bevel=0.01)
+        box(x - 0.018, y + 0.01, z + 0.09, 0.036, 0.08, 0.014, 'black', bevel=0.005)
+    else:
+        box(x - 0.012, y - 0.04, z + 0.035, 0.024, 0.08, 0.035, 'dark_metal')
+        ball(x, y - 0.025, z + 0.09, 0.03, color, 2, scale=(0.75, 1.3, 0.6))
+        box(x - 0.016, y + 0.01, z + 0.085, 0.032, 0.07, 0.014, 'black', bevel=0.005)
+        box(x - 0.012, y + 0.06, z + 0.08, 0.024, 0.04, 0.012, color)
+        rod((x - 0.02, y + 0.0, z + 0.05), (x - 0.02, y + 0.09, z + 0.07), 0.006, 'steel')     # 排气管
+    rod((x, y - 0.075, z + 0.035), (x, y - 0.06, z + 0.13), 0.005, 'steel')                     # 前叉
+    box(x - 0.045, y - 0.07, z + 0.125, 0.09, 0.008, 0.008, 'dark_metal')                        # 车把
+    box(x - 0.01, y - 0.1, z + 0.1, 0.02, 0.006, 0.016, M('#fff4c8', emit=1.5))                 # 大灯
+
+
+def mini_car(x, y, color, z=Z0, L=0.3, W=0.16):
+    """停车场的新车（建筑比例），车头朝 -Y，(x,y) 是车中心。"""
+    m = M(color, rough=0.2)
+    for dx in (-W / 2 + 0.01, W / 2 - 0.01):
+        for dy in (-L * 0.3, L * 0.3):
+            hcyl(x + dx, y + dy, z + 0.03, 0.03, 0.02, 'black', 'x', 12)
+    box(x - W / 2, y - L / 2, z + 0.02, W, L, 0.06, m, bevel=0.018)
+    box(x - W / 2 + 0.01, y - L * 0.22, z + 0.07, W - 0.02, L * 0.5, 0.05, m, bevel=0.016)
+    box(x - W / 2 + 0.008, y - L * 0.22 - 0.004, z + 0.08, W - 0.016, L * 0.5 + 0.008, 0.03, 'glass_dark', bevel=0.01)
+    box(x - W / 2 + 0.014, y - L * 0.2, z + 0.11, W - 0.028, L * 0.46, 0.012, m, bevel=0.008)
+    for s in (-1, 1):
+        box(x + s * (W / 2 - 0.03) - 0.015, y - L / 2 - 0.004, z + 0.05, 0.03, 0.006, 0.014, M('#fff4c8', emit=1.4))
+    box(x - 0.025, y - L / 2 - 0.006, z + 0.026, 0.05, 0.006, 0.014, M('#2f5fc0', emit=0.3))
+
+
+@sprite('moto-factory', 2, 2)
+def moto_factory():
+    """摩托车厂：蓝白拱顶总装车间（正面是半圆拱山墙 + 大门），屋顶招牌；门口一排新车，右边一段试车跑道。"""
+    lot(2, 2, 'concrete')
+    white = M('#f4f6f8'); blue = M('#2f6fd0'); roofc = M('#4a86d8', rough=0.35, metal=0.2)
+    x0, y0, sx, sy, H, rise = 0.1, 0.8, 1.2, 1.1, 0.84, 0.42
+    top = Z0 + H
+    box(x0, y0, Z0, sx, sy, H, white, bevel=0.005)
+    box(x0 - 0.008, y0 - 0.008, Z0, sx + 0.016, sy + 0.016, 0.1, blue)            # 蓝色墙裙
+    box(x0 - 0.008, y0 - 0.008, top - 0.05, sx + 0.016, sy + 0.016, 0.05, blue)   # 檐口蓝带
+    # 拱顶：屋脊沿 y，正面看是半圆拱
+    n = 20
+    arc = [(x0 - 0.03 + (sx + 0.06) * i / n, top + rise * math.sin(math.pi * i / n)) for i in range(n + 1)]
+    extrude_xz(arc, y0 + 0.02, y0 + sy + 0.02, roofc)
+    for k in range(7):                                                            # 屋面肋
+        yk = y0 + 0.06 + k * (sy - 0.1) / 6
+        arc2 = [(x0 - 0.035 + (sx + 0.07) * i / n, top + 0.006 + (rise + 0.006) * math.sin(math.pi * i / n)) for i in range(n + 1)]
+        extrude_xz(arc2, yk, yk + 0.018, M('#d8e6f6'))
+    # 正面山墙：白色拱面 + 扇形玻璃窗
+    garc = [(x0 + sx * i / n, top + (rise - 0.03) * math.sin(math.pi * i / n)) for i in range(n + 1)]
+    extrude_xz([(x, z + 0.012) for x, z in arc], y0 - 0.045, y0 + 0.02, roofc)    # 拱檐（挑出一圈）
+    extrude_xz(garc, y0 - 0.05, y0 + 0.1, white)
+    warc = [(x0 + 0.25 + (sx - 0.5) * i / n, top + 0.03 + (rise - 0.14) * math.sin(math.pi * i / n)) for i in range(n + 1)]
+    extrude_xz(warc, y0 - 0.062, y0, M('#7ec0f0', rough=0.05, metal=0.3))
+    for k in range(1, 6):
+        xm = x0 + 0.25 + (sx - 0.5) * k / 6
+        box(xm - 0.006, y0 - 0.068, top + 0.02, 0.012, 0.008, (rise - 0.12) * math.sin(math.pi * k / 6) + 0.01, white)
+    # 正面：大卷帘门（半开，里面露出一台车）+ 小门 + 招牌
+    dx0, dw, dh = x0 + 0.32, 0.56, 0.5
+    box(dx0, y0 - 0.006, Z0, dw, 0.008, dh, M('#2d3238'))
+    box(dx0, y0 - 0.012, Z0 + 0.28, dw, 0.012, dh - 0.28, 'steel')
+    for k in range(7):
+        box(dx0, y0 - 0.018, Z0 + 0.29 + k * 0.03, dw, 0.006, 0.004, 'frame')
+    box(dx0 - 0.03, y0 - 0.02, Z0, 0.03, 0.02, dh + 0.03, blue); box(dx0 + dw, y0 - 0.02, Z0, 0.03, 0.02, dh + 0.03, blue)
+    box(dx0 - 0.03, y0 - 0.02, Z0 + dh, dw + 0.06, 0.02, 0.03, blue)
+    box(x0 + 0.08, y0 - 0.012, Z0, 0.14, 0.014, 0.24, 'glass_dark')
+    sign_front('总装车间', x0 + sx / 2, y0, Z0 + 0.66, 0.5, 0.11, 'sign_blue', 'white', size=0.08)
+    for i in range(5):
+        window_side(y0 + 0.08 + i * 0.2, Z0 + 0.32, 0.14, 0.2, x0 + sx)
+    # 屋顶招牌（立在拱顶上，正对正面）
+    bx0, by_, bw, bz = x0 + 0.12, y0 + 0.55, 0.96, top + rise - 0.02
+    for lx in (bx0 + 0.1, bx0 + bw - 0.1):
+        box(lx, by_, bz - 0.06, 0.025, 0.025, 0.3, 'dark_metal')
+    box(bx0, by_ - 0.03, bz + 0.12, bw, 0.03, 0.26, M('#fafafa', emit=0.3))
+    box(bx0, by_ - 0.034, bz + 0.12, bw, 0.004, 0.035, M('#e8453c', emit=0.4))
+    text('摩托车厂', bx0 + bw / 2, by_ - 0.036, bz + 0.265, 0.17, M('#2f6fd0', emit=0.2), 'front')
+    # 门口一排新车（摩托 / 电动车间隔）
+    cols = ['#d9352a', '#2f6fd0', '#2f2f35', '#f6c938', '#f4f4f0', '#3fae6a']
+    for i, col in enumerate(cols):
+        mini_moto(0.2 + i * 0.18, 0.45, col, scooter=(i % 2 == 1))
+    box(0.1, 0.33, Z0, 1.1, 0.24, 0.003, M('#c4c0b6'))
+    for k in range(7):
+        box(0.11 + k * 0.18, 0.33, Z0, 0.008, 0.24, 0.004, 'line')
+    # 试车跑道：右边一条长圆形环道，红白路肩，起跑线
+    tx0, tx1, ty0, ty1 = 1.42, 1.94, 0.08, 1.9
+    r = (tx1 - tx0) / 2; cx = (tx0 + tx1) / 2
+    asph = M('#5a5d63')
+    box(tx0, ty0 + r, Z0, tx1 - tx0, ty1 - ty0 - 2 * r, 0.006, asph)
+    for cy in (ty0 + r, ty1 - r):
+        cyl(cx, cy, Z0, r, 0.006, asph, 32)
+    ri = r - 0.12
+    box(cx - ri, ty0 + r, Z0, 2 * ri, ty1 - ty0 - 2 * r, 0.012, 'grass')
+    for cy in (ty0 + r, ty1 - r):
+        cyl(cx, cy, Z0, ri, 0.012, 'grass', 32)
+    for k in range(18):                                                         # 外侧红白路肩（右边那条直道）
+        box(tx1 - 0.02, ty0 + r + k * (ty1 - ty0 - 2 * r) / 18, Z0, 0.02, (ty1 - ty0 - 2 * r) / 18, 0.014,
+            'red' if k % 2 else 'white')
+    for k in range(6):                                                          # 起跑线（棋盘格）
+        for j in range(2):
+            box(tx1 - 0.12 + k * 0.02, 0.9 + j * 0.02, Z0, 0.02, 0.02, 0.008, 'white' if (k + j) % 2 else 'black')
+    mini_moto(tx1 - 0.06, 0.62, '#d9352a')
+    for k in range(3):                                                          # 跑道边的锥桶
+        cyl(tx0 + 0.15, 1.2 + k * 0.15, Z0 + 0.012, 0.018, 0.05, 'orange', 10, r2=0.004)
+    tree(1.32, 0.12, 0.55, Z0); bush(1.3, 0.7, 0.05)
+    lamp(0.05, 0.62, Z0, 0.5)
+
+
+@sprite('car-factory', 2, 2)
+def car_factory():
+    """汽车厂：白 / 银灰大厂房 + 红色条带，总装车间大门里露出流水线；左后一栋办公楼；门口停车场一排新车。"""
+    lot(2, 2, 'concrete')
+    white = M('#f5f6f7'); silver = M('#c3c8cf', rough=0.35, metal=0.4); red = M('#d8322a')
+    x0, x1, yf, yb, H = 0.1, 1.9, 0.82, 1.9, 0.82
+    top = Z0 + H
+    dep = 0.28                                    # 门洞进深
+    # 后半截主体
+    box(x0, yf + dep, Z0, x1 - x0, yb - yf - dep, H, silver, bevel=0.004)
+    # 正面一层：左右墙垛 + 门楣，中间是总装车间门洞
+    ox0, ox1, oh = 0.56, 1.44, 0.46
+    box(x0, yf, Z0, ox0 - x0, dep, H, white, bevel=0.004)
+    box(ox1, yf, Z0, x1 - ox1, dep, H, white, bevel=0.004)
+    box(ox0, yf, Z0 + oh, ox1 - ox0, dep, H - oh, white)
+    # 红色条带（正面 + 侧面）
+    for (bz, bh) in ((Z0 + 0.6, 0.06), (Z0 + 0.7, 0.02)):
+        box(x0 - 0.006, yf - 0.006, bz, ox0 - x0 + 0.006, 0.01, bh, red)
+        box(ox1, yf - 0.006, bz, x1 - ox1 + 0.006, 0.01, bh, red)
+        box(ox0, yf - 0.006, bz, ox1 - ox0, 0.01, bh, red)
+        box(x1 - 0.004, yf, bz, 0.01, yb - yf + 0.006, bh, red)
+    box(x0, yf - 0.008, top - 0.03, x1 - x0, yb - yf + 0.016, 0.03, white)
+    box(x1 - 0.008, yf - 0.008, top - 0.03, 0.016, yb - yf + 0.016, 0.03, white)
+    # 门洞里面：地面、里墙、流水线、白车身、机械臂、顶灯
+    yi = yf + dep
+    box(ox0, yf, Z0, ox1 - ox0, dep, 0.004, M('#9aa0a6'))
+    box(ox0, yi - 0.01, Z0, ox1 - ox0, 0.012, oh, M('#4a5058'))
+    box(ox0, yf + 0.02, Z0 + oh - 0.03, ox1 - ox0, dep - 0.02, 0.03, M('#6a7078'))
+    for k in range(3):
+        box(ox0 + 0.08 + k * 0.3, yf + 0.06, Z0 + oh - 0.045, 0.16, 0.03, 0.012, M('#ffffff', emit=2.0))
+    box(ox0, yf + 0.1, Z0, ox1 - ox0, 0.1, 0.05, 'dark_metal')                        # 传送带
+    box(ox0, yf + 0.1, Z0 + 0.05, ox1 - ox0, 0.1, 0.006, M('#e0b020'))
+    for k in range(3):
+        cxk = ox0 + 0.15 + k * 0.29
+        body = ['#f4f4f0', '#d8322a', '#c3c8cf'][k]
+        box(cxk - 0.1, yf + 0.11, Z0 + 0.056, 0.2, 0.08, 0.04, M(body, rough=0.2), bevel=0.012)
+        box(cxk - 0.05, yf + 0.115, Z0 + 0.095, 0.11, 0.07, 0.035, M(body, rough=0.2), bevel=0.012)
+        box(cxk - 0.048, yf + 0.112, Z0 + 0.1, 0.105, 0.076, 0.02, 'glass_dark', bevel=0.006)
+    for k in range(2):                                                                  # 黄色机械臂
+        ax = ox0 + 0.3 + k * 0.29
+        yel = M('#f2b820', rough=0.4)
+        cyl(ax, yf + 0.22, Z0, 0.025, 0.06, 'dark_metal', 12)
+        rod((ax, yf + 0.22, Z0 + 0.06), (ax + 0.04, yf + 0.2, Z0 + 0.22), 0.016, yel)
+        rod((ax + 0.04, yf + 0.2, Z0 + 0.22), (ax - 0.04, yf + 0.16, Z0 + 0.14), 0.012, yel)
+        ball(ax + 0.04, yf + 0.2, Z0 + 0.22, 0.02, yel, 2)
+    # 门框 + 门上招牌
+    box(ox0 - 0.02, yf - 0.02, Z0, 0.02, 0.02, oh + 0.02, red); box(ox1, yf - 0.02, Z0, 0.02, 0.02, oh + 0.02, red)
+    box(ox0 - 0.02, yf - 0.02, Z0 + oh, ox1 - ox0 + 0.04, 0.02, 0.02, red)
+    sign_front('总装车间', (ox0 + ox1) / 2, yf, Z0 + 0.53, 0.5, 0.1, 'sign_white', M('#d8322a'), size=0.075)
+    # 侧面：一排高窗 + 一个卷帘门
+    for i in range(5):
+        curtain_side(yf + 0.06 + i * 0.21, Z0 + 0.36, 0.17, 0.18, x1, 2, 1, glass=M('#6db4ea', rough=0.05, metal=0.3))
+    box(x1, yf + 0.1, Z0, 0.012, 0.3, 0.3, 'steel')
+    for k in range(8):
+        box(x1 + 0.006, yf + 0.1, Z0 + 0.02 + k * 0.035, 0.008, 0.3, 0.004, 'frame')
+    # 屋顶：采光带 + 设备
+    for k in range(3):
+        box(0.85, yf + 0.15 + k * 0.3, top, 0.95, 0.1, 0.04, M('#8fcaf0', rough=0.05, metal=0.3), bevel=0.01)
+    box(1.4, 1.55, top, 0.3, 0.22, 0.12, M('#d5dbe2'), bevel=0.01)
+    for k in range(2):
+        cyl(1.47 + k * 0.15, 1.66, top + 0.12, 0.05, 0.02, 'dark_metal', 16)
+    # 左后办公楼（玻璃幕墙 6 层 + 红顶带 + 楼顶标志）
+    ow0, ow1, oy0, oy1, oh2 = 0.12, 0.72, 1.3, 1.88, 6 * FH
+    box(ow0, oy0, Z0, ow1 - ow0, oy1 - oy0, oh2, white, bevel=0.004)
+    gl = M('#5aa6e6', rough=0.05, metal=0.3)
+    curtain_front(ow0 + 0.05, top + 0.04, ow1 - ow0 - 0.1, Z0 + oh2 - top - 0.14, oy0, 3, 3, glass=gl)
+    curtain_side(oy0 + 0.05, top + 0.04, oy1 - oy0 - 0.1, Z0 + oh2 - top - 0.14, ow1, 3, 3, glass=gl)
+    box(ow0 - 0.01, oy0 - 0.01, Z0 + oh2 - 0.08, ow1 - ow0 + 0.02, oy1 - oy0 + 0.02, 0.08, red)
+    for lx in (ow0 + 0.1, ow1 - 0.1):                                                # 楼顶大招牌
+        box(lx, oy0 + 0.1, Z0 + oh2, 0.025, 0.025, 0.06, 'dark_metal')
+    box(ow0 - 0.02, oy0 + 0.07, Z0 + oh2 + 0.05, ow1 - ow0 + 0.04, 0.03, 0.2, M('#d8322a', emit=0.35))
+    text('汽车厂', (ow0 + ow1) / 2, oy0 + 0.066, Z0 + oh2 + 0.15, 0.15, M('#ffffff', emit=0.5), 'front')
+    # 停车场：一排新车
+    asph = M('#5a5d63')
+    box(0.06, 0.06, Z0, 1.88, 0.62, 0.004, asph)
+    for k in range(7):
+        box(0.1 + k * 0.26, 0.24, Z0, 0.008, 0.38, 0.006, 'line')
+    box(0.06, 0.2, Z0, 1.88, 0.008, 0.006, 'line')
+    for i, col in enumerate(['#d8322a', '#f4f4f0', '#c3c8cf', '#2f6fd0', '#2f2f35', '#f4f4f0']):
+        mini_car(0.23 + i * 0.26, 0.45, col)
+    for lx in (0.08, 1.92):
+        lamp(lx - 0.04, 0.72, Z0, 0.5)
+    box(0.06, 0.7, Z0, 1.88, 0.06, 0.03, 'curb')
+    for k in range(4):
+        bush(0.2 + k * 0.45, 0.73, 0.04, Z0 + 0.03)
+
+
 @sprite('plaza', 2, 2, facing=False)
 def plaza():
     """广场：铺装 + 环形步道，中间喷泉，长椅、路灯、四角树。"""

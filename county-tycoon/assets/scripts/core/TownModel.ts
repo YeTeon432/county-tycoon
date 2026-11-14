@@ -87,10 +87,11 @@ export class TownModel {
      * 放一栋建筑。
      * 放不下时返回 null，调用方据此给出失败反馈。
      */
-    place(def: BuildingDef, col: number, row: number): PlacedBuilding | null {
+    place(def: BuildingDef, col: number, row: number, facing: Facing | null = null): PlacedBuilding | null {
         if (!this.canPlace(def, col, row)) return null;
 
-        const placed: PlacedBuilding = { uid: this._nextUid++, def, col, row, facing: null };
+        // 放置预览里玩家选好的朝向直接锁定（D022）；没给就按 settleFacings 的老规则
+        const placed: PlacedBuilding = { uid: this._nextUid++, def, col, row, facing: def.flat ? null : facing };
         for (let r = 0; r < def.height; r++) {
             for (let c = 0; c < def.width; c++) {
                 this._cells[(row + r) * this.width + (col + c)] = placed;
@@ -116,20 +117,30 @@ export class TownModel {
         for (let i = 0; i < list.length; i++) {
             const b = list[i];
             if (b.def.flat || b.facing) continue;
-            const { col, row } = b, w = b.def.width, h = b.def.height;
-            let front = false, right = false, back = false;
-            for (let c = col; c < col + w; c++) {
-                if (this.isRoad(c, row + h)) front = true;
-                if (this.isRoad(c, row - 1)) back = true;
-            }
-            for (let r = row; r < row + h; r++) {
-                if (this.isRoad(col + w, r)) right = true;
-                if (this.isRoad(col - 1, r)) back = true;
-            }
-            if (front) b.facing = 'L';
-            else if (right) b.facing = 'R';
-            else if (back) b.facing = 'L';
+            const f = this.facingByRoads(b.def, b.col, b.row);
+            if (f) b.facing = f;
         }
+    }
+
+    /**
+     * 按四周的路算一个朝向（不改任何东西）；四周没路返回 null。
+     * 放置预览用它给默认朝向，settleFacings 用它定朝向，两边规则一致。
+     */
+    facingByRoads(def: BuildingDef, col: number, row: number): Facing | null {
+        const w = def.width, h = def.height;
+        let front = false, right = false, back = false;
+        for (let c = col; c < col + w; c++) {
+            if (this.isRoad(c, row + h)) front = true;
+            if (this.isRoad(c, row - 1)) back = true;
+        }
+        for (let r = row; r < row + h; r++) {
+            if (this.isRoad(col + w, r)) right = true;
+            if (this.isRoad(col - 1, r)) back = true;
+        }
+        if (front) return 'L';
+        if (right) return 'R';
+        if (back) return 'L';
+        return null;
     }
 
     /** 玩家手动换朝向（路口转角想朝另一条路时用）。道路和空地返回 null */

@@ -140,3 +140,34 @@ this._sim = new Simulation(simCfg, townView, { seed: Date.now() });
 所以玩家不盖房不盖厂时来的人照样是 0，不会凭空涨人口。
 
 50 年快进（新速率）：人口 1025，心情 68，财政 4943 万，曲线正常。
+
+## 2026-11-14 T402 交通工具 + T403 车厂经营数据 + T407 启动资金
+
+### 做了什么
+- `config.ts`：`EconomyConfig.vehicles`（`minAge/maxAge` + `tiers.walk/ebike/moto/car`：price、factory、savingsRatio、minSalary、chance、range、mood、fuel），带默认值；导出 `VEHICLE_ORDER`。默认 `startFunds` 改 100000。
+- `economy.json`：`startFunds: 100000`；新增 `vehicles` 段；新增 `moto-factory`（42000 / 维护 420 / 装配工 12×3300 + 质检员 2×3900 / 产值 600×28 / env −1 / town）和 `car-factory`（110000 / 950 / 装配工 18×3600(初中) + 技术员 4×5200(高中) + 工程师 2×6800(大专) / 1200×30 / env −2 / county）。
+- `Simulation.ts`：
+  - 新居民 `vehicle: 'walk'`；构造参数加 `state`：`new Simulation(cfg, town, { state: save.sim })` 走读档路径，`normalizeSimState()` 原地补齐（缺 vehicle → walk 等），随机数接着 rngState 算，不再登记开局建筑 / 开局居民。
+  - 第 4 步居民状态更新里 `buyVehicles()`（在心情之前，买了当月就有加成）：18～65 岁、有工作、县里有对应厂、储蓄 ≥ 价格 × savingsRatio、月薪 ≥ minSalary；从最好的一档往下找第一档满足的，按那档概率掷一次；只往上换。车款从储蓄扣，加到离家沿路最近（走不到就 uid 最小）那座厂的 `lastRevenue`，企业税当月进 `income.industry` 和资金。写个人日志「买了一辆摩托车」+ 大事记「赵培根买了一辆摩托车」。
+  - 油费：消费前从储蓄和本月预算里一起扣。
+  - 消费半径、家附近店铺覆盖、上班舒适距离 × 交通倍率；找工作的通勤惩罚 ÷ 倍率；心情目标 + tier.mood。
+  - `summary().vehicles`。
+- `consumption.ts`：`consumeForResident` 加可选 `radius` 参数。
+- 测试：`sim.test.ts` 新增「交通工具」12 条（无厂不买、有厂买最好档 + 产值 / 税、低薪只买电动车、只升不降、汽车、油费、旧存档归一化、读档接着跑与不存档一致、同种子复现、消费半径）。全部 57 条通过。
+- 快进：`node tests/sim/run.js --vehicles`（longrun 的自动县长 + 第 N 年盖摩托车厂、第 10 年盖汽车厂，跑 30 年）。
+
+### 问题 / 数值调整（和 DESIGN 11.1 不一样的地方）
+- **买车概率按 DESIGN 原值太快**：电动 8% / 摩托 5% 时，盖厂后 1 年有车率 ~45%、3 年 ~75%，街上一下子全是车，没有「慢慢变富」的感觉。原因是居民储蓄普遍 2～4 万，储蓄门槛基本形同虚设，只有概率在起作用。改为 **电动 1.5% / 摩托 1% / 汽车 0.8%**。
+- **汽车 6 万买不起**：储蓄有平衡点（每月花掉 3% 存款），月薪 5200 的人存款封顶约 6 万，6 万 × 1.2 = 7.2 万没人够得着，30 年 0 辆汽车。改为 **汽车 40000**（门槛 4.8 万）。
+- 调整后（第 1 年盖摩托车厂）：盖厂后第 1 年 8%、2 年 15%、4 年 35%、10 年 ~44%、20 年 ~62%、30 年 72%（占人口；占在职 75%）。第 5 年才盖：1 年后 11%、5 年后 34%、15 年后 ~60%。汽车第 10 年盖厂，到第 30 年 7～14 辆（只有月薪 ≥4500 的技术岗买得起，自动县长不盖学校，没有大专生）。
+- 50 年基线快进不受影响（人口 1025，心情 68）。财政 50 年攒到 4900 万是老问题（自动县长花钱太少），与本次无关。
+
+### 下一步
+- 汽车厂解锁后如果真机上汽车太少，可以把汽车 minSalary 降到 4200 或者 savingsRatio 降到 1.0。
+- `bestJobFor` 现在没有「最远找多远」的硬上限，只有通勤惩罚；以后如果要加，倍率已经有了。
+
+### 需要集成
+- **读档路径**：现在 GameRoot 总是 `createSimulation(...)` 新开一局，没有把存档里的 `sim` 喂回模拟层。读档请用 `new Simulation(cfg, view, { state: save.sim })`（或者给 SimLoader 加个参数）；旧存档缺 `vehicle` 的会自动补 walk，SaveGame.ts 不用改。
+- **DESIGN 11.1 表格**同步改：电动 8%→1.5%、摩托 5%→1%、汽车 3%→0.8%、汽车价格 60000→40000。
+- 合同没有改动、不需要新增字段。
+- buildings.json 里 `moto-factory` / `car-factory` 的 unlock 由界面层按 economy.json 判断（模拟层 `canAfford` 只看钱，和以前一样）。

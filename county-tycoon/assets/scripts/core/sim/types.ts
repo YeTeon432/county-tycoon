@@ -15,6 +15,8 @@ export type Education = 0 | 1 | 2 | 3;
 export type Demand = 'food' | 'daily' | 'fun' | 'other';
 /** 城镇等级（DESIGN 6） */
 export type TownLevel = 'village' | 'town' | 'county' | 'city' | 'top100';
+/** 交通工具（DESIGN 11，D022）。开局都是 walk，只往上换 */
+export type Vehicle = 'walk' | 'ebike' | 'moto' | 'car';
 
 export interface Resident {
     id: number;
@@ -34,6 +36,8 @@ export interface Resident {
     education: Education;
     monthsUnemployed: number;
     arrivedMonth: number;        // 绝对月份（见 SimState.month）
+    /** 交通工具（D022）。旧存档没有这个字段，读档时当 'walk' */
+    vehicle: Vehicle;
     log: LifeEvent[];            // 最近 N 条，新的在后
 }
 

@@ -1,8 +1,8 @@
-import { _decorator, Component, Graphics, Layers, Node, UITransform, Color, Sprite, SpriteFrame, Vec2 } from 'cc';
+import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Sprite, SpriteFrame, Vec2 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
-import { PlacedBuilding, TownModel } from '../core/TownModel';
+import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 import { hexToColor, shade } from '../core/ColorUtil';
 
 const { ccclass } = _decorator;
@@ -26,6 +26,8 @@ export class BuildingLayer extends Component {
 
     private _objRoot: Node | null = null;
     private _ghost: Graphics | null = null;
+    /** 放置预览的半透明贴图（D022） */
+    private _ghostSprite: Sprite | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
     private readonly _nodes = new Map<number, Node>();
     /** uid -> 节点当前显示的是哪张图（null = 色块）。贴图晚到、朝向变化时据此重建 */
@@ -43,6 +45,7 @@ export class BuildingLayer extends Component {
     private readonly _cGhostBad = new Color(224, 74, 74, 110);
     private readonly _cGhostEdgeOk = new Color(255, 255, 255, 230);
     private readonly _cGhostEdgeBad = new Color(224, 74, 74, 240);
+    private readonly _cGhostTint = new Color(255, 120, 110, 255);
 
     static create(iso: IsoMath, model: TownModel, art: ArtLibrary): Node {
         const node = new Node('BuildingLayer');
@@ -67,6 +70,13 @@ export class BuildingLayer extends Component {
         this._art = art;
         this._objRoot = BuildingLayer.makeChild(this.node, 'Objects');
         this._ghost = BuildingLayer.makeChild(this.node, 'Ghost').addComponent(Graphics);
+        const gs = BuildingLayer.makeChild(this.node, 'GhostSprite');
+        gs.getComponent(UITransform)!.setAnchorPoint(new Vec2(0.5, 0));
+        gs.addComponent(UIOpacity).opacity = 170;
+        this._ghostSprite = gs.addComponent(Sprite);
+        this._ghostSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        this._ghostSprite.trim = false;
+        gs.active = false;
         this.redraw();
     }
 
@@ -256,15 +266,19 @@ export class BuildingLayer extends Component {
 
     /** 放置预览：占地菱形，绿白可放 / 红色不可放 */
     showGhost(def: BuildingDef | null, col: number, row: number): void {
+        if (this._ghostSprite) this._ghostSprite.node.active = false;
+        if (!def) { if (this._ghost) this._ghost.clear(); return; }
+        const model = this._model;
+        if (!model) return;
+        this.showGhostShape(def, col, row, model.canPlace(def, col, row));
+    }
+
+    private showGhostShape(def: BuildingDef, col: number, row: number, ok: boolean): void {
         const g = this._ghost;
         const iso = this._iso;
-        const model = this._model;
-        if (!g || !iso || !model) return;
+        if (!g || !iso) return;
 
         g.clear();
-        if (!def) return;
-
-        const ok = model.canPlace(def, col, row);
         const pts = iso.footprint(col, row, def.width, def.height);
         const path = () => {
             g.moveTo(pts[0].x, pts[0].y);
@@ -282,6 +296,26 @@ export class BuildingLayer extends Component {
 
     clearGhost(): void {
         if (this._ghost) this._ghost.clear();
+        if (this._ghostSprite) this._ghostSprite.node.active = false;
+    }
+
+    /**
+     * 放置预览（D022）：占地菱形 + 半透明的真实贴图（按给定朝向）。
+     * ok=false 时贴图染红。没有贴图的建筑只画菱形。
+     */
+    showPreview(def: BuildingDef, col: number, row: number, facing: Facing | null, ok: boolean): void {
+        this.showGhostShape(def, col, row, ok);
+        const gs = this._ghostSprite, iso = this._iso;
+        if (!gs || !iso) return;
+        const frame = def.flat ? null : this.usableFrame(def, facing === 'R');
+        if (!frame) { gs.node.active = false; return; }
+        const sz = this._art!.worldSize(frame);
+        gs.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
+        gs.spriteFrame = frame;
+        gs.color = ok ? Color.WHITE : this._cGhostTint;
+        const p = iso.footBottom(col, row, def.width, def.height);
+        gs.node.setPosition(p.x, p.y, 0);
+        gs.node.active = true;
     }
 
     private static makeChild(parent: Node, name: string): Node {

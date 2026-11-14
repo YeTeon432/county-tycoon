@@ -12,6 +12,9 @@ import { createSimulation, loadSimJson } from '../core/SimLoader';
 import { loadTerrain } from '../core/TerrainConfig';
 import { Terrain } from '../core/Terrain';
 import { WorldView } from '../world/WorldView';
+import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
+import { PlaceControls } from '../world/PlaceControls';
+import { TopBar } from '../ui/TopBar';
 
 const { ccclass } = _decorator;
 
@@ -36,6 +39,18 @@ export class GameRoot extends Component {
     private _ui: UiRoot | null = null;
     /** 开局那条土路的中心格（镜头对准这里） */
     private _openingCell: [number, number] = [0, 0];
+    /** 这一局是新开的（没读到存档）：要播开场（T407） */
+    private _newGame = true;
+    private _saver: SaveManager | null = null;
+
+    /** 这一局是不是新开的（界面据此决定播不播开场） */
+    get newGame(): boolean {
+        return this._newGame;
+    }
+
+    protected onDestroy(): void {
+        if (this._saver) this._saver.stopAutoSave();
+    }
 
     protected start(): void {
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
@@ -59,18 +74,40 @@ export class GameRoot extends Component {
         model.setTerrain(terrain);
         this._model = model;
 
-        // 开局地块：一条土路 + 两栋自建房（PRD 第 2 节）。要在建模拟之前放，模拟层会把它们登记成开局的家
-        this.placeOpening(model, buildings);
-        const sim = createSimulation(model, economy, names, Date.now() % 100000000);
+        // 有存档就读档（D022：以前存档只写不读）；读不到或坏了就新开一局
+        const loaded = readSave();
+        let sim;
+        if (loaded.ok && loaded.save) {
+            const defs = new Map(buildings.map((d) => [d.id, d] as [string, BuildingDef]));
+            const skipped = restoreTown(model, loaded.save.town, defs);
+            if (skipped.length) console.warn(`[GameRoot] 读档时 ${skipped.length} 栋没放回去`);
+            sim = createSimulation(model, economy, names, 1, loaded.save.sim);
+            this._newGame = false;
+            const first = model.allBuildings().find((b) => !b.def.flat);
+            if (first) this._openingCell = [first.col, first.row];
+            console.log(`[GameRoot] 读档：${sim.state.residents.length} 人，${model.allBuildings().length} 栋`);
+        } else {
+            if (loaded.reason && loaded.reason !== 'empty') console.warn(`[GameRoot] 存档读不了（${loaded.reason}），新开一局`);
+            // 开局地块：一条土路 + 两栋自建房（PRD 第 2 节）。要在建模拟之前放，模拟层会把它们登记成开局的家
+            this.placeOpening(model, buildings);
+            sim = createSimulation(model, economy, names, Date.now() % 100000000);
+        }
         this._sim = sim;
+        // 自动存档：切后台时 + 每个月结算后（DESIGN 1：每月自动存）
+        this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
+        this._saver.startAutoSave();
+        sim.onMonth = () => { if (this._saver) this._saver.saveNow(); };
 
         this.buildWorld(world, model);
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
         this.buildBar(buildings);
+        this.buildPlaceControls();
         // 经营界面（支线 B）放最后，压在所有东西上面
-        this._ui = UiRoot.create(this.node, this._sim, model);
+        this._ui = UiRoot.create(this.node, this._sim, model, { newGame: this._newGame });
         // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView
         const view = this._view, ui = this._ui;
+        if (this._bar) ui.attachBuildingBar(this._bar);
+        if (this._bar && view) this._bar.setArt(view.art);
         if (view) {
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
@@ -80,7 +117,8 @@ export class GameRoot extends Component {
             if (view.life && sim) view.life.setResidentSource(() => sim.state.residents);
             // 放置 / 拆除的提示文字，原来在旧 HUD 里，现在归顶栏第二行
             view.onCellTapped = () => this.updatePlacementHint();
-            view.onTownChanged = () => this.updatePlacementHint();
+            // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
+            view.onTownChanged = () => { this.updatePlacementHint(); if (this._saver) this._saver.saveNow(); };
         }
         this.updatePlacementHint();
     }
@@ -95,7 +133,9 @@ export class GameRoot extends Component {
         if (view.demolishing) {
             ui.setPlacementHint('拆除模式：点建筑移除');
         } else if (view.selectedBuilding) {
-            ui.setPlacementHint(`放置：${view.selectedBuilding.name}`);
+            ui.setPlacementHint(view.selectedBuilding.flat
+                ? `修路：${view.selectedBuilding.name}，点地块直接铺`
+                : `放置：${view.selectedBuilding.name}，点地块预览，按「确定」盖下`);
         } else {
             ui.setPlacementHint('点建筑看详情；底部选建筑后可放置');
         }
@@ -146,9 +186,25 @@ export class GameRoot extends Component {
 
         // 放置/拆除之后刷新 HUD 上的计数
         // 接模拟层：盖楼扣钱、拆楼清人
-        worldView.onBuilt = (b) => (this._sim ? this._sim.onBuilt(b.uid, b.def.id) : true);
+        worldView.onBuilt = (b) => {
+            const ok = this._sim ? this._sim.onBuilt(b.uid, b.def.id) : true;
+            if (ok && this._ui) this._ui.notifyBuilt();
+            return ok;
+        };
         worldView.onDemolished = (uid) => { if (this._sim) this._sim.onDemolished(uid); };
         worldView.onPlaceRejected = (d, why) => console.log(`[GameRoot] ${d.name} 没盖成：${why}`);
+    }
+
+    /** 放置确认条（D022）：预览上方的「换朝向 / 确定 / ✕」，压在地图和底栏上、面板下 */
+    private buildPlaceControls(): void {
+        const view = this._view;
+        if (!view) return;
+        const sim = this._sim;
+        view.canAfford = (def) => (sim ? sim.canAfford(def.id) : true);
+        const n = new Node('PlaceControls');
+        n.layer = Layers.Enum.UI_2D;
+        this.node.addChild(n);
+        n.addComponent(PlaceControls).setup(view, TopBar.HEIGHT, BuildingBar.BAR_HEIGHT);
     }
 
     /** 底部建筑选择栏 */

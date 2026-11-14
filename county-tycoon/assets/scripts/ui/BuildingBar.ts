@@ -1,171 +1,442 @@
 import {
-    _decorator, Component, Node, UITransform, Layers, Graphics, Color, Label,
-    EventTouch, view, Vec3,
+    _decorator, Color, Component, EventTouch, Graphics, JsonAsset, Label, Layers, Node, resources, Sprite, SpriteFrame,
+    tween, Tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
+import { ArtLibrary } from '../core/ArtLibrary';
 import { BuildingDef } from '../core/BuildingConfig';
-import { InputGuard } from '../core/InputGuard';
 import { hexToColor } from '../core/ColorUtil';
+import { InputGuard } from '../core/InputGuard';
+import { SimApi } from '../core/sim/SimApi';
+import { TownLevel } from '../core/sim/types';
+import {
+    drawShadow, formatNumber, makeIcon, makeLabel, makePanelNode, makeRoundButton,
+    UI_COLOR, UI_FONT, UI_PALETTE, UI_RADIUS, UI_SHEET_RADIUS,
+} from './UiTheme';
 
 const { ccclass } = _decorator;
 
-/** 一个可点的建筑按钮 */
-interface BuildingButton {
-    node: Node;
-    frame: Graphics;
+/** 底栏页签。cats = buildings.json 里归到这一页的 category；没列到的类别进最后一页 */
+export const BAR_TABS: { key: string; label: string; cats: string[] }[] = [
+    { key: '住宅', label: '住宅', cats: ['住宅'] },
+    { key: '店铺', label: '店铺', cats: ['店铺'] },
+    { key: '工业', label: '工业', cats: ['工业'] },
+    { key: '公共', label: '公共', cats: ['公共', '金融'] },
+    { key: '设施', label: '道路·设施', cats: ['设施'] },
+];
+
+const LEVEL_ORDER: TownLevel[] = ['village', 'town', 'county', 'city', 'top100'];
+const LEVEL_NAME: Record<TownLevel, string> = {
+    village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县',
+};
+
+/** economy.json 里建造栏要用的两项 */
+interface Econ { cost: number; unlock: TownLevel }
+
+interface Card {
     def: BuildingDef;
+    tab: string;
+    node: Node;
+    g: Graphics;
+    /** 缩略图（拿到 ArtLibrary 之后才有图） */
+    thumb: Sprite;
+    /** 没有贴图时的色块 */
+    swatch: Graphics;
+    name: Label;
+    price: Label;
+    coin: Sprite;
+    lock: Sprite;
+    /** 上次画的状态，变了才重画 */
+    state: string;
 }
 
 /**
- * 底部的建筑选择栏 + 拆除开关。
+ * 底部建造栏（T406，DESIGN 8.2）。
  *
- * 竖屏只有 720 宽，15 种建筑一屏塞不下，所以做成横向可滑动的一排。
- * 用 Graphics 画按钮而不是 Sprite，理由和地图一样：占位阶段没有美术资源（D003）。
+ *   ┌──────────────── 白色底板（顶部大圆角 + 投影）────────────────┐
+ *   │  [住宅] [店铺] [工业] [公共] [道路·设施]   ← 类别页签          │
+ *   │  ┌────┐ ┌────┐ ┌────┐ ┌────┐ …            ← 横向滚动的建筑卡片 │
+ *   │  │缩略│ │    │ │    │ │    │                                   │
+ *   │  │名字│ │    │ │    │ │    │                                   │
+ *   │  │¥价 │ │    │ │    │ │    │                                   │
+ *   └──────────────────────────────────────────────────────────────┘
+ *   左上角浮着一个圆形「拆除」开关。
  *
- * 布局约定（容易算错，记在这里）：
- *   所有按钮的 x 是"相对整条栏中心"的坐标，栏中心在屏幕正中，宽度等于屏幕宽。
- *   第 i 个按钮的中心 = -屏宽/2 + 内边距 + 按钮宽/2 + i*(按钮宽+间距) - 滚动量
- *   注意要再加半个按钮宽，否则第一个按钮会有一半跑到屏幕外。
+ * 卡片状态：常态白 / 选中（蓝框浅蓝底、上浮、右上对勾）/ 买不起（缩略图变灰、价格变红）/
+ *           未解锁（缩略图变灰、中间一把锁、价格换成「镇上解锁」，点了不选中）。
  *
- * 整条栏会登记到 InputGuard，点按钮的时候地图不会跟着响应（D005）。
+ * 需要的外部数据（都可以晚到，没到之前用占位）：
+ *   - bindSim(sim)：canAfford、城镇等级。UiRoot 会自动找到建造栏并绑上
+ *   - setArt(art)：缩略图用 ArtLibrary 里那栋楼的贴图。没有就画色块
+ *   - 价格：自己读 economy.json 的 cost（数值不写死在代码里）
+ *
+ * 整块底板 + 拆除按钮登记 InputGuard（D005）。
  */
 @ccclass('BuildingBar')
 export class BuildingBar extends Component {
-    private _defs: BuildingDef[] = [];
-    private _buttons: BuildingButton[] = [];
+    /** 底栏总高：上 16 + 页签 52 + 14 + 卡片 172 + 下 20 */
+    static readonly BAR_HEIGHT = 274;
+    static readonly TAB_H = 52;
+    static readonly ITEM_W = 132;
+    static readonly ITEM_H = 172;
+    static readonly ITEM_GAP = 14;
+    static readonly PADDING = 20;
+    /** 拆除按钮直径（浮在底板左上方） */
+    static readonly DEMOLISH_SIZE = 72;
 
-    /** 横向滚动量，0 表示最左；范围 [0, maxScroll] */
+    onSelect: ((def: BuildingDef | null) => void) | null = null;
+    onDemolishToggle: ((on: boolean) => void) | null = null;
+    /** 点了未解锁 / 买不起的卡片：给一句提示（UiRoot 接到顶栏提示条） */
+    onNotice: ((text: string) => void) | null = null;
+
+    private _defs: BuildingDef[] = [];
+    private _cards: Card[] = [];
+    private _tab = BAR_TABS[1].key;
+    private _tabs: { key: string; node: Node; g: Graphics; label: Label; w: number }[] = [];
+    private _cardLayer: Node | null = null;
+
     private _scrollX = 0;
     private _dragging = false;
     private _dragDist = 0;
 
     private _demolishMode = false;
+    private _demolishBtn: ReturnType<typeof makeRoundButton> | null = null;
     private _selectedId: string | null = null;
 
-    /** 一条栏的总高 */
-    static readonly BAR_HEIGHT = 200;
-    /** 按钮尺寸与间距 */
-    static readonly ITEM_W = 112;
-    static readonly ITEM_H = 128;
-    static readonly ITEM_GAP = 10;
-    static readonly PADDING = 14;
+    private _sim: SimApi | null = null;
+    private _art: ArtLibrary | null = null;
+    private _artApplied = false;
+    private _econ = new Map<string, Econ>();
+    private _pollT = 0;
 
-    onSelect: ((def: BuildingDef | null) => void) | null = null;
-    onDemolishToggle: ((on: boolean) => void) | null = null;
+    private _hintArrow: Node | null = null;
 
     build(defs: BuildingDef[]): void {
         this._defs = defs;
-
         const visible = view.getVisibleSize();
-        const barH = BuildingBar.BAR_HEIGHT;
+        const W = visible.width;
+        const H = BuildingBar.BAR_HEIGHT;
 
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
-        trans.setContentSize(visible.width, barH);
-        this.node.setPosition(0, -visible.height / 2 + barH / 2, 0);
+        trans.setContentSize(W, H);
+        this.node.setPosition(0, -visible.height / 2 + H / 2, 0);
 
-        this.buildBackground(visible.width, barH);
-        this.buildItems();
-        this.buildDemolishButton(visible.width, barH);
+        this.buildSheet(W, H);
+        this.buildTabs(W, H);
+        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H);
+        this._cardLayer.setPosition(0, -H / 2 + 20 + BuildingBar.ITEM_H / 2, 0);
+        for (const def of defs) this._cards.push(this.buildCard(def));
+        this.buildDemolishButton(W, H);
         this.registerBarScroll();
-        this.applyScroll();
+        this.applyTab();
+        this.loadEconomy();
 
-        // 整条栏吃掉点击，地图不响应
         InputGuard.add(this.node);
     }
 
-    private buildBackground(width: number, height: number): void {
-        const bgNode = new Node('BarBg');
-        bgNode.layer = Layers.Enum.UI_2D;
-        bgNode.addComponent(UITransform).setContentSize(width, height);
-        this.node.addChild(bgNode);
+    // ───────────────────────── 外部数据 ─────────────────────────
 
-        const g = bgNode.addComponent(Graphics);
-        g.fillColor = new Color(20, 20, 26, 232);
-        g.rect(-width / 2, -height / 2, width, height);
-        g.fill();
-        // 顶边一条亮线，和地图区分开
-        g.fillColor = new Color(120, 120, 140, 200);
-        g.rect(-width / 2, height / 2 - 2, width, 2);
+    /** 接模拟层：买得起吗、城镇等级。可以晚于 build 调 */
+    bindSim(sim: SimApi): void {
+        this._sim = sim;
+        this.refreshCards(true);
+    }
+
+    /** 接贴图仓库（WorldView 的那一份，别新建，省一份纹理内存）。贴图没加载完也可以先给 */
+    setArt(art: ArtLibrary): void {
+        this._art = art;
+        this._artApplied = false;
+        this.tryApplyArt();
+    }
+
+    get hasSim(): boolean {
+        return !!this._sim;
+    }
+
+    get hasArt(): boolean {
+        return !!this._art;
+    }
+
+    get demolishMode(): boolean {
+        return this._demolishMode;
+    }
+
+    /** 价格：economy.json 的 cost（支线 A 维护）。读不到就不显示价格 */
+    private loadEconomy(): void {
+        resources.load('config/economy', JsonAsset, (err, asset) => {
+            if (err || !asset || !asset.json) return;
+            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel }[] }).buildings;
+            if (!Array.isArray(list)) return;
+            for (const b of list) {
+                if (!b || typeof b.id !== 'string') continue;
+                this._econ.set(b.id, {
+                    cost: typeof b.cost === 'number' ? b.cost : 0,
+                    unlock: LEVEL_ORDER.indexOf(b.unlock as TownLevel) >= 0 ? b.unlock as TownLevel : 'village',
+                });
+            }
+            this.refreshCards(true);
+        });
+    }
+
+    // ───────────────────────── 底板 + 页签 ─────────────────────────
+
+    private buildSheet(W: number, H: number): void {
+        const bg = makePanelNode(this.node, 'BarBg', W, H);
+        const g = bg.addComponent(Graphics);
+        const R = UI_SHEET_RADIUS;
+        // 只要顶部圆角：往下多画 R，伸出屏幕
+        drawShadow(g, -W / 2, -H / 2 - R, W, H + R, R, 4);
+        g.fillColor = UI_COLOR.panel;
+        g.roundRect(-W / 2, -H / 2 - R, W, H + R, R);
         g.fill();
     }
 
-    /** 把建筑按钮排成一排（x 先算好，滚动时再整体位移） */
-    private buildItems(): void {
-        for (let i = 0; i < this._defs.length; i++) {
-            this._buttons.push(this.buildItem(this._defs[i]));
+    private buildTabs(W: number, H: number): void {
+        const y = H / 2 - 16 - BuildingBar.TAB_H / 2;
+        const gap = 10;
+        // 「道路·设施」字多，宽一点；其余等宽
+        const widths = BAR_TABS.map((t) => (t.label.length > 2 ? 156 : 108));
+        const total = widths.reduce((a, b) => a + b, 0) + gap * (BAR_TABS.length - 1);
+        let x = -total / 2;
+        for (let i = 0; i < BAR_TABS.length; i++) {
+            const t = BAR_TABS[i];
+            const w = widths[i];
+            const node = makePanelNode(this.node, `Tab_${t.key}`, w, BuildingBar.TAB_H);
+            node.setPosition(x + w / 2, y, 0);
+            const g = node.addComponent(Graphics);
+            const label = makeLabel(node, 'Txt', t.label, UI_FONT.small, UI_COLOR.textDim, w - 12);
+            label.isBold = true;
+            node.on(Node.EventType.TOUCH_END, () => {
+                if (this._dragging) return;
+                this.selectTab(t.key);
+            }, this);
+            this._tabs.push({ key: t.key, node, g, label, w });
+            x += w + gap;
         }
     }
 
-    private buildItem(def: BuildingDef): BuildingButton {
+    /** 切页签（开局提示、外部跳转也能调）。不清当前选中的建筑 */
+    selectTab(key: string): void {
+        if (!BAR_TABS.some((t) => t.key === key)) return;
+        this._tab = key;
+        this._scrollX = 0;
+        this.applyTab();
+    }
+
+    get tab(): string {
+        return this._tab;
+    }
+
+    private applyTab(): void {
+        const h = BuildingBar.TAB_H;
+        for (const t of this._tabs) {
+            const on = t.key === this._tab;
+            t.g.clear();
+            t.g.fillColor = on ? UI_PALETTE.blue : UI_COLOR.button;
+            t.g.roundRect(-t.w / 2, -h / 2, t.w, h, h / 2);
+            t.g.fill();
+            t.label.color = on ? UI_PALETTE.white : UI_COLOR.textDim;
+        }
+        for (const c of this._cards) c.node.active = c.tab === this._tab;
+        this.applyScroll();
+        this.refreshCards(true);
+    }
+
+    private static tabOf(def: BuildingDef): string {
+        for (const t of BAR_TABS) if (t.cats.indexOf(def.category) >= 0) return t.key;
+        return BAR_TABS[BAR_TABS.length - 1].key;
+    }
+
+    // ───────────────────────── 卡片 ─────────────────────────
+
+    private buildCard(def: BuildingDef): Card {
         const w = BuildingBar.ITEM_W;
         const h = BuildingBar.ITEM_H;
+        const node = makePanelNode(this._cardLayer!, `Item_${def.id}`, w, h);
+        const g = node.addComponent(Graphics);
 
-        const node = new Node(`Item_${def.id}`);
-        node.layer = Layers.Enum.UI_2D;
-        node.addComponent(UITransform).setContentSize(w, h);
-        this.node.addChild(node);
+        // 图区：卡片上部 116×96
+        const imgW = w - 16, imgH = 96;
+        const imgY = h / 2 - 8 - imgH / 2;
+        const swatchNode = makePanelNode(node, 'Swatch', imgW, imgH);
+        swatchNode.setPosition(0, imgY, 0);
+        const swatch = swatchNode.addComponent(Graphics);
+        this.drawSwatch(swatch, def, imgW, imgH);
 
-        // 选中框：默认不画，选中时描一圈亮色 + 浅底
-        const frame = node.addComponent(Graphics);
+        const thumbNode = makePanelNode(node, 'Thumb', imgW, imgH);
+        thumbNode.setPosition(0, imgY, 0);
+        const thumb = thumbNode.addComponent(Sprite);
+        thumb.sizeMode = Sprite.SizeMode.CUSTOM;
+        thumbNode.active = false;
 
-        // 建筑色块：按真实占格比例画，1×1 和 2×2 一眼能分出来
-        const swatchNode = new Node('Swatch');
-        swatchNode.layer = Layers.Enum.UI_2D;
-        swatchNode.addComponent(UITransform).setContentSize(w, h);
-        swatchNode.setPosition(0, 16, 0);
-        node.addChild(swatchNode);
-        const sg = swatchNode.addComponent(Graphics);
-        const maxSide = 58;
-        const unit = maxSide / Math.max(def.width, def.height);
-        const sw = Math.max(10, unit * def.width * 0.86);
-        const sh = Math.max(10, unit * def.height * 0.86);
-        hexToColor(def.color, sg.fillColor);
-        sg.rect(-sw / 2, -sh / 2, sw, sh);
-        sg.fill();
-        // 顶部一条暗边，有"上面"的方向感
-        const roofH = Math.max(4, Math.round(sh / 5));
-        sg.fillColor = new Color(0, 0, 0, 70);
-        sg.rect(-sw / 2, sh / 2 - roofH, sw, roofH);
-        sg.fill();
+        const lock = makeIcon(node, 'lock', 40, UI_COLOR.textDim);
+        lock.node.setPosition(0, imgY, 0);
+        lock.node.active = false;
 
-        // 名字，贴在按钮底部
-        const nameNode = new Node('Name');
-        nameNode.layer = Layers.Enum.UI_2D;
-        nameNode.addComponent(UITransform).setContentSize(w, 30);
-        nameNode.setPosition(0, -h / 2 + 18, 0);
-        node.addChild(nameNode);
-        const label = nameNode.addComponent(Label);
-        label.string = def.name;
-        label.fontSize = 20;
-        label.lineHeight = 24;
-        label.color = new Color(235, 235, 240, 255);
-        label.horizontalAlign = Label.HorizontalAlign.CENTER;
-        label.verticalAlign = Label.VerticalAlign.CENTER;
-        label.overflow = Label.Overflow.SHRINK;
+        const name = makeLabel(node, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
+        name.isBold = true;
+        name.node.setPosition(0, -h / 2 + 52, 0);
+
+        const coin = makeIcon(node, 'coin', 22);
+        const price = makeLabel(node, 'Price', '', UI_FONT.small - 1, UI_COLOR.text, w - 40);
+        price.node.setPosition(10, -h / 2 + 22, 0);
+        coin.node.setPosition(-w / 2 + 18, -h / 2 + 22, 0);
 
         node.on(Node.EventType.TOUCH_END, () => {
-            // 刚刚是在滑动列表，就不要当成点击
             if (this._dragging) return;
             this.handleItemClick(def);
         }, this);
 
-        return { node, frame, def };
+        return { def, tab: BuildingBar.tabOf(def), node, g, thumb, swatch, name, price, coin, lock, state: '' };
     }
 
-    /** 整条栏负责横向滚动 */
+    /** 没有贴图时的占位：一块等距菱形色块（按占格画大小），比方块更像"一块地上的楼" */
+    private drawSwatch(g: Graphics, def: BuildingDef, w: number, h: number): void {
+        g.clear();
+        const c = new Color();
+        hexToColor(def.color, c);
+        const side = def.flat ? 0.9 : 0.62 + 0.14 * Math.min(2, Math.max(def.width, def.height) - 1);
+        const dw = w * side, dh = dw / 2;
+        const lift = def.flat ? 0 : 26;
+        const cy = -h / 2 + dh / 2 + 10;
+        // 侧面（暗）
+        if (lift > 0) {
+            g.fillColor = new Color(c.r * 0.7, c.g * 0.7, c.b * 0.7, 255);
+            g.moveTo(-dw / 2, cy); g.lineTo(0, cy - dh / 2); g.lineTo(dw / 2, cy);
+            g.lineTo(dw / 2, cy + lift); g.lineTo(0, cy - dh / 2 + lift); g.lineTo(-dw / 2, cy + lift); g.close();
+            g.fill();
+        }
+        // 顶面
+        g.fillColor = c;
+        const ty = cy + lift;
+        g.moveTo(-dw / 2, ty); g.lineTo(0, ty + dh / 2); g.lineTo(dw / 2, ty); g.lineTo(0, ty - dh / 2); g.close();
+        g.fill();
+    }
+
+    /** 缩略图：建筑用图集里那张（朝左的默认版），马路用地面图集里一段直路，桥用桥面 */
+    private frameFor(def: BuildingDef): SpriteFrame | null {
+        const art = this._art;
+        if (!art) return null;
+        if (def.road) return art.groundByName(`${def.road}-5`) ?? art.get(def.id);
+        if (def.id === 'bridge') return art.groundByName('bridge-gx') ?? art.get(def.id);
+        return art.get(def.id);
+    }
+
+    private tryApplyArt(): void {
+        const art = this._art;
+        if (!art || this._artApplied || !art.loaded) return;
+        this._artApplied = true;
+        const imgW = BuildingBar.ITEM_W - 16, imgH = 96;
+        for (const c of this._cards) {
+            const f = this.frameFor(c.def);
+            if (!f) continue;
+            // 等比缩进图区（宽高都不超），贴底放：楼"站"在图区底边上
+            const s = Math.min(imgW / f.rect.width, imgH / f.rect.height);
+            const tw = f.rect.width * s, th = f.rect.height * s;
+            c.thumb.spriteFrame = f;
+            const t = c.thumb.node.getComponent(UITransform)!;
+            t.setContentSize(tw, th);
+            const imgY = BuildingBar.ITEM_H / 2 - 8 - imgH / 2;
+            c.thumb.node.setPosition(0, imgY - imgH / 2 + th / 2, 0);
+            c.thumb.node.active = true;
+            c.swatch.node.active = false;
+        }
+        this.refreshCards(true);
+    }
+
+    private isLocked(def: BuildingDef): Econ | null {
+        const e = this._econ.get(def.id);
+        const sim = this._sim;
+        if (!e || !sim) return null;
+        return LEVEL_ORDER.indexOf(e.unlock) > LEVEL_ORDER.indexOf(sim.state.level) ? e : null;
+    }
+
+    /** 按买得起 / 解锁 / 选中重画卡片；只重画状态变了的 */
+    private refreshCards(force = false): void {
+        for (const c of this._cards) {
+            if (!c.node.active) continue;
+            const locked = this.isLocked(c.def);
+            const afford = this._sim ? this._sim.canAfford(c.def.id) : true;
+            const selected = c.def.id === this._selectedId;
+            const st = `${locked ? 'L' : ''}${afford ? 'A' : ''}${selected ? 'S' : ''}${this._econ.size}`;
+            if (!force && st === c.state) continue;
+            c.state = st;
+            this.drawCard(c, !!locked, afford, selected);
+        }
+    }
+
+    private drawCard(c: Card, locked: boolean, afford: boolean, selected: boolean): void {
+        const w = BuildingBar.ITEM_W, h = BuildingBar.ITEM_H;
+        const g = c.g;
+        g.clear();
+        if (selected) drawShadow(g, -w / 2, -h / 2, w, h, UI_RADIUS, 3);
+        g.fillColor = selected ? UI_COLOR.selectedFill : UI_PALETTE.white;
+        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS);
+        g.fill();
+        g.lineWidth = selected ? 4 : 2;
+        g.strokeColor = selected ? UI_PALETTE.blue : UI_COLOR.border;
+        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS);
+        g.stroke();
+        // 图区浅底
+        const imgW = w - 16, imgH = 96, imgY = h / 2 - 8 - imgH / 2;
+        g.fillColor = selected ? new Color(214, 232, 250, 255) : UI_COLOR.block;
+        g.roundRect(-imgW / 2, imgY - imgH / 2, imgW, imgH, 12);
+        g.fill();
+        if (selected) {
+            // 右上角对勾徽章
+            g.fillColor = UI_PALETTE.blue;
+            g.circle(w / 2 - 14, h / 2 - 14, 15);
+            g.fill();
+        }
+        this.setCheck(c, selected);
+
+        const dim = locked || !afford;
+        c.thumb.grayscale = dim;
+        c.thumb.color = locked ? new Color(255, 255, 255, 110) : UI_PALETTE.white;
+        const so = c.swatch.node.getComponent(UIOpacity) ?? c.swatch.node.addComponent(UIOpacity);
+        so.opacity = dim ? 110 : 255;
+        c.lock.node.active = locked;
+        c.name.color = locked ? UI_COLOR.textDim : UI_COLOR.text;
+
+        const e = this._econ.get(c.def.id);
+        if (locked && e) {
+            c.price.string = `${LEVEL_NAME[e.unlock]}解锁`;
+            c.price.color = UI_COLOR.textDim;
+            c.coin.node.active = false;
+            c.price.node.setPosition(0, -h / 2 + 22, 0);
+        } else {
+            c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
+            c.price.color = afford ? UI_COLOR.text : UI_COLOR.down;
+            c.coin.node.active = !!e;
+            c.price.node.setPosition(10, -h / 2 + 22, 0);
+        }
+        // 选中上浮一点
+        c.node.setPosition(c.node.position.x, selected ? 6 : 0, 0);
+    }
+
+    private setCheck(c: Card, on: boolean): void {
+        let check = c.node.getChildByName('Icon_check');
+        if (!check && on) {
+            const s = makeIcon(c.node, 'check', 18);
+            s.node.setPosition(BuildingBar.ITEM_W / 2 - 14, BuildingBar.ITEM_H / 2 - 14, 0);
+            check = s.node;
+        }
+        if (check) check.active = on;
+    }
+
+    // ───────────────────────── 滚动 ─────────────────────────
+
     private registerBarScroll(): void {
         this.node.on(Node.EventType.TOUCH_START, () => {
             this._dragDist = 0;
             this._dragging = false;
         }, this);
-
         this.node.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => {
             const d = e.getUIDelta();
             this._dragDist += Math.abs(d.x);
-            if (this._dragDist > 6) this._dragging = true;
+            if (this._dragDist > 8) this._dragging = true;
             if (this._dragging) this.scrollBy(-d.x);
         }, this);
-
         const end = () => {
             this._dragging = false;
             this._dragDist = 0;
@@ -174,9 +445,12 @@ export class BuildingBar extends Component {
         this.node.on(Node.EventType.TOUCH_CANCEL, end, this);
     }
 
-    /** 内容总宽（含两侧内边距） */
+    private visibleCards(): Card[] {
+        return this._cards.filter((c) => c.tab === this._tab);
+    }
+
     private contentWidth(): number {
-        const n = this._defs.length;
+        const n = this.visibleCards().length;
         if (n === 0) return 0;
         return BuildingBar.PADDING * 2 + n * BuildingBar.ITEM_W + (n - 1) * BuildingBar.ITEM_GAP;
     }
@@ -190,114 +464,119 @@ export class BuildingBar extends Component {
         this.applyScroll();
     }
 
-    /** 按当前滚动量摆放所有按钮 */
     private applyScroll(): void {
         const visibleW = view.getVisibleSize().width;
         const max = this.maxScroll();
         if (this._scrollX < 0) this._scrollX = 0;
         if (this._scrollX > max) this._scrollX = max;
-
         const startX = -visibleW / 2 + BuildingBar.PADDING + BuildingBar.ITEM_W / 2;
-        for (let i = 0; i < this._buttons.length; i++) {
+        const cards = this.visibleCards();
+        for (let i = 0; i < cards.length; i++) {
             const x = startX + i * (BuildingBar.ITEM_W + BuildingBar.ITEM_GAP) - this._scrollX;
-            // 按钮中心随滚动移到栏外时，直接靠裁剪交给 GPU（不显式隐藏，避免闪烁）
-            this._buttons[i].node.setPosition(x, 0, 0);
+            cards[i].node.setPosition(x, cards[i].def.id === this._selectedId ? 6 : 0, 0);
         }
     }
 
+    // ───────────────────────── 点击 ─────────────────────────
+
     private handleItemClick(def: BuildingDef): void {
+        const locked = this.isLocked(def);
+        if (locked) {
+            if (this.onNotice) this.onNotice(`${def.name}：县城升到「${LEVEL_NAME[locked.unlock]}」后解锁`);
+            return;
+        }
         // 再点一次已选中的 → 取消选择
         if (this._selectedId === def.id) {
             this._selectedId = null;
-            this.refreshSelection();
+            this.refreshCards();
             if (this.onSelect) this.onSelect(null);
             return;
         }
         this._selectedId = def.id;
-        this._demolishMode = false;
-        this.refreshSelection();
+        if (this._demolishMode) {
+            this._demolishMode = false;
+            if (this._demolishBtn) this._demolishBtn.setActive(false);
+        }
+        this.refreshCards();
         if (this.onSelect) this.onSelect(def);
         if (this.onDemolishToggle) this.onDemolishToggle(false);
-    }
-
-    /** 右上角的拆除开关，浮在建筑列表上方 */
-    private buildDemolishButton(visibleW: number, barH: number): void {
-        const w = 96;
-        const h = 54;
-        const node = new Node('DemolishBtn');
-        node.layer = Layers.Enum.UI_2D;
-        node.addComponent(UITransform).setContentSize(w, h);
-        // 放在栏的右上角内侧
-        node.setPosition(visibleW / 2 - w / 2 - 12, barH / 2 - h / 2 - 8, 0);
-        this.node.addChild(node);
-
-        const g = node.addComponent(Graphics);
-        this.drawDemolish(g, w, h, false);
-
-        const labelNode = new Node('Txt');
-        labelNode.layer = Layers.Enum.UI_2D;
-        labelNode.addComponent(UITransform).setContentSize(w, h);
-        node.addChild(labelNode);
-        const label = labelNode.addComponent(Label);
-        label.string = '拆除';
-        label.fontSize = 24;
-        label.lineHeight = 28;
-        label.color = new Color(255, 255, 255, 255);
-        label.horizontalAlign = Label.HorizontalAlign.CENTER;
-        label.verticalAlign = Label.VerticalAlign.CENTER;
-
-        node.on(Node.EventType.TOUCH_END, () => {
-            if (this._dragging) return;
-            this._demolishMode = !this._demolishMode;
-            if (this._demolishMode) this._selectedId = null;
-            this.drawDemolish(g, w, h, this._demolishMode);
-            this.refreshSelection();
-            // 只走这一个回调：进入拆除模式时 WorldView 自己会清掉选中的建筑。
-            // 这里不要再调 onSelect(null)，否则 selectBuilding 会把刚设好的拆除状态又清掉。
-            if (this.onDemolishToggle) this.onDemolishToggle(this._demolishMode);
-        }, this);
-    }
-
-    private drawDemolish(g: Graphics, w: number, h: number, active: boolean): void {
-        g.clear();
-        g.fillColor = active ? new Color(180, 40, 40, 240) : new Color(60, 60, 72, 230);
-        g.rect(-w / 2, -h / 2, w, h);
-        g.fill();
-        g.lineWidth = 2;
-        g.strokeColor = active ? new Color(255, 140, 140, 255) : new Color(120, 120, 140, 255);
-        g.rect(-w / 2, -h / 2, w, h);
-        g.stroke();
-    }
-
-    /** 高亮当前选中项 */
-    private refreshSelection(): void {
-        const w = BuildingBar.ITEM_W;
-        const h = BuildingBar.ITEM_H;
-        for (let i = 0; i < this._buttons.length; i++) {
-            const btn = this._buttons[i];
-            const active = btn.def.id === this._selectedId;
-            btn.frame.clear();
-            if (active) {
-                btn.frame.fillColor = new Color(255, 214, 90, 34);
-                btn.frame.rect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4);
-                btn.frame.fill();
-                btn.frame.lineWidth = 3;
-                btn.frame.strokeColor = new Color(255, 214, 90, 255);
-                btn.frame.rect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4);
-                btn.frame.stroke();
-            }
-            const s = active ? 1.06 : 1;
-            btn.node.setScale(s, s, 1);
+        if (this._sim && !this._sim.canAfford(def.id) && this.onNotice) {
+            this.onNotice(`建设资金不够盖${def.name}`);
         }
     }
 
-    /** 取消所有选中 */
+    /** 底板左上方浮着的圆形拆除开关：常态白底红锤子，开着时红底白锤子 */
+    private buildDemolishButton(W: number, H: number): void {
+        const S = BuildingBar.DEMOLISH_SIZE;
+        const btn = makeRoundButton(this.node, 'DemolishBtn', 'demolish', S, () => {
+            if (this._dragging) return;
+            this._demolishMode = !this._demolishMode;
+            if (this._demolishMode) this._selectedId = null;
+            btn.setActive(this._demolishMode);
+            this.refreshCards();
+            // 只走这一个回调：进入拆除模式时 WorldView 自己会清掉选中的建筑
+            if (this.onDemolishToggle) this.onDemolishToggle(this._demolishMode);
+        }, UI_PALETTE.coral, UI_PALETTE.coral);
+        btn.node.setPosition(-W / 2 + 16 + S / 2, H / 2 + 18 + S / 2, 0);
+        this._demolishBtn = btn;
+        // 按钮在底板外面，单独登记
+        InputGuard.add(btn.node);
+    }
+
+    /** 取消所有选中（放好一栋 / 外部取消时调） */
     clearSelection(): void {
         this._selectedId = null;
-        this.refreshSelection();
+        this.refreshCards();
+        this.applyScroll();
+    }
+
+    /** 退出拆除模式（外部取消时调），不触发回调 */
+    clearDemolish(): void {
+        this._demolishMode = false;
+        if (this._demolishBtn) this._demolishBtn.setActive(false);
+    }
+
+    // ───────────────────────── 开局提示箭头（T407） ─────────────────────────
+
+    /** 在某个页签上方显示上下跳动的箭头；null = 收起 */
+    showTabHint(key: string | null): void {
+        if (this._hintArrow) {
+            Tween.stopAllByTarget(this._hintArrow);
+            this._hintArrow.destroy();
+            this._hintArrow = null;
+        }
+        if (!key) return;
+        const tab = this._tabs.find((t) => t.key === key);
+        if (!tab) return;
+        const arrow = makePanelNode(this.node, 'TabHint', 52, 60);
+        // 白色描边：先画一个大一圈的白箭头，再叠珊瑚色箭头，压在地图上也看得清
+        const outline = makeIcon(arrow, 'arrow-down', 58, UI_PALETTE.white);
+        outline.node.setPosition(0, 0, 0);
+        const ic = makeIcon(arrow, 'arrow-down', 46, UI_PALETTE.coral);
+        ic.node.setPosition(0, 1, 0);
+        const baseY = tab.node.position.y + BuildingBar.TAB_H / 2 + 40;
+        arrow.setPosition(tab.node.position.x, baseY, 0);
+        tween(arrow)
+            .repeatForever(tween<Node>()
+                .to(0.4, { position: new Vec3(tab.node.position.x, baseY + 14, 0) }, { easing: 'sineOut' })
+                .to(0.4, { position: new Vec3(tab.node.position.x, baseY, 0) }, { easing: 'sineIn' }))
+            .start();
+        this._hintArrow = arrow;
+    }
+
+    protected update(dt: number): void {
+        if (!this._artApplied) this.tryApplyArt();
+        // 资金和等级随时在变：每 0.3 秒对一次卡片状态（只重画变了的）
+        this._pollT += dt;
+        if (this._pollT >= 0.3) {
+            this._pollT = 0;
+            if (this._sim) this.refreshCards();
+        }
     }
 
     protected onDestroy(): void {
         InputGuard.remove(this.node);
+        if (this._demolishBtn) InputGuard.remove(this._demolishBtn.node);
+        if (this._hintArrow) Tween.stopAllByTarget(this._hintArrow);
     }
 }

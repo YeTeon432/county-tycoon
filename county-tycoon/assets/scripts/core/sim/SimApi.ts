@@ -34,4 +34,6 @@ export interface SimSummary {
     avgSalary: number;
     avgSavings: number;
     avgMood: number;
+    /** 有交通工具（非步行）的人数（D022） */
+    vehicles: number;
 }

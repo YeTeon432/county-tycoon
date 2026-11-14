@@ -1,4 +1,4 @@
-import { _decorator, Component, Layers, Node, Sprite, SpriteFrame, UITransform, Vec2, Vec3, tween } from 'cc';
+import { _decorator, Component, JsonAsset, Layers, Node, Sprite, SpriteFrame, UITransform, Vec2, Vec3, resources, tween } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
@@ -9,7 +9,8 @@ const { ccclass } = _decorator;
 /**
  * 让城镇动起来（T210 / T219，D017）：行人、电动车、汽车沿道路走，店铺冒金币。
  *
- * - 行人 / 电动车走所有道路；汽车只走城市道路（PRD：土路不走汽车）。
+ * - D022：街上每个移动的东西都是一位居民——没车的走路，有车的大多开自己的车（电动车 / 摩托车 / 汽车），
+ *   不再有匿名汽车。所有人都走所有道路；速度 = 交通工具基础速度 × 当前道路倍率 × 个人差异（config/traffic.json）。
  * - 走法：从一格中心走到相邻一格中心，到了再随机挑下一格（偏好直走，不掉头，死路才掉头）。
  *   横向偏移一个"车道"值：行人走人行道，车靠一侧，对向车自然分两边。
  * - 节点挂进 BuildingLayer 的 Objects，和建筑共用前后排序（gx+gy），被楼挡住时会真的被挡住。
@@ -17,7 +18,34 @@ const { ccclass } = _decorator;
  * - 数量按道路格数自动调整，道路增删后多余的会消失、缺的会补上。
  * - 纯表现层：不读不写任何经营数值。金币只是视觉提示，真正的收入结算是 M2 的事。
  */
-type Kind = 'ped' | 'scoot' | 'car';
+type Kind = 'ped' | 'scoot' | 'moto' | 'car';
+type VehicleKey = 'walk' | 'ebike' | 'moto' | 'car';
+const KIND_OF: Record<VehicleKey, Kind> = { walk: 'ped', ebike: 'scoot', moto: 'moto', car: 'car' };
+const VEHICLE_OF: Record<Kind, VehicleKey> = { ped: 'walk', scoot: 'ebike', moto: 'moto', car: 'car' };
+
+/** config/traffic.json（D022，DESIGN 11.3）。加载不到就用这份 */
+interface TrafficConfig {
+    vehicles: Record<VehicleKey, { speed: number }>;
+    roads: Record<string, Partial<Record<VehicleKey, number>>>;
+    personalSpread: number;
+    driveShare: number;
+}
+const DEFAULT_TRAFFIC: TrafficConfig = {
+    vehicles: { walk: { speed: 0.6 }, ebike: { speed: 1.3 }, moto: { speed: 1.7 }, car: { speed: 2.2 } },
+    roads: {
+        dirt: { walk: 1, ebike: 0.8, moto: 0.75, car: 0.45 },
+        city: { walk: 1, ebike: 1, moto: 1, car: 1 },
+    },
+    personalSpread: 0.1,
+    driveShare: 0.7,
+};
+/** 影子帧（支线 C）和它在各类图里的着地点高度（贴图像素，图底边往上；actors.py 的 SETTLE） */
+const SHADOW: Record<Kind, { frame: string; settle: number }> = {
+    ped: { frame: 'shadow-s', settle: 5 },
+    scoot: { frame: 'shadow-m', settle: 8 },
+    moto: { frame: 'shadow-m', settle: 10 },
+    car: { frame: 'shadow-l', settle: 17 },
+};
 
 interface Agent {
     kind: Kind;
@@ -27,7 +55,7 @@ interface Agent {
     col: number; row: number;   // 出发格
     tc: number; tr: number;     // 目标格
     t: number;                  // 0..1
-    speed: number;              // 格 / 秒
+    speed: number;              // 基础速度 × 个人差异，格 / 秒（道路倍率每步再乘）
     side: number;               // 行人走哪侧人行道：±1
     anim: number;
     /** 这个小人是哪位居民（T311）；汽车和没有居民数据时为 null */
@@ -39,11 +67,14 @@ export interface WalkerInfo {
     id: number;
     gender: 'M' | 'F';
     age: number;
+    /** 交通工具（D022）；没有就当步行 */
+    vehicle?: VehicleKey;
 }
 
 const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
 const PED_SKINS = 6;
 const SCOOT_SKINS = 3;
+const MOTO_SKINS = 3;
 const CAR_SKINS = 3;
 
 @ccclass('LifeLayer')
@@ -63,6 +94,20 @@ export class LifeLayer extends Component {
     /** 居民名单来源（T311）。不设就退回随机小人（老行为） */
     private _residents: (() => readonly WalkerInfo[]) | null = null;
     private _residentCache: WalkerInfo[] = [];
+    private _traffic: TrafficConfig = DEFAULT_TRAFFIC;
+
+    protected start(): void {
+        resources.load('config/traffic', JsonAsset, (err, json) => {
+            if (err || !json || !json.json) { console.warn('[LifeLayer] traffic.json 加载失败，用默认速度', err); return; }
+            const t = json.json as Partial<TrafficConfig>;
+            this._traffic = {
+                vehicles: { ...DEFAULT_TRAFFIC.vehicles, ...(t.vehicles ?? {}) },
+                roads: { ...DEFAULT_TRAFFIC.roads, ...(t.roads ?? {}) },
+                personalSpread: typeof t.personalSpread === 'number' ? t.personalSpread : DEFAULT_TRAFFIC.personalSpread,
+                driveShare: typeof t.driveShare === 'number' ? t.driveShare : DEFAULT_TRAFFIC.driveShare,
+            };
+        });
+    }
 
     /** 接上模拟层：街上的行人、电动车骑手从真实居民里抽 */
     setResidentSource(fn: () => readonly WalkerInfo[]): void {
@@ -131,9 +176,16 @@ export class LifeLayer extends Component {
         return b && b.def.flat ? (b.def.road ?? 'city') : null;
     }
 
-    private canWalk(a: Agent, col: number, row: number): boolean {
-        const k = this.roadKind(col, row);
-        return a.kind === 'car' ? k === 'city' : k !== null;
+    /** D022：汽车也能上土路（只是慢），所有人都走所有道路 */
+    private canWalk(_a: Agent, col: number, row: number): boolean {
+        return this.roadKind(col, row) !== null;
+    }
+
+    /** 这一步的道路倍率：走过一半之前按出发格、之后按目标格 */
+    private roadFactor(a: Agent): number {
+        const k = (a.t < 0.5 ? this.roadKind(a.col, a.row) : this.roadKind(a.tc, a.tr)) ?? 'city';
+        const f = this._traffic.roads[k]?.[VEHICLE_OF[a.kind]];
+        return typeof f === 'number' && f > 0 ? f : 1;
     }
 
     private rescanRoads(): void {
@@ -169,49 +221,63 @@ export class LifeLayer extends Component {
                 if (id !== null && !alive.has(id)) this.despawn(i);
             }
         }
+        // 不会比真实人口多：5 个人的村子街上最多 5 个人。没接居民（老行为）时只有随机行人
         const pop = this._residents ? this._residentCache.length : Infinity;
-        const adults = this._residents ? this._residentCache.filter((r) => r.age >= 18 && r.age < 60).length : Infinity;
-        // 不会比真实人口多：5 个人的村子街上最多 5 个人
-        const scoot = Math.min(14, Math.floor(this._roads.length / 8), Math.floor(adults / 3));
-        const want: Record<Kind, number> = {
-            ped: Math.min(40, Math.floor(this._roads.length / 3), pop - scoot),
-            scoot,
-            car: Math.min(12, Math.floor(this._cityRoads.length / 7)),
-        };
-        (['ped', 'scoot', 'car'] as Kind[]).forEach((k) => {
-            let have = 0;
-            for (const a of this._agents) if (a.kind === k) have++;
-            for (; have < want[k]; have++) if (!this.spawn(k)) break;
-            for (let i = this._agents.length - 1; i >= 0 && have > want[k]; i--) {
-                if (this._agents[i].kind === k) { this.despawn(i); have--; }
-            }
-        });
+        const want = Math.min(48, Math.floor(this._roads.length / 2.5), pop);
+        let have = this._agents.length;
+        for (; have < want; have++) if (!this.spawn()) break;
+        for (let i = this._agents.length - 1; i >= 0 && have > want; i--) { this.despawn(i); have--; }
     }
 
-    private spawn(kind: Kind): boolean {
-        const pool = kind === 'car' ? this._cityRoads : this._roads;
+    /** 上街一个人：挑一位还没在街上的居民，有车的按 driveShare 的概率开车出门 */
+    private spawn(): boolean {
+        const pool = this._roads;
         if (pool.length === 0) return false;
+        let residentId: number | null = null;
+        let kind: Kind = 'ped';
+        let skin = Math.floor(Math.random() * PED_SKINS);
+        let personal = 1 + (Math.random() * 2 - 1) * this._traffic.personalSpread;
+        if (this._residents) {
+            const who = this.pickWalker();
+            if (!who) return false;
+            residentId = who.id;
+            const v = who.vehicle ?? 'walk';
+            if (v !== 'walk' && Math.random() < this._traffic.driveShare) kind = KIND_OF[v] ?? 'ped';
+            skin = LifeLayer.skinOf(who, kind);
+            // 个人差异按 id 固定：同一个人每次出门快慢一样
+            const h = ((who.id * 2654435761) >>> 0) / 4294967296;
+            personal = 1 + (h * 2 - 1) * this._traffic.personalSpread;
+        }
         const [col, row] = pool[Math.floor(Math.random() * pool.length)];
-        const skins = kind === 'ped' ? PED_SKINS : (kind === 'scoot' ? SCOOT_SKINS : CAR_SKINS);
         const node = new Node(`A_${kind}`);
         node.layer = Layers.Enum.UI_2D;
-        const ui = node.addComponent(UITransform);
-        ui.setAnchorPoint(new Vec2(0.5, 0));
-        const sprite = node.addComponent(Sprite);
+        node.addComponent(UITransform).setAnchorPoint(new Vec2(0.5, 0));
+        // 影子先加、身体后加：同一节点下后加的画在上面
+        const sh = this._art!.get(SHADOW[kind].frame);
+        if (sh) {
+            const sn = new Node('Shadow');
+            sn.layer = Layers.Enum.UI_2D;
+            const sz = this._art!.worldSize(sh);
+            sn.addComponent(UITransform).setContentSize(sz.width, sz.height);
+            const ss = sn.addComponent(Sprite);
+            ss.sizeMode = Sprite.SizeMode.CUSTOM;
+            ss.spriteFrame = sh;
+            // 老人（ped3）拄拐，图多垫了 3 像素（actors.py 的 SETTLE）
+            const settle = kind === 'ped' && skin === 3 ? 8 : SHADOW[kind].settle;
+            sn.setPosition(0, settle / this._art!.scale, 0);
+            node.addChild(sn);
+        }
+        const body = new Node('Body');
+        body.layer = Layers.Enum.UI_2D;
+        body.addComponent(UITransform).setAnchorPoint(new Vec2(0.5, 0));
+        const sprite = body.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.trim = false;
-        let residentId: number | null = null;
-        let skin = Math.floor(Math.random() * skins);
-        if (this._residents && kind !== 'car') {
-            const who = this.pickWalker(kind);
-            if (!who) { node.destroy(); return false; }
-            residentId = who.id;
-            skin = LifeLayer.skinOf(who, kind);
-        }
+        node.addChild(body);
         const a: Agent = {
             kind, node, sprite, skin, residentId,
             col, row, tc: col, tr: row, t: 1,
-            speed: kind === 'ped' ? 0.55 + Math.random() * 0.25 : (kind === 'scoot' ? 1.4 + Math.random() * 0.4 : 1.9 + Math.random() * 0.5),
+            speed: this._traffic.vehicles[VEHICLE_OF[kind]].speed * personal,
             side: Math.random() < 0.5 ? 1 : -1,
             anim: Math.random(),
         };
@@ -222,17 +288,19 @@ export class LifeLayer extends Component {
         return true;
     }
 
-    /** 挑一位还没上街的居民。电动车只给成年人骑 */
-    private pickWalker(kind: Kind): WalkerInfo | null {
+    /** 挑一位还没上街的居民（开不开车由他有没有车决定，模拟层只给成年人买车） */
+    private pickWalker(): WalkerInfo | null {
         const shown = new Set<number>();
         for (const a of this._agents) if (a.residentId !== null) shown.add(a.residentId);
-        const pool = this._residentCache.filter((r) => !shown.has(r.id) && (kind !== 'scoot' || (r.age >= 18 && r.age < 60)));
+        const pool = this._residentCache.filter((r) => !shown.has(r.id));
         return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
     }
 
     /** 外观跟着人走：老人银发、女性多穿浅色；同一个人每次出门都是同一身衣服 */
     private static skinOf(r: WalkerInfo, kind: Kind): number {
         if (kind === 'scoot') return r.id % SCOOT_SKINS;
+        if (kind === 'moto') return r.id % MOTO_SKINS;
+        if (kind === 'car') return r.id % CAR_SKINS;
         if (r.age >= 60) return 3;
         const female = [4, 0, 5], male = [1, 2, 5, 0];
         const set = r.gender === 'F' ? female : male;
@@ -270,7 +338,7 @@ export class LifeLayer extends Component {
             // 孤零零一格路：原地站着，偶尔再试试
             if (Math.random() < dt) this.pickNext(a);
         } else {
-            a.t += a.speed * dt;
+            a.t += a.speed * this.roadFactor(a) * dt;
             while (a.t >= 1) {
                 const rest = a.t - 1;
                 this.pickNext(a);
@@ -285,7 +353,7 @@ export class LifeLayer extends Component {
     /** 车道偏移：行人走人行道，车靠一侧（垂直于行进方向，对向自动分两边） */
     private lane(a: Agent): number {
         if (a.kind === 'ped') return (this.roadKind(a.col, a.row) === 'city' ? 0.36 : 0.27) * a.side;
-        return a.kind === 'scoot' ? 0.2 : 0.14;
+        return a.kind === 'car' ? 0.14 : 0.2;
     }
 
     private place(a: Agent): void {
@@ -308,6 +376,8 @@ export class LifeLayer extends Component {
             name = `ped${a.skin}-${front ? 'front' : 'back'}${dx === 0 && dy === 0 ? 0 : f}`;
         } else if (a.kind === 'scoot') {
             name = `scoot${a.skin}-${front ? 'front' : 'back'}`;
+        } else if (a.kind === 'moto') {
+            name = `moto${a.skin}-${front ? 'front' : 'back'}`;
         } else {
             name = `car${a.skin}`;
         }
@@ -315,7 +385,8 @@ export class LifeLayer extends Component {
         if (frame && a.sprite.spriteFrame !== frame) {
             a.sprite.spriteFrame = frame;
             const sz = art.worldSize(frame);
-            a.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
+            a.sprite.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
+            a.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);   // 点人判定用
         }
         const sx = flip ? -1 : 1;
         if (a.node.scale.x !== sx) a.node.setScale(sx, 1, 1);

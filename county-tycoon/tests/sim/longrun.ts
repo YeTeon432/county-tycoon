@@ -83,9 +83,25 @@ export interface YearRow {
     level: string;
     income: number;
     expense: number;
+    /** 有车人数 / 各档人数（D022） */
+    vehicles: number;
+    ebike: number;
+    moto: number;
+    car: number;
+    /** 18～65 岁有工作的人（买车资格的分母） */
+    eligible: number;
 }
 
-export function runLongTest(years = 50): YearRow[] {
+export interface LongRunOpts {
+    /** 从第几个月起，钱够就盖一座摩托车厂（只盖一座）。不传 = 不盖 */
+    motoFromMonth?: number;
+    /** 升到县城后，钱够就盖一座汽车厂 */
+    carWhenCounty?: boolean;
+    /** 从第几个月起盖汽车厂，不看城镇等级（自动县长不盖学校，升不到县城，快进时用这个看汽车） */
+    carFromMonth?: number;
+}
+
+export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
     const cfg = loadConfig();
     const map = new FlatMap(SIZE);
 
@@ -205,6 +221,20 @@ export function runLongTest(years = 50): YearRow[] {
             }
         }
 
+        // 4. 车厂（D022 快进用）
+        const tryBuild = (defId: string) => {
+            if (s.buildings.some((b) => b.defId === defId) || !sim.canAfford(defId)) return;
+            const spot = map.freeNextToRoad(2, 2);
+            if (!spot) return;
+            const uid = map.put(defId, spot.col, spot.row, 2, 2);
+            if (uid === null) return;
+            town.refresh();
+            if (!sim.onBuilt(uid, defId)) map.clear(spot.col, spot.row);
+        };
+        if (opts.motoFromMonth !== undefined && month >= opts.motoFromMonth) tryBuild('moto-factory');
+        if (opts.carFromMonth !== undefined && month >= opts.carFromMonth) tryBuild('car-factory');
+        if (opts.carWhenCounty && (s.level === 'county' || s.level === 'city' || s.level === 'top100')) tryBuild('car-factory');
+
         sim.stepMonth();
 
         if (month % 12 === 0) {
@@ -229,10 +259,37 @@ export function runLongTest(years = 50): YearRow[] {
                 level: sim.state.level,
                 income: Math.round(income),
                 expense: Math.round(expense),
+                vehicles: s2.vehicles,
+                ebike: sim.state.residents.filter((r) => r.vehicle === 'ebike').length,
+                moto: sim.state.residents.filter((r) => r.vehicle === 'moto').length,
+                car: sim.state.residents.filter((r) => r.vehicle === 'car').length,
+                eligible: sim.state.residents.filter((r) => r.age >= cfg.economy.vehicles.minAge
+                    && r.age <= cfg.economy.vehicles.maxAge && r.jobId !== null).length,
             });
         }
     }
     return rows;
+}
+
+/** D022 快进：第 N 年盖摩托车厂、县城后盖汽车厂，看有车率怎么涨 */
+export function vehiclesMain(): void {
+    const years = 30;
+    const pad = (s: unknown, n: number) => {
+        const str = String(s);
+        return str.length >= n ? str : new Array(n - str.length + 1).join(' ') + str;
+    };
+    for (const from of [12, 60]) {
+        const rows = runLongTest(years, { motoFromMonth: from, carFromMonth: 120 });
+        console.log(`\n第 ${from / 12} 年起盖摩托车厂、第 10 年起盖汽车厂（${years} 年）`);
+        console.log('年  人口  等级     有车/人口  有车/在职  电动  摩托  汽车  平均储蓄  平均心情  建设资金');
+        for (const r of rows) {
+            const rate = r.pop ? Math.round(r.vehicles / r.pop * 100) : 0;
+            const rateW = r.eligible ? Math.round(Math.min(r.vehicles, r.eligible) / r.eligible * 100) : 0;
+            console.log(`${pad(r.year, 3)} ${pad(r.pop, 5)}  ${(r.level + "       ").slice(0, 7)}  ` +
+                `${pad(rate + '%', 9)} ${pad(rateW + '%', 10)} ${pad(r.ebike, 5)} ${pad(r.moto, 5)} ${pad(r.car, 5)} ` +
+                `${pad(r.avgSavings, 9)} ${pad(r.avgMood, 9)} ${pad(r.funds, 9)}`);
+        }
+    }
 }
 
 export function main(): void {

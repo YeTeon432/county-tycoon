@@ -3,6 +3,7 @@ import { makeSimConfig } from './sim/config';
 import { Simulation } from './sim/Simulation';
 import { SimpleTownView } from './sim/townView';
 import { TownModel } from './TownModel';
+import { SimState } from './sim/types';
 
 /**
  * 把模拟层接进游戏（集成）：读 economy.json / names.json，用 TownModel 做 TownView。
@@ -25,12 +26,13 @@ export function loadSimJson(): Promise<[any, any]> {
     return Promise.all([loadJson('config/economy'), loadJson('config/names')]);
 }
 
-export function createSimulation(model: TownModel, economyJson: any, namesJson: any, seed: number): Simulation {
+/** state 给了就是读档：接着存档里的居民、财政、随机数往下跑（D022 接上读档） */
+export function createSimulation(model: TownModel, economyJson: any, namesJson: any, seed: number, state?: SimState): Simulation {
     const view = new SimpleTownView(model.width, model.height, () =>
         model.allBuildings().map((b) => ({
             uid: b.uid, defId: b.def.id,
             col: b.col, row: b.row, width: b.def.width, height: b.def.height,
             road: b.def.flat,
         })));
-    return new Simulation(makeSimConfig(economyJson, namesJson), view, { seed });
+    return new Simulation(makeSimConfig(economyJson, namesJson), view, state ? { state } : { seed });
 }

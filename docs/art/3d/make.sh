@@ -10,5 +10,6 @@ for s in homes_shops civic_industry terrain_obj; do
   "$BL" -b -P docs/art/3d/$s.py -- $B/buildings "$@" 2>&1 | grep -E '^\[(ok|warn)\]|Error|Traceback' || true
 done
 "$BL" -b -P docs/art/3d/actors.py -- $B/actors "$@" 2>&1 | grep -E '^\[(ok|warn)\]|Error|Traceback' || true
+python3 -I docs/art/3d/shadows.py $B/actors | grep -E '^\[ok\]' || true     # T405：人车影子（PIL）
 if [ $# -eq 0 ] || [ ! -f $B/ground/ground.png ]; then python3 -I docs/art/3d/ground.py $B; fi
 python3 -I docs/art/3d/pack.py $B $R

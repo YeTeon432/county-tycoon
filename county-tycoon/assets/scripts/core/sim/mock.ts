@@ -13,7 +13,7 @@ export class MockSim implements SimApi {
         const r = (id: number, name: string, gender: 'M' | 'F', age: number, homeId: number, jobTitle: string, salary: number, spouseId: number | null): Resident => ({
             id, name, gender, age, birthMonth: (id * 5) % 12 + 1, homeId, jobId: salary ? 1001 : null, jobTitle, salary,
             savings: 8000 + id * 3100, spouseId, parentIds: [], childIds: [], mood: 55 + id * 6, education: 1,
-            monthsUnemployed: salary ? 0 : 2, arrivedMonth: 0, log: [{ month: 0, text: '住进了自建房' }],
+            monthsUnemployed: salary ? 0 : 2, arrivedMonth: 0, vehicle: 'walk', log: [{ month: 0, text: '住进了自建房' }],
         });
         this.state = {
             version: 1, seed: 1, rngState: 1, month: 0, level: 'village', nextResidentId: 6,
@@ -81,6 +81,7 @@ export class MockSim implements SimApi {
             avgSalary: Math.round(ps.reduce((a, p) => a + p.salary, 0) / Math.max(1, ps.filter((p) => p.salary > 0).length)),
             avgSavings: Math.round(ps.reduce((a, p) => a + p.savings, 0) / n),
             avgMood: Math.round(ps.reduce((a, p) => a + p.mood, 0) / n),
+            vehicles: ps.filter((p) => p.vehicle && p.vehicle !== 'walk').length,
         };
     }
 }

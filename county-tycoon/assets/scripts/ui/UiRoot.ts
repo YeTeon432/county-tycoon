@@ -1,15 +1,27 @@
-import { _decorator, Component, JsonAsset, Layers, Node, resources, UITransform } from 'cc';
+import { _decorator, Component, JsonAsset, Layers, Node, profiler, resources, UITransform } from 'cc';
+import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
+import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
+import { IntroCards } from './IntroCards';
 import { MonthReportPanel } from './MonthReportPanel';
 import { ResidentListPanel } from './ResidentListPanel';
 import { ResidentPanel } from './ResidentPanel';
 import { TimeController } from './TimeController';
-import { TopBar } from './TopBar';
+import { Speed, TopBar } from './TopBar';
 
 const { ccclass } = _decorator;
+
+/** UiRoot.create 的可选参数 */
+export interface UiRootOptions {
+    /**
+     * 新档 = true：播开场卡片、资金从 0 滚上来、「店铺」页签上出提示箭头（T407）。
+     * 读档 = false：直接进游戏。缺省 true（现在 GameRoot 还没接读档，每次启动都是新档）。
+     */
+    newGame?: boolean;
+}
 
 /**
  * 经营界面的总入口（支线 B 负责，见 docs/PARALLEL.md）。
@@ -52,7 +64,17 @@ export class UiRoot extends Component {
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
 
-    static create(parent: Node, sim: SimApi, model: TownModel): UiRoot {
+    /** 建造栏（GameRoot 建的；attachBuildingBar 或自动找到） */
+    private _bar: BuildingBar | null = null;
+    /** 开场卡片层：压在所有面板上面 */
+    private _introLayer: Node | null = null;
+    private _newGame = true;
+    /** 开局提示箭头还在：等第一次盖楼（非道路）后收起 */
+    private _waitFirstBuild = false;
+    private _baseBuildings = 0;
+    private _tick = 0;
+
+    static create(parent: Node, sim: SimApi, model: TownModel, opts: UiRootOptions = {}): UiRoot {
         const node = new Node('UiRoot');
         node.layer = Layers.Enum.UI_2D;
         node.addComponent(UITransform);
@@ -60,6 +82,7 @@ export class UiRoot extends Component {
         const ui = node.addComponent(UiRoot);
         ui.sim = sim;
         ui.model = model;
+        ui._newGame = opts.newGame !== false;
         ui.build();
         return ui;
     }
@@ -68,12 +91,126 @@ export class UiRoot extends Component {
     protected build(): void {
         if (!this.sim) return;
 
+        // 预览左下角的帧率统计默认关掉（DESIGN 8.2）；调试时用 setStatsVisible(true) 打开
+        UiRoot.setStatsVisible(false);
+
         this.buildTopBar();
         this.buildClock();
         this.buildPanelLayer();
+        this.buildIntroLayer();
 
-        // economy.json 是支线 A 的，还没交付。读不到就用 20 秒的默认值，不影响开发。
-        this.loadEconomyTiming();
+        // 建造栏是 GameRoot 建的，在 UiRoot 之前：直接找到它，接上模拟层和贴图
+        this.findSiblings();
+
+        // economy.json：一个月几秒 + 开局资金
+        this.loadEconomy();
+    }
+
+    /** 帧率统计开关（DESIGN 8.2：默认关，调试能开） */
+    static setStatsVisible(on: boolean): void {
+        if (on) profiler.showStats(); else profiler.hideStats();
+    }
+
+    /**
+     * 把建造栏交给界面管（集成可以显式调；不调的话 build 时按节点名 'BuildingBar' 自动找）。
+     * 接上之后：卡片的买不起 / 未解锁状态、开局提示箭头、点锁住卡片的提示都由这里驱动。
+     */
+    attachBuildingBar(bar: BuildingBar): void {
+        this._bar = bar;
+        if (this.sim) bar.bindSim(this.sim);
+        bar.onNotice = (text) => this.setPlacementHint(text);
+    }
+
+    /** 给建造栏缩略图用的贴图仓库（WorldView 那一份）。集成在 WorldView 加 `get art()` 后调这个最干净 */
+    setArt(art: ArtLibrary): void {
+        if (this._bar) this._bar.setArt(art);
+    }
+
+    /**
+     * 同级节点里找建造栏和 WorldView（GameRoot 把它们都挂在同一个父节点下）。
+     * WorldView 的贴图仓库现在是私有字段 _art：先认公开的 art，没有再退到 _art。
+     * 这是在集成加 getter 之前的过渡，见 devlog「需要集成」。
+     */
+    private findSiblings(): void {
+        const parent = this.node.parent;
+        if (!parent) return;
+        if (!this._bar) {
+            const bar = parent.getChildByName('BuildingBar')?.getComponent(BuildingBar);
+            if (bar) this.attachBuildingBar(bar);
+        }
+        if (this._bar && !this._bar.hasArt) {
+            const view = parent.getChildByName('WorldRoot')?.getComponent('WorldView') as unknown as
+                { art?: ArtLibrary; _art?: ArtLibrary } | null;
+            const art = view ? (view.art ?? view._art) : null;
+            if (art instanceof ArtLibrary) this._bar.setArt(art);
+        }
+    }
+
+    private buildIntroLayer(): void {
+        const layer = new Node('IntroLayer');
+        layer.layer = Layers.Enum.UI_2D;
+        layer.addComponent(UITransform);
+        this.node.addChild(layer);
+        this._introLayer = layer;
+    }
+
+    // ───────────────────────── 开局（T407） ─────────────────────────
+
+    /** 新档：暂停时间 → 开场卡片 → 资金滚上来 + 「店铺」页签上的箭头 */
+    private playOpening(startFunds: number): void {
+        const layer = this._introLayer;
+        if (!layer || !this.sim) return;
+        const clock = this._clock;
+        const resume: Speed = clock ? clock.speed : 1;
+        this.applySpeed(0);
+        if (this._topBar) this._topBar.holdFunds(0);   // 卡片期间顶栏显示 ¥0
+
+        const intro = IntroCards.show(layer, startFunds);
+        intro.onDone = () => {
+            this.applySpeed(resume === 0 ? 1 : resume);
+            if (this._topBar) this._topBar.rollFunds(0, 1);
+            this.startFirstBuildHint();
+        };
+    }
+
+    private applySpeed(speed: Speed): void {
+        if (this._clock) this._clock.setSpeed(speed);
+        if (this._topBar) this._topBar.setSpeed(speed);
+    }
+
+    private startFirstBuildHint(): void {
+        if (!this.model) return;
+        if (this._bar) this._bar.showTabHint('店铺');
+        this._baseBuildings = this.countBuildings();
+        this._waitFirstBuild = true;
+    }
+
+    /** 不算道路：开局提示是「盖几家店」，修路不算 */
+    private countBuildings(): number {
+        return this.model ? this.model.allBuildings().filter((b) => !b.def.flat).length : 0;
+    }
+
+    /**
+     * 盖好一栋楼（集成可以在 WorldView.onBuilt 成功后调；不调也行，update 里会数楼）。
+     * 第一次盖非道路的楼 → 收起开局箭头。
+     */
+    notifyBuilt(): void {
+        if (this._topBar) this._topBar.refresh();
+        if (!this._waitFirstBuild) return;
+        if (this.countBuildings() > this._baseBuildings) {
+            this._waitFirstBuild = false;
+            if (this._bar) this._bar.showTabHint(null);
+        }
+    }
+
+    protected update(dt: number): void {
+        // 资金在盖楼 / 拆楼时也会变，顶栏不能只在月底刷新：每 0.5 秒对一次（只是改几段文字）
+        this._tick += dt;
+        if (this._tick < 0.5) return;
+        this._tick = 0;
+        if (this._topBar) this._topBar.refresh();
+        if (this._waitFirstBuild) this.notifyBuilt();
+        if (this._bar && !this._bar.hasArt) this.findSiblings();
     }
 
     private buildTopBar(): void {
@@ -139,13 +276,17 @@ export class UiRoot extends Component {
         this._reportPanel = panel;
     }
 
-    private loadEconomyTiming(): void {
+    /** economy.json：一个月几秒、开局资金。读到之后（读不到也照样）新档才开始播开场 */
+    private loadEconomy(): void {
         resources.load('config/economy', JsonAsset, (err, asset) => {
-            // 读不到是正常情况（支线 A 还没交），用默认值，不打警告
-            if (err || !asset || !asset.json) return;
-            const json = asset.json as { secondsPerMonth?: number };
+            const json = (!err && asset && asset.json ? asset.json : {}) as { secondsPerMonth?: number; startFunds?: number };
             if (this._clock && typeof json.secondsPerMonth === 'number') {
                 this._clock.setSecondsPerMonth(json.secondsPerMonth);
+            }
+            if (this._newGame && this.sim) {
+                // 金额以配置为准（DESIGN 13）；没配就用模拟层当前的钱
+                const funds = typeof json.startFunds === 'number' ? json.startFunds : this.sim.state.finance.funds;
+                this.playOpening(funds);
             }
         });
     }

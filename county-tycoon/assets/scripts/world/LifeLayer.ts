@@ -3,6 +3,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
 import { BuildingLayer } from './BuildingLayer';
+import { skinOf as lookOf } from '../core/Appearance';
 
 const { ccclass } = _decorator;
 
@@ -52,6 +53,8 @@ interface Agent {
     node: Node;
     sprite: Sprite;
     skin: number;
+    /** 行人的外观名（D023，如 'woman1'）；有新图时按它取帧，没有就退回 ped<skin> */
+    look: string | null;
     col: number; row: number;   // 出发格
     tc: number; tr: number;     // 目标格
     t: number;                  // 0..1
@@ -236,6 +239,7 @@ export class LifeLayer extends Component {
         let residentId: number | null = null;
         let kind: Kind = 'ped';
         let skin = Math.floor(Math.random() * PED_SKINS);
+        let look: string | null = null;
         let personal = 1 + (Math.random() * 2 - 1) * this._traffic.personalSpread;
         if (this._residents) {
             const who = this.pickWalker();
@@ -244,6 +248,7 @@ export class LifeLayer extends Component {
             const v = who.vehicle ?? 'walk';
             if (v !== 'walk' && Math.random() < this._traffic.driveShare) kind = KIND_OF[v] ?? 'ped';
             skin = LifeLayer.skinOf(who, kind);
+            if (kind === 'ped') look = lookOf(who);
             // 个人差异按 id 固定：同一个人每次出门快慢一样
             const h = ((who.id * 2654435761) >>> 0) / 4294967296;
             personal = 1 + (h * 2 - 1) * this._traffic.personalSpread;
@@ -262,8 +267,8 @@ export class LifeLayer extends Component {
             const ss = sn.addComponent(Sprite);
             ss.sizeMode = Sprite.SizeMode.CUSTOM;
             ss.spriteFrame = sh;
-            // 老人（ped3）拄拐，图多垫了 3 像素（actors.py 的 SETTLE）
-            const settle = kind === 'ped' && skin === 3 ? 8 : SHADOW[kind].settle;
+            // D023 起所有行人皮肤（含老人）统一 SETTLE = 5
+            const settle = SHADOW[kind].settle;
             sn.setPosition(0, settle / this._art!.scale, 0);
             node.addChild(sn);
         }
@@ -275,7 +280,7 @@ export class LifeLayer extends Component {
         sprite.trim = false;
         node.addChild(body);
         const a: Agent = {
-            kind, node, sprite, skin, residentId,
+            kind, node, sprite, skin, look, residentId,
             col, row, tc: col, tr: row, t: 1,
             speed: this._traffic.vehicles[VEHICLE_OF[kind]].speed * personal,
             side: Math.random() < 0.5 ? 1 : -1,
@@ -373,7 +378,9 @@ export class LifeLayer extends Component {
         let name: string;
         if (a.kind === 'ped') {
             const f = Math.floor(a.anim * 4) % 2;
-            name = `ped${a.skin}-${front ? 'front' : 'back'}${dx === 0 && dy === 0 ? 0 : f}`;
+            const suffix = `-${front ? 'front' : 'back'}${dx === 0 && dy === 0 ? 0 : f}`;
+            // D023：先用新外观（woman1-front0），图集里还没有就退回旧的 ped<N>
+            name = a.look && art.get(a.look + suffix) ? a.look + suffix : `ped${a.skin}${suffix}`;
         } else if (a.kind === 'scoot') {
             name = `scoot${a.skin}-${front ? 'front' : 'back'}`;
         } else if (a.kind === 'moto') {

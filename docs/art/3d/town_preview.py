@@ -99,17 +99,17 @@ for c in range(N):
         elif k == 'pond': n = 'terrain-pond-lily'
         if n and n in AF: objs.append((c + r + 1, n, c + 1, r + 1))
 # 人车：放在路上（锚点 = 底边中点）
-A = [('ped0-front0', 7.5, 2.2), ('ped4-back1', 7.85, 3.4), ('ped3-front1', 4.3, 5.85), ('ped1-front0', 9.5, 5.15),
+A = [('man0-front0', 7.5, 2.2), ('woman1-back1', 7.85, 3.4), ('oldman0-front1', 4.3, 5.85), ('girl1-front0', 9.5, 5.15),
      ('scoot0-front', 7.3, 9.5), ('scoot1-back', 12.2, 5.3), ('car0', 5.5, 5.4), ('car2', 10.6, 5.6),
-     ('ped5-front1', 12.8, 10.3), ('ped2-back0', 9.2, 10.6), ('car1', 7.6, 12.0),
+     ('oldwoman1-front1', 12.8, 10.3), ('boy0-back0', 9.2, 10.6), ('woman2-front0', 8.6, 2.6), ('car1', 7.6, 12.0),
      ('moto0-front', 3.2, 5.5), ('moto2-back', 7.55, 7.4), ('moto1-front', 11.4, 10.6)]
 # T405：影子（图心 = 着地中心 = 人车图底边中点往上 SETTLE 像素，SETTLE 见 actors.py）
-SETTLE = {'ped': 5, 'ped3': 8, 'scoot': 8, 'moto': 10, 'car': 17}
+SETTLE = {'ped': 5, 'scoot': 8, 'moto': 10, 'car': 17}   # D023：行人皮肤统一 5
 def shadow_of(n):
-    if n.startswith('ped'): return 'shadow-s', SETTLE['ped3' if n.startswith('ped3') else 'ped']
     if n.startswith('scoot'): return 'shadow-m', SETTLE['scoot']
     if n.startswith('moto'): return 'shadow-m', SETTLE['moto']
     if n.startswith('car'): return 'shadow-l', SETTLE['car']
+    if n.split('-')[-1] in ('front0', 'front1', 'back0', 'back1'): return 'shadow-s', SETTLE['ped']
     return None, 0
 for n, gx, gy in A:
     if n in AF: objs.append((gx + gy, n, gx, gy))

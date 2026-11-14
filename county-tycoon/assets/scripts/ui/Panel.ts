@@ -211,7 +211,7 @@ export class Panel extends Component {
         const card = this.card;
         const H = view.getVisibleSize().height;
         if (this._shade) {
-            const so = this._shade.getComponent(UIOpacity);
+            const so = this._shade.isValid ? this._shade.getComponent(UIOpacity) : null;
             if (so) tween(so).to(0.18, { opacity: 0 }).start();
         }
         if (!card) {
@@ -227,8 +227,9 @@ export class Panel extends Component {
     protected onDestroy(): void {
         InputGuard.remove(this.node);
         // 动画进行中被 UiRoot 直接销毁时，别让 tween 继续改已销毁的节点
-        if (this.card) Tween.stopAllByTarget(this.card);
-        const so = this._shade ? this._shade.getComponent(UIOpacity) : null;
+        // 销毁时子节点可能已经先被销毁（组件表已清空），先查 isValid 再碰，否则 getComponent 会抛错
+        if (this.card && this.card.isValid) Tween.stopAllByTarget(this.card);
+        const so = this._shade && this._shade.isValid ? this._shade.getComponent(UIOpacity) : null;
         if (so) Tween.stopAllByTarget(so);
     }
 }

@@ -3,6 +3,8 @@ import { SimApi } from '../core/sim/SimApi';
 import { TownModel } from '../core/TownModel';
 import { LifeEvent, Resident, monthLabel } from '../core/sim/types';
 import { Panel } from './Panel';
+import { Portrait } from './Portrait';
+import { BODY_NAME, bodyOf } from '../core/Appearance';
 import { ListRow, ScrollList } from './ScrollList';
 import {
     formatMoney, makeLabel, makeLabelLeft, makePanelNode, makeSectionTitle, makeStatTile, moodColor, moodLabel,
@@ -42,6 +44,20 @@ export class ResidentPanel extends Panel {
         if (!content) return;
         const W = this.contentW;
         let y = this.contentTop;
+
+        // ── 头像（D023）：同一套外观的胸像，和街上的小人是同一个人 ──
+        const male = r.gender === 'M';
+        const faceSize = 128;
+        if (Portrait.place(content, r, -W / 2 + faceSize / 2, y - faceSize / 2, faceSize, male ? UI_COLOR.avatarM : UI_COLOR.avatarF)) {
+            const tx = -W / 2 + faceSize + 24;
+            const who = makeLabelLeft(content, 'Who', `${BODY_NAME[bodyOf(r)]} · ${r.age} 岁`, UI_FONT.body, UI_COLOR.text, W - faceSize - 24);
+            who.isBold = true;
+            who.node.setPosition(tx, y - 40, 0);
+            const v = ({ walk: '步行', ebike: '骑电动车', moto: '骑摩托车', car: '开汽车' } as Record<string, string>)[r.vehicle ?? 'walk'] ?? '步行';
+            const sub = makeLabelLeft(content, 'Sub', `${r.jobTitle || (r.age < 18 ? '上学 / 在家' : r.age >= 60 ? '退休' : '待业')} · ${v}`, UI_FONT.small, UI_COLOR.textDim, W - faceSize - 24);
+            sub.node.setPosition(tx, y - 80, 0);
+            y -= faceSize + 20;
+        }
 
         // ── 数值格 ──
         const tileH = 108, gap = 16;

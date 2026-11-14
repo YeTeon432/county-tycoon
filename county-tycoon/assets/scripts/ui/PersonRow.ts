@@ -1,6 +1,7 @@
 import { Color, Graphics, Node, UITransform } from 'cc';
 import { Resident } from '../core/sim/types';
 import { ScrollList } from './ScrollList';
+import { Portrait } from './Portrait';
 import { makeLabel, makeLabelLeft, makeLabelRight, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
 
 /**
@@ -22,16 +23,20 @@ export function buildPersonRow(
     const male = r.gender === 'M';
 
     const g = row.addComponent(Graphics);
-    g.fillColor = male ? UI_COLOR.avatarM : UI_COLOR.avatarF;
-    g.circle(-W / 2 + 26, 0, 24);
-    g.fill();
     g.fillColor = UI_COLOR.borderDim;
     g.rect(-W / 2 + 64, -H / 2, W - 64, 2);
     g.fill();
 
-    const initial = makeLabel(row, 'Initial', r.name.charAt(0), UI_FONT.small, male ? UI_PALETTE.blue : UI_PALETTE.coral, 40);
-    initial.isBold = true;
-    initial.node.setPosition(-W / 2 + 26, 0, 0);
+    // D023：有头像图就放头像，没有退回「姓」字圆圈
+    const bg = male ? UI_COLOR.avatarM : UI_COLOR.avatarF;
+    if (!Portrait.place(row, r, -W / 2 + 26, 0, 50, bg)) {
+        g.fillColor = bg;
+        g.circle(-W / 2 + 26, 0, 24);
+        g.fill();
+        const initial = makeLabel(row, 'Initial', r.name.charAt(0), UI_FONT.small, male ? UI_PALETTE.blue : UI_PALETTE.coral, 40);
+        initial.isBold = true;
+        initial.node.setPosition(-W / 2 + 26, 0, 0);
+    }
 
     const name = makeLabelLeft(row, 'Name', r.name, UI_FONT.body, UI_COLOR.link, 220);
     name.node.setPosition(-W / 2 + 66, 14, 0);

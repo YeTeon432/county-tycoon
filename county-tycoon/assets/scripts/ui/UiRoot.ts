@@ -3,6 +3,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
+import { Portrait } from './Portrait';
 import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
 import { IntroCards } from './IntroCards';
@@ -124,6 +125,7 @@ export class UiRoot extends Component {
     /** 给建造栏缩略图用的贴图仓库（WorldView 那一份）。集成在 WorldView 加 `get art()` 后调这个最干净 */
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
+        Portrait.setArt(art);
     }
 
     /**
@@ -142,7 +144,7 @@ export class UiRoot extends Component {
             const view = parent.getChildByName('WorldRoot')?.getComponent('WorldView') as unknown as
                 { art?: ArtLibrary; _art?: ArtLibrary } | null;
             const art = view ? (view.art ?? view._art) : null;
-            if (art instanceof ArtLibrary) this._bar.setArt(art);
+            if (art instanceof ArtLibrary) { this._bar.setArt(art); Portrait.setArt(art); }
         }
     }
 
@@ -340,7 +342,11 @@ export class UiRoot extends Component {
     private openResident(residentId: number): void {
         const layer = this._panelLayer;
         if (!this.sim || !this.model || !layer) return;
-        // 详情面板保持打开，档案压在上面；档案关掉后详情还在，符合"点了人再返回"的操作习惯
+        // 详情面板保持打开，档案压在上面；档案关掉后详情还在，符合"点了人再返回"的操作习惯。
+        // 但档案只留一份：再点另一个人时先关掉旧档案（否则叠两层，关的时候会重复销毁报错）
+        const old = this._residentPanel;
+        this._residentPanel = null;
+        if (old && old.node && old.node.isValid) old.node.destroy();
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId);
         if (panel) {
             panel.onClosed = () => {

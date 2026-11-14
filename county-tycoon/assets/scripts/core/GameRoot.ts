@@ -107,7 +107,7 @@ export class GameRoot extends Component {
         // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView
         const view = this._view, ui = this._ui;
         if (this._bar) ui.attachBuildingBar(this._bar);
-        if (this._bar && view) this._bar.setArt(view.art);
+        if (view) ui.setArt(view.art);   // 底栏缩略图 + 居民头像
         if (view) {
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);

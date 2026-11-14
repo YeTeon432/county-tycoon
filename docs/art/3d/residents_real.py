@@ -3,7 +3,7 @@
 
     python3 -I docs/art/3d/residents_real.py <旧版图目录> docs/art/build3d/actors docs/art/3d/preview/residents_real.png
 
-每版一条人行道 + 草地，14 套 front0 / back0 交替站一排，脚下画影子（新版 SETTLE 6，旧版 5）。
+每版一条人行道 + 草地，14 套 front0 / back0 交替站一排，脚下画影子（新版 SETTLE 12（8 倍图）/ 缩一半后 6，旧版 5）。
 上半 = 贴图原尺寸（游戏最大 ×4 档），下半 = 一半（×2 档）。
 """
 import os, sys
@@ -31,6 +31,8 @@ def strip(src, settle, shadow):
     for i, n in enumerate(SKINS):
         fr = 'front0' if i % 2 == 0 else 'back0'
         sp = Image.open(os.path.join(src, f'{n}-{fr}.png')).convert('RGBA')
+        if sp.width == 64:                                   # 8 倍图：缩一半 = 游戏 ×4 档的贴图像素
+            sp = sp.resize((32, sp.height // 2), Image.LANCZOS)
         x = 30 + i * STEP; y = 58
         im.alpha_composite(shadow, (x - shadow.width // 2, y - shadow.height // 2))
         im.alpha_composite(sp, (x - sp.width // 2, y + settle - sp.height))
@@ -38,6 +40,8 @@ def strip(src, settle, shadow):
 
 
 shadow = Image.open(os.path.join(NEW, 'shadow-s.png')).convert('RGBA')
+if shadow.width == 56:
+    shadow = shadow.resize((28, 14), Image.LANCZOS)
 rows = [('旧版（像乐高）', strip(OLD, 5, shadow)), ('新版 C 小比例写实', strip(NEW, 6, shadow))]
 sw, sh = rows[0][1].size
 pad = 20; LW = 170

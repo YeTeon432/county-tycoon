@@ -19,8 +19,12 @@ GCOLS = gimg.width // FW
 HW, HH = FW // 2, FH // 2
 
 def sprite(name):
-    x, y, w, h = AF[name]
-    return atlas.crop((x, y, x + w, y + h))
+    x, y, w, h = AF[name][:4]
+    im = atlas.crop((x, y, x + w, y + h))
+    k = AF[name][4] if len(AF[name]) > 4 else 4          # 人车是 8 倍图：缩一半贴，和游戏里同样大小
+    if k != 4:
+        im = im.resize((round(w * 4 / k), round(h * 4 / k)), Image.LANCZOS)
+    return im
 
 def gframe(name):
     i = GM['frames'][name]
@@ -104,7 +108,7 @@ A = [('man0-front0', 7.5, 2.2), ('woman1-back1', 7.85, 3.4), ('oldman0-front1', 
      ('oldwoman1-front1', 12.8, 10.3), ('boy0-back0', 9.2, 10.6), ('woman2-front0', 8.6, 2.6), ('car1', 7.6, 12.0),
      ('moto0-front', 3.2, 5.5), ('moto2-back', 7.55, 7.4), ('moto1-front', 11.4, 10.6)]
 # T405：影子（图心 = 着地中心 = 人车图底边中点往上 SETTLE 像素，SETTLE 见 actors.py）
-SETTLE = {'ped': 6, 'scoot': 8, 'moto': 10, 'car': 17}   # D023 风格 C：行人皮肤统一 6
+SETTLE = {'ped': 6, 'scoot': 8, 'moto': 10, 'car': 17}   # 4 倍像素（人车 8 倍图缩一半后；actors.py 里是 12 / 16 / 20 / 34）
 def shadow_of(n):
     if n.startswith('scoot'): return 'shadow-m', SETTLE['scoot']
     if n.startswith('moto'): return 'shadow-m', SETTLE['moto']

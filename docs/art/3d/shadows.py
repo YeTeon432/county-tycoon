@@ -3,16 +3,16 @@
 
     python3 -I docs/art/3d/shadows.py <输出目录>      # make.sh 里输出到 build3d/actors，和人车一起打进图集
 
-帧：shadow-s 28×14（行人）、shadow-m 48×24（电动车 / 摩托）、shadow-l 96×48（汽车）。
+帧：shadow-s 56×28（行人）、shadow-m 96×48（电动车 / 摩托）、shadow-l 192×96（汽车），和人车一样是 8 倍图。
 锚点约定：**图的几何中心 = 着地中心**（不是底边中点）。人车图的着地中心 = 它们底边中点往上 SETTLE 像素（见 actors.py）。
-中心 alpha ≈ 0.35，往外平滑衰减到 0；4 倍分辨率，和其它图一样 scale 4。
+中心 alpha ≈ 0.35，往外平滑衰减到 0。
 """
 import os, sys
 from PIL import Image
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else '.'
 os.makedirs(OUT, exist_ok=True)
-SIZES = {'shadow-s': 28, 'shadow-m': 48, 'shadow-l': 96}
+SIZES = {'shadow-s': 56, 'shadow-m': 96, 'shadow-l': 192}   # 8 倍图（atlas-frames 第 5 个数 = 8）
 PEAK = 0.35
 SS = 4                                        # 超采样，边缘更顺
 

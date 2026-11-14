@@ -9,11 +9,11 @@
 锚点 = 图底边中点。等距图里脚 / 轮子的着地中心并不是最低点（右下那只脚、车的右下角更低），
 所以每张图建好后把整个模型沿地面往画面上方（-X、+Y 方向）平移，让最低点正好压在图底边上，
 不会被裁。平移量每类固定（同一类所有帧一样，走路不上下抖），见 SETTLE。
-→ 着地中心在图里的位置 = 底边中点往上 SETTLE 像素（贴图像素，世界单位再 ÷4），影子要对齐到这里。
+→ 着地中心在图里的位置 = 底边中点往上 SETTLE 像素（贴图像素；人车是 8 倍图，世界单位再 ÷8），影子要对齐到这里。
 
 行人（D023，DESIGN 14.2）：14 套皮肤 boy0/1 girl0/1 man0/1/2 woman0/1/2 oldman0/1 oldwoman0/1，外观见 SKINS，
-  每套 <皮肤>-front0/front1/back0/back1（32 宽）+ 头像 face-<皮肤>（128×128 胸像，face_shot）。
-  所有行人皮肤 SETTLE 统一 5（拐杖、菜篮都收在脚的范围内）。
+  每套 <皮肤>-front0/front1/back0/back1（64 宽，8 倍图）+ 头像 face-<皮肤>（128×128 胸像，face_shot）。
+  所有行人皮肤 SETTLE 统一 12（8 倍图）（拐杖、菜篮都收在脚的范围内）。
   旧帧名 ped0~4 = man0 / man1 / man2 / oldman0 / woman0 的复制（LEGACY）；ped5 蓬松卷发白衬衫仍单独渲染，只为兼容。
   scoot0 黄衣 蓝车 / scoot1 红衣 白车 / scoot2 青衣 粉车
   moto0 红车 黑夹克 / moto1 黑车 绿夹克 / moto2 蓝车 灰卫衣
@@ -49,7 +49,8 @@ MOTOS = [
 ]
 
 # 每类固定的「抬到底边」平移量（px，画面向上）。None = 自动（打印出来再填）。
-SETTLE = {'ped': 6, 'scoot': 8, 'moto': 10, 'car': 17, 'coin': 0}
+PXS = 2      # 人车出 8 倍图（贴图像素 = 世界像素 × 8），atlas-frames 里这些帧的第 5 个数写 8；头像 face-* 不受影响
+SETTLE = {'ped': 12, 'scoot': 16, 'moto': 20, 'car': 34, 'coin': 0}   # 8 倍图的像素（4 倍时是 6 / 8 / 10 / 17）
 
 
 # ---------------------------------------------------------------- 工具
@@ -120,7 +121,7 @@ def settle(kind, turn=False):
     for o in _model_objects():
         oe = o.evaluated_get(dg)
         for c in oe.bound_box:
-            lo = min(lo, (oe.matrix_world @ Vector(c)).dot(up) / U)
+            lo = min(lo, (oe.matrix_world @ Vector(c)).dot(up) / (U / PXS))
     need = -lo
     px = SETTLE.get(kind)
     if px is None:
@@ -129,7 +130,7 @@ def settle(kind, turn=False):
     elif need > px + 1.0:
         print(f'[warn] settle {kind}: 需要 {need:.1f}px > 固定 {px}px')
     d = Vector((-1, 1, 0)).normalized()          # 地面上画面正上方的方向，up·d = 0.5
-    T = Matrix.Translation(d * (px * U / d.dot(up)))
+    T = Matrix.Translation(d * (px * (U / PXS) / d.dot(up)))
     for o in objs:
         o.matrix_world = T @ o.matrix_world
 
@@ -853,7 +854,7 @@ def person(name, frame, turn, cute=False, do_settle=True):
     T = B['torso']; th = B['th']
     x0 = lean * 0.3
     z0 = hip - 0.012
-    tube([((x0, 0, hip - 0.03), T[0][1] * 0.95, T[0][2] * 0.95), ((x0, 0, hip + 0.02), T[0][1] * 0.95, T[0][2] * 0.95)],
+    tube([((x0, 0, hip - 0.03), T[0][1] * 0.95, T[0][2] * 0.95), ((x0, 0, hip + 0.012), T[0][1] * 0.88, T[0][2] * 0.88)],
          pants if legs != 'skirt' else p['pants'], 16, 2, (True, False))
     extra = p['extra']
     top = p['top']; hem_c = shade(top, 0.84)
@@ -902,11 +903,28 @@ def person(name, frame, turn, cute=False, do_settle=True):
             for s in (1, -1):
                 for i in range(6):
                     q = surf(0.15 + i * 0.13, 0.42 * s, 0.003); ball(q.x, q.y, q.z, 0.0045, '#e8453c', 1)
-    if extra == 'cardigan':    # 开衫：前面露米白里衣 + 一排扣
+    if extra == 'cardigan':    # 开衫：前襟 V 字敞开，露出一大块米白里衣；两条深色门襟边 + 一排扣 + 两个贴袋
         inner = p.get('inner', '#f3ead8')
-        tube([(surf(0.04, 0.0, 0.0), 0.007, 0.024), (surf(0.96, 0.0, 0.0), 0.007, 0.018)], inner, 10, 2)
-        for i in range(3):
-            q = surf(0.2 + i * 0.22, 0.32, 0.003); ball(q.x, q.y, q.z, 0.004, M('#f3ead8', rough=0.3), 1)
+        edge = shade(top, 0.68)
+        def half(zf):           # 敞口半宽（Y 方向）：领口最宽，往下收
+            return 0.016 + 0.024 * zf ** 1.4
+        zs = [0.06 + i * 0.9 / 8 for i in range(9)]
+        tube([(surf(zf, 0.0, 0.0), 0.006, half(zf)) for zf in zs], inner, 14, 3, (False, False))
+        for s_ in (1, -1):
+            pts = []
+            for zf in zs:
+                ang = math.asin(min(0.95, half(zf) / _lerp_prof(T, zf)[1])) * s_
+                pts.append((surf(zf, ang, 0.002), 0.004, 0.004))
+            tube(pts, edge, 8, 3)
+        for i in range(4):     # 扣子钉在靠镜头那片门襟上
+            zf = 0.16 + i * 0.2
+            ang = -math.asin(min(0.95, (half(zf) + 0.006) / _lerp_prof(T, zf)[1]))
+            q = surf(zf, ang, 0.004); ball(q.x, q.y, q.z, 0.0042, M('#f6efe0', rough=0.3), 2)
+        for s_ in (1, -1):     # 贴袋：浅一点的面 + 深色袋口
+            q = surf(0.2, 0.95 * s_, 0.002)
+            ball(q.x, q.y, q.z, 0.017, shade(top, 1.12), 2, scale=(0.35, 0.8, 0.8))
+            q2 = surf(0.3, 0.95 * s_, 0.004)
+            ball(q2.x, q2.y, q2.z, 0.014, edge, 1, scale=(0.3, 1.0, 0.22))
     if extra == 'floral':      # 碎花：一圈撒白 / 黄 / 粉小点
         import random
         rnd = random.Random(3)
@@ -1011,7 +1029,7 @@ def head_c(name, C, hr, hs, cute, eye_k):
             ball(e.x, e.y, e.z, hr * 0.13 * ek, EYE, 2, scale=(0.4, 0.78, 1.0))
             ball(e.x + 0.003, e.y - 0.002, e.z + hr * 0.04 * ek, hr * 0.04 * ek, M('#ffffff', emit=1.0), 1)
         b = P(0.37 * s, eye_el + (0.42 if cute else 0.3), 1.02)
-        box(b.x - 0.004, b.y - hr * 0.14, b.z - 0.003, 0.008, hr * 0.28, hr * (0.08 if not elder else 0.11), brow,
+        box(b.x - 0.004, b.y - hr * 0.14, b.z - 0.003, 0.008, hr * 0.28, hr * ((0.08 if cute else 0.1) if not elder else 0.12), brow,
             rot=(0.15 * s, 0, 0))
         c = P(0.64 * s, eye_el - 0.26, 0.99)
         ball(c.x, c.y, c.z, hr * (0.16 if cute else 0.13), M(BLUSH, rough=0.9), 2, scale=(0.4, 1, 0.6))
@@ -1019,7 +1037,7 @@ def head_c(name, C, hr, hs, cute, eye_k):
     for i in range(5):
         t = (i - 2) / 2
         m = P(t * 0.1, mz + t * t * 0.05, 1.0)
-        ball(m.x, m.y, m.z, hr * (0.035 if cute else 0.032), MOUTH, 2)
+        ball(m.x, m.y, m.z, hr * (0.035 if cute else 0.042), MOUTH, 2)
     n = P(0.0, (mz + eye_el) / 2 - 0.02, 1.0)
     ball(n.x, n.y, n.z, hr * 0.075, SKIN_SHADE, 2, scale=(0.9, 0.8, 1.2))
     HAIRS[p['style']](C, hr, hs, P, p, sub, cute)
@@ -1230,7 +1248,7 @@ HAIRS = {'short': h_short, 'side': h_side, 'buzz': h_buzz, 'elder': h_elder, 'ba
 for _n in RESIDENTS + ['ped5']:
     for _f in (0, 1):
         for _turn, _dir in ((False, 'front'), (True, 'back')):
-            actor(f'{_n}-{_dir}{_f}', 32)(lambda n=_n, f=_f, t=_turn: person(n, f, t))
+            actor(f'{_n}-{_dir}{_f}', 32 * PXS, PXS)(lambda n=_n, f=_f, t=_turn: person(n, f, t))
 
 
 # ---------------------------------------------------------------- 头像（D023）：同一模型的胸像，128×128 透明底
@@ -1374,7 +1392,7 @@ def scooter(skin, turn):
 
 for _i in range(len(SCOOTS)):
     for _turn, _dir in ((False, 'front'), (True, 'back')):
-        actor(f'scoot{_i}-{_dir}', 56)(lambda i=_i, t=_turn: scooter(i, t))
+        actor(f'scoot{_i}-{_dir}', 56 * PXS, PXS)(lambda i=_i, t=_turn: scooter(i, t))
 
 
 # ---------------------------------------------------------------- 摩托车
@@ -1441,7 +1459,7 @@ def motorcycle(skin, turn):
 
 for _i in range(len(MOTOS)):
     for _turn, _dir in ((False, 'front'), (True, 'back')):
-        actor(f'moto{_i}-{_dir}', 56)(lambda i=_i, t=_turn: motorcycle(i, t))
+        actor(f'moto{_i}-{_dir}', 56 * PXS, PXS)(lambda i=_i, t=_turn: motorcycle(i, t))
 
 
 # ---------------------------------------------------------------- 汽车
@@ -1531,28 +1549,28 @@ def van(color):
     ends(L, W, 0.06, 0.12, color)
 
 
-@actor('car0', 120)
+@actor('car0', 120 * PXS, PXS)
 def car0():
     warm(); sedan('#dc3a2e'); settle('car')
 
 
-@actor('car1', 120)
+@actor('car1', 120 * PXS, PXS)
 def car1():
     warm(); sedan('#f3f1ea'); settle('car')
 
 
-@actor('car2', 120)
+@actor('car2', 120 * PXS, PXS)
 def car2():
     warm(); van('#2f6fd8'); settle('car')
 
 
 # ---------------------------------------------------------------- 金币
-@actor('coin', 28)
+@actor('coin', 28 * PXS, PXS)
 def coin():
     from mathutils import Euler
     right, up, fwd = _cam_axes()
     R = 0.13
-    ctr = up * (R + U)                  # 底边留 1px（图底边 = 原点）
+    ctr = up * (R + U / PXS)                  # 底边留 1px（图底边 = 原点）
     rot = Euler(CAM_ROT)
     n = -fwd                              # 朝镜头的法线
     def disc(r, t, m, off):

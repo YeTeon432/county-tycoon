@@ -16,6 +16,7 @@ import { ImageAsset, JsonAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resour
  *
  * 倍率（D021）：json 里的 "scale" = 一个世界单位对应几个贴图像素（缺省 1）。
  * 贴图在世界里的尺寸 = 贴图像素 / 倍率，调用方一律用 worldSize() 取，不要直接用 rect。
+ * 单帧可以有自己的倍率：frames 里写 [x, y, w, h, 倍率]（D023：人车 8 倍，脸在手机上才看得清）。
  * 地面 json 还可以给 frameWidth / frameHeight（缺省 32×16·倍率），帧按网格从左到右、从上到下排。
  */
 const BUILDING_DIR = 'art/buildings';
@@ -45,6 +46,8 @@ export class ArtLibrary {
     private _loaded = false;
     /** 建筑图集的倍率（贴图像素 / 世界单位） */
     private _scale = 1;
+    /** 单帧倍率（atlas-frames.json 里第 5 个数）；没写的帧用图集倍率。人车是 8 倍，建筑 4 倍 */
+    private readonly _frameScale = new Map<SpriteFrame, number>();
 
     /** 已加载的建筑图数量（调试 / 测试用） */
     get count(): number {
@@ -66,7 +69,8 @@ export class ArtLibrary {
 
     /** 一张建筑 / 角色贴图在世界里的宽高（贴图像素 ÷ 倍率） */
     worldSize(frame: SpriteFrame): { width: number; height: number } {
-        return { width: frame.rect.width / this._scale, height: frame.rect.height / this._scale };
+        const k = this._frameScale.get(frame) ?? this._scale;
+        return { width: frame.rect.width / k, height: frame.rect.height / k };
     }
 
     /** 某个建筑的贴图；没有图就是 null */
@@ -130,8 +134,11 @@ export class ArtLibrary {
                         this._scale = ArtLibrary.validScale(meta!.scale);
                         const tex = ArtLibrary.makeTexture(image, this._scale);
                         for (const id of Object.keys(frames)) {
-                            const [x, y, w, h] = frames[id];
-                            if (!this._buildings.has(id)) this._buildings.set(id, ArtLibrary.rectFrame(tex, x, y, w, h));
+                            const [x, y, w, h, k] = frames[id];
+                            if (this._buildings.has(id)) continue;
+                            const f = ArtLibrary.rectFrame(tex, x, y, w, h);
+                            if (Number(k) > 0) this._frameScale.set(f, Number(k));
+                            this._buildings.set(id, f);
                         }
                     }
                     finish();

@@ -301,11 +301,12 @@ def sprite(name, w, h, facing=True):
     return deco
 
 
-def actor(name, width_px):
+def actor(name, width_px, px_scale=1):
     """登记一张会动的东西（人 / 车 / 金币）。锚点 = 世界原点 (0,0,0)，渲染后就是图的底边中点
-    （脚底、轮子着地点）。图宽固定 width_px（取偶数），高度自动。不出 _r。"""
+    （脚底、轮子着地点）。图宽固定 width_px（取偶数），高度自动。不出 _r。
+    px_scale：像素倍率（相对 TILE_PX 的 4 倍图）。2 = 8 倍图，同一模型像素翻倍（width_px 也要跟着翻倍）。"""
     def deco(fn):
-        _SPRITES.append((name, 0, 0, False, fn, width_px))
+        _SPRITES.append((name, 0, 0, False, fn, (width_px, px_scale)))
         return fn
     return deco
 
@@ -349,6 +350,10 @@ def _model_objects():
 
 
 def _render_one(name, w, h, fn, turn, out_dir, width_px=None):
+    px_scale = 1
+    if isinstance(width_px, tuple):
+        width_px, px_scale = width_px
+    u = U / px_scale                            # 这张图一个像素是多少世界单位
     _reset()
     fn()
     objs = _model_objects()
@@ -376,8 +381,8 @@ def _render_one(name, w, h, fn, turn, out_dir, width_px=None):
         oe = o.evaluated_get(dg)
         for c in oe.bound_box:
             p = oe.matrix_world @ Vector(c) - pb
-            top = max(top, p.dot(up) / U); lo = min(lo, p.dot(up) / U)
-            side = max(side, abs(p.dot(right)) / U)
+            top = max(top, p.dot(up) / u); lo = min(lo, p.dot(up) / u)
+            side = max(side, abs(p.dot(right)) / u)
     if lo < -1.5:
         print(f'[warn] {name}: 模型低于占地下顶点 {-lo:.0f}px，会被裁掉')
     if side > resx / 2 + 1.5:
@@ -390,9 +395,9 @@ def _render_one(name, w, h, fn, turn, out_dir, width_px=None):
     bpy.ops.object.camera_add(rotation=CAM_ROT)
     cam = bpy.context.object; sc.camera = cam
     cam.data.type = 'ORTHO'
-    cam.data.ortho_scale = max(resx, resy) * U
+    cam.data.ortho_scale = max(resx, resy) * u
     cam.data.sensor_fit = 'AUTO'
-    cam.location = pb + up * (resy / 2 * U) - fwd * 40
+    cam.location = pb + up * (resy / 2 * u) - fwd * 40
     cam.data.clip_start = 0.1; cam.data.clip_end = 100
     path = os.path.join(out_dir, name + ('_r' if turn else '') + '.png')
     sc.render.filepath = path

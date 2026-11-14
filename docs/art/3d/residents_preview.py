@@ -15,7 +15,7 @@ SKINS = [('boy0', '男孩'), ('boy1', '男孩'), ('girl0', '女孩'), ('girl1', 
          ('man0', '青年男'), ('man1', '青年男'), ('man2', '青年男'),
          ('woman0', '青年女'), ('woman1', '青年女'), ('woman2', '青年女'),
          ('oldman0', '老爷爷'), ('oldman1', '老爷爷'), ('oldwoman0', '老奶奶'), ('oldwoman1', '老奶奶')]
-SETTLE = 6            # 和 actors.py 的 SETTLE['ped'] 一致
+SETTLE = 12           # 和 actors.py 的 SETTLE['ped'] 一致（8 倍图像素）
 BG = (246, 243, 236, 255); CARD = (255, 255, 255, 255); LINE = (226, 220, 208, 255)
 INK = (60, 52, 46, 255); SUB = (140, 128, 116, 255)
 
@@ -53,11 +53,12 @@ def residents():
         d.ellipse([cx0 + 8, base - 10, cx0 + CW - 8, base + 6], fill=(236, 231, 220, 255))
         for j, fr in enumerate(('front0', 'back0')):
             im = load(f'{n}-{fr}')
-            big = im.resize((im.width * K, im.height * K), Image.NEAREST)
+            F = K * 32 / im.width                       # 8 倍图（64 宽）→ 和游戏 ×4 档放大 3 倍一样大
+            big = im.resize((round(im.width * F), round(im.height * F)), Image.LANCZOS)
             x = cx0 + 6 + j * (32 * K + 6)
             if shadow:   # 影子图心 = 底边中点往上 SETTLE
-                sh = shadow.resize((shadow.width * K, shadow.height * K), Image.LANCZOS)
-                gx = x + big.width // 2; gy = base - SETTLE * K
+                sh = shadow.resize((round(shadow.width * F), round(shadow.height * F)), Image.LANCZOS)
+                gx = x + big.width // 2; gy = base - round(SETTLE * F)
                 img.alpha_composite(sh, (gx - sh.width // 2, gy - sh.height // 2))
             img.alpha_composite(big, (x, base - big.height))
         fc = load(f'face-{n}').resize((FACE, FACE), Image.LANCZOS)

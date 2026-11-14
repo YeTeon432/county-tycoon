@@ -220,3 +220,15 @@ ped 5、ped3（老人）8、scoot 8、moto 10、car 17（行人 / 电动车 / �
 
 - 新帧：`<皮肤>-front0/front1/back0/back1`（14 套）、`face-<皮肤>`（14 张，128×128，scale 4 的图集里，但头像是 UI 用，按像素原尺寸取）。
 - 行人影子 settle 统一 5（贴图像素）：LifeLayer 里老人 / ped3 原来的 8 要改成 5（ped3 的图现在就是 oldman0，已经是 5）。
+
+## 2026-11-14 居民风格样稿 A / B / C（用户觉得 14 套像乐高，先挑方向，14 套不动）
+
+- 新增 `docs/art/3d/style_test.py`（Blender）：只借 actors.py 的工具函数，导入时把 argv 换成空目标，actors.py 的输出不变。
+  新零件：变截面管子 `tube`（Catmull-Rom、圆头）、椭球 `ellip`（带发束起伏 `ridges`）、小手掌 `hand`、尖发束 `cone`；
+  材质后处理 `matte`（A / C）、`toonify` 两阶卡通 + Freestyle 描边（B）。
+  woman0 / oldman1 / boy0 × A / B / C，每人 front0、back0（宽 32）+ 128 头像，输出到 `docs/art/build3d/style_test/`。
+- 新增 `docs/art/3d/style_preview.py` → `preview/style_options.png`（3 行 × 3 人 + 「现在」列）、
+  `preview/style_options_real.png`（原尺寸 ×4 档 + 一半 ×2 档，摆在路边草地）。
+- 问题：胯部管子上端的圆头从衣服里顶出来（老头背后一块深色、B 女上衣像条纹）→ 上端改平头；
+  B 老头两侧白毛超出 32 宽 → 缩短并缩头 7%，右边缘还剩一点半透明像素。
+- 没跑 make.sh，图集和游戏代码都没动。

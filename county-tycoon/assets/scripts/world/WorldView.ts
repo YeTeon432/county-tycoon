@@ -114,6 +114,8 @@ export class WorldView extends Component {
     onTownChanged: (() => void) | null = null;
     /** 钱够不够（预览里提前把「确定」灰掉）；不接就当够 */
     canAfford: ((def: BuildingDef) => boolean) | null = null;
+    /** 盖不了的原因（没解锁 / 预算不够），预览里显示；接了就优先用它，不再问 canAfford */
+    blockReason: ((def: BuildingDef) => string | null) | null = null;
     /** 预览出现 / 挪动 / 换朝向 / 消失时通知（确认条据此显示） */
     onPendingChanged: ((p: PendingPlace | null) => void) | null = null;
 
@@ -364,7 +366,8 @@ export class WorldView extends Component {
         const model = this._model!;
         let reason = '';
         if (!model.canPlace(def, col, row)) reason = '这里放不下';
-        else if (this.canAfford && !this.canAfford(def)) reason = '建设资金不够';
+        else if (this.blockReason) reason = this.blockReason(def) ?? '';
+        else if (this.canAfford && !this.canAfford(def)) reason = '预算不够';
         return { def, col, row, facing, ok: reason === '', reason, canRotate: !!this._art.get(`${def.id}_r`) };
     }
 

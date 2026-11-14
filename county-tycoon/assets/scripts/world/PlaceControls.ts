@@ -59,6 +59,7 @@ export class PlaceControls extends Component {
         const ln = new Node('Txt');
         ln.layer = Layers.Enum.UI_2D;
         ln.addComponent(UITransform).setContentSize(250, 36);
+        // 文字放不下时缩字号，不换行
         rn.addChild(ln);
         this._reason = ln.addComponent(Label);
         this._reason.fontSize = 22;
@@ -66,6 +67,7 @@ export class PlaceControls extends Component {
         this._reason.color = C.white;
         this._reason.horizontalAlign = Label.HorizontalAlign.CENTER;
         this._reason.verticalAlign = Label.VerticalAlign.CENTER;
+        this._reason.overflow = Label.Overflow.SHRINK;
 
         InputGuard.add(this.node);
         this.node.active = false;
@@ -85,10 +87,14 @@ export class PlaceControls extends Component {
         this._reason!.node.parent!.active = show;
         if (show) {
             this._reason!.string = p.reason;
+            // 红条宽度按字数估（中文 22 号约 22 像素 / 字），放得下「预算不够（还差 ¥12,345）」
+            const w = Math.min(PlaceControls.W, Math.max(160, p.reason.length * 22 + 36));
+            this._reason!.node.getComponent(UITransform)!.setContentSize(w - 20, 36);
+            this._reason!.node.parent!.getComponent(UITransform)!.setContentSize(w, 36);
             const g = this._reasonBg!;
             g.clear();
             g.fillColor = C.red;
-            g.roundRect(-110, -18, 220, 36, 18);
+            g.roundRect(-w / 2, -18, w, 36, 18);
             g.fill();
         }
         this.follow();

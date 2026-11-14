@@ -269,8 +269,8 @@ export class BuildingBar extends Component {
         thumb.sizeMode = Sprite.SizeMode.CUSTOM;
         thumbNode.active = false;
 
-        const lock = makeIcon(node, 'lock', 40, UI_COLOR.textDim);
-        lock.node.setPosition(0, imgY, 0);
+        const lock = makeIcon(node, 'lock', 24, UI_COLOR.textDim);
+        lock.node.setPosition(-imgW / 2 + 16, imgY + imgH / 2 - 16, 0);   // 图区左上角的小锁，不挡缩略图
         lock.node.active = false;
 
         const name = makeLabel(node, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
@@ -344,6 +344,17 @@ export class BuildingBar extends Component {
         this.refreshCards(true);
     }
 
+    /** 盖不了的原因（放置预览用）：没解锁 → 「镇上解锁」；钱不够 → 「预算不够」；能盖 → null */
+    blockReason(def: BuildingDef): string | null {
+        const locked = this.isLocked(def);
+        if (locked) return `${LEVEL_NAME[locked.unlock]}解锁`;
+        if (this._sim && !this._sim.canAfford(def.id)) {
+            const e = this._econ.get(def.id);
+            return e ? `预算不够（还差 ¥${formatNumber(Math.max(0, e.cost - this._sim.state.finance.funds))}）` : '预算不够';
+        }
+        return null;
+    }
+
     private isLocked(def: BuildingDef): Econ | null {
         const e = this._econ.get(def.id);
         const sim = this._sim;
@@ -390,26 +401,21 @@ export class BuildingBar extends Component {
         }
         this.setCheck(c, selected);
 
-        const dim = locked || !afford;
-        c.thumb.grayscale = dim;
-        c.thumb.color = locked ? new Color(255, 255, 255, 110) : UI_PALETTE.white;
+        // 用户要求（2026-11-14）：卡片一律正常显示、都标价，不变灰；
+        // 钱不够 / 没解锁到地图上点地块时，预览和确认条里再说原因（WorldView.blockReason）
+        void afford;
+        c.thumb.grayscale = false;
+        c.thumb.color = UI_PALETTE.white;
         const so = c.swatch.node.getComponent(UIOpacity) ?? c.swatch.node.addComponent(UIOpacity);
-        so.opacity = dim ? 110 : 255;
-        c.lock.node.active = locked;
-        c.name.color = locked ? UI_COLOR.textDim : UI_COLOR.text;
+        so.opacity = 255;
+        c.lock.node.active = locked;          // 只留一把小锁做标记
+        c.name.color = UI_COLOR.text;
 
         const e = this._econ.get(c.def.id);
-        if (locked && e) {
-            c.price.string = `${LEVEL_NAME[e.unlock]}解锁`;
-            c.price.color = UI_COLOR.textDim;
-            c.coin.node.active = false;
-            c.price.node.setPosition(0, -h / 2 + 22, 0);
-        } else {
-            c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
-            c.price.color = afford ? UI_COLOR.text : UI_COLOR.down;
-            c.coin.node.active = !!e;
-            c.price.node.setPosition(10, -h / 2 + 22, 0);
-        }
+        c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
+        c.price.color = UI_COLOR.text;
+        c.coin.node.active = !!e;
+        c.price.node.setPosition(10, -h / 2 + 22, 0);
         // 选中上浮一点
         c.node.setPosition(c.node.position.x, selected ? 6 : 0, 0);
     }
@@ -480,11 +486,7 @@ export class BuildingBar extends Component {
     // ───────────────────────── 点击 ─────────────────────────
 
     private handleItemClick(def: BuildingDef): void {
-        const locked = this.isLocked(def);
-        if (locked) {
-            if (this.onNotice) this.onNotice(`${def.name}：县城升到「${LEVEL_NAME[locked.unlock]}」后解锁`);
-            return;
-        }
+        // 没解锁、钱不够也能选中：到地图上点地块，预览会说明为什么盖不了
         // 再点一次已选中的 → 取消选择
         if (this._selectedId === def.id) {
             this._selectedId = null;
@@ -500,9 +502,6 @@ export class BuildingBar extends Component {
         this.refreshCards();
         if (this.onSelect) this.onSelect(def);
         if (this.onDemolishToggle) this.onDemolishToggle(false);
-        if (this._sim && !this._sim.canAfford(def.id) && this.onNotice) {
-            this.onNotice(`建设资金不够盖${def.name}`);
-        }
     }
 
     /** 底板左上方浮着的圆形拆除开关：常态白底红锤子，开着时红底白锤子 */

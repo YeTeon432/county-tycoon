@@ -201,6 +201,8 @@ export class GameRoot extends Component {
         if (!view) return;
         const sim = this._sim;
         view.canAfford = (def) => (sim ? sim.canAfford(def.id) : true);
+        const bar = this._bar;
+        if (bar) view.blockReason = (def) => bar.blockReason(def);
         const n = new Node('PlaceControls');
         n.layer = Layers.Enum.UI_2D;
         this.node.addChild(n);

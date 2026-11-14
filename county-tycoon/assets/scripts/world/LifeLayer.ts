@@ -314,7 +314,8 @@ export class LifeLayer extends Component {
         const frame = art.get(name);
         if (frame && a.sprite.spriteFrame !== frame) {
             a.sprite.spriteFrame = frame;
-            a.node.getComponent(UITransform)!.setContentSize(frame.rect.width, frame.rect.height);
+            const sz = art.worldSize(frame);
+            a.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
         }
         const sx = flip ? -1 : 1;
         if (a.node.scale.x !== sx) a.node.setScale(sx, 1, 1);
@@ -332,7 +333,8 @@ export class LifeLayer extends Component {
         const h = bn.getComponent(UITransform)!.contentSize.height;
         const node = new Node('Coin');
         node.layer = Layers.Enum.UI_2D;
-        node.addComponent(UITransform).setContentSize(frame.rect.width, frame.rect.height);
+        const sz = this._art!.worldSize(frame);
+        node.addComponent(UITransform).setContentSize(sz.width, sz.height);
         const s = node.addComponent(Sprite);
         s.sizeMode = Sprite.SizeMode.CUSTOM;
         s.spriteFrame = frame as SpriteFrame;

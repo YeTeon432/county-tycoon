@@ -24,3 +24,6 @@ node_modules/
 *~
 reference/
 __pycache__/
+
+# D021 3D 渲染中间产物（sh docs/art/3d/make.sh 重新生成）
+build3d/

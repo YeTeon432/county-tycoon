@@ -158,3 +158,11 @@
 - **T311 ✅**：行人和电动车骑手从真实居民里抽（`LifeLayer.setResidentSource`），一人最多一个小人，街上人数不超过真实人口；外观跟人走（老人银发、同一个人每次同一身衣服）；搬走 / 去世的人对应的小人会消失。汽车仍是匿名的。空手点中行人 → 打开那位居民的档案（判定框放宽 4 像素，人优先于格子）。为此在 UiRoot（支线 B 的文件）加了一个公开方法 `openResidentById`，只是转调已有的 `openResident`。
   - 实测（编辑器 + 真实鼠标点击）：人口 5，街上 4 个小人，全部是在册居民且不重复；点其中一位（赵培根）弹出他的档案，地图上没有误放建筑。
 - **M2 核心原型的 T301～T311 全部完成。**
+
+## 2026-11-14 画面改为 3D 预渲染风（D021）
+- 用户看了另一款 3D 城建手游的资源，决定换风格。先用 Blender 做了同场景样板 `docs/art/3d/preview/scene3d.png`，用户确认。
+- **出图管线**：`docs/art/3d/lib.py` 公共库（正交等距相机、左上主光、材质、零件、自动取景、`_r` 沿对角线镜像）；建筑 `homes_shops.py` / `civic_industry.py`，地形物件 `terrain_obj.py`，人车 `actors.py`，地面 `ground.py`（PIL，周期纹理无缝），打包 `pack.py`。一键 `sh docs/art/3d/make.sh`，全量约 3.5 分钟。
+- **产出**：图集 92 张（和旧图集帧名一一对应，无缺无多），2048×2048；地面 66 帧，2048×512。整镇验收图 `docs/art/3d/preview/town.png`。
+- **代码**：`ArtLibrary` 读 json 里的 `"scale"`（4），倍率 > 1 时线性过滤，新增 `scale` / `worldSize()`；地面按 `frameWidth/frameHeight` 网格切帧。`BuildingLayer` 宽度校验乘倍率，`BuildingLayer` / `LifeLayer` 精灵尺寸改用 `worldSize()`。tsc：改动文件通过；`tests/sim/sweep.ts` 的 6 个 `padStart` 报错是原来就有的。
+- **问题**：编辑器开在支线 B 的 worktree，游戏内画面还没看过（待集成验证）。几栋 2×2 公共建筑比旧图矮（发展中心、学校、纺织厂）；1×1 招牌字在原尺寸偏小；人车没有落地阴影。
+- **下一步**：在编辑器里实际跑一遍主线；按游戏内效果调楼高、招牌字号，给人车加椭圆影子。

@@ -126,7 +126,8 @@ export class BuildingLayer extends Component {
                 const node = BuildingLayer.makeChild(root, `T${c}_${r}`);
                 const ui = node.getComponent(UITransform)!;
                 ui.setAnchorPoint(new Vec2(0.5, 0));
-                ui.setContentSize(frame.rect.width, frame.rect.height);
+                const sz = art.worldSize(frame);
+                ui.setContentSize(sz.width, sz.height);
                 const p = iso.footBottom(c, r, 1, 1);
                 node.setPosition(p.x, p.y, 0);
                 const s = node.addComponent(Sprite);
@@ -176,13 +177,13 @@ export class BuildingLayer extends Component {
         this.sortAll();
     }
 
-    /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽；朝右的图缺了就用默认图 */
+    /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽·倍率；朝右的图缺了就用默认图 */
     private usableFrame(def: BuildingDef, right: boolean) {
         const art = this._art;
         const iso = this._iso!;
         const frame = art ? ((right ? art.get(`${def.id}_r`) : null) ?? art.get(def.id)) : null;
         if (!frame) return null;
-        const want = (def.width + def.height) * iso.hw;
+        const want = (def.width + def.height) * iso.hw * art!.scale;
         const fw = frame.rect.width;
         if (fw !== want) {
             if (!this._warned.has(def.id)) {
@@ -214,7 +215,8 @@ export class BuildingLayer extends Component {
         if (frame) {
             const ui = node.getComponent(UITransform)!;
             ui.setAnchorPoint(new Vec2(0.5, 0));
-            ui.setContentSize(frame.rect.width, frame.rect.height);
+            const sz = this._art!.worldSize(frame);
+            ui.setContentSize(sz.width, sz.height);
             const sprite = node.addComponent(Sprite);
             sprite.sizeMode = Sprite.SizeMode.CUSTOM;
             sprite.type = Sprite.Type.SIMPLE;

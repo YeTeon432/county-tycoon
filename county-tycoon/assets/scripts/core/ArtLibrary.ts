@@ -9,8 +9,14 @@ import { ImageAsset, JsonAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resour
  *   - art/buildings/<id>.png  可选：散图，同名时覆盖图集里的那帧，方便手改一张图直接试
  *   - art/ground/ground.png   地面图集，每帧 32×16 横排：0~3 草地，4+mask 城市道路，20+mask 土路（mask 见 GridMap）
  *
- * 像素锐利由代码保证：加载原始 ImageAsset，自建 Texture2D 并强制最近邻 / 无 mipmap / Clamp，
- * 也不进动态合图（合图纹理是线性过滤）。导入面板里的 Filter Mode 改不改都不影响游戏。
+ * 过滤方式由代码定：加载原始 ImageAsset，自建 Texture2D，无 mipmap / Clamp，不进动态合图。
+ *   - 倍率 1（像素图）：最近邻，保证像素锐利
+ *   - 倍率 > 1（D021 起的 3D 渲染图，4 倍分辨率）：线性过滤
+ * 导入面板里的 Filter Mode 改不改都不影响游戏。
+ *
+ * 倍率（D021）：json 里的 "scale" = 一个世界单位对应几个贴图像素（缺省 1）。
+ * 贴图在世界里的尺寸 = 贴图像素 / 倍率，调用方一律用 worldSize() 取，不要直接用 rect。
+ * 地面 json 还可以给 frameWidth / frameHeight（缺省 32×16·倍率），帧按网格从左到右、从上到下排。
  */
 const BUILDING_DIR = 'art/buildings';
 const BUILDING_ATLAS = 'art/atlas';
@@ -37,6 +43,8 @@ export class ArtLibrary {
     /** 帧名 → 帧号，来自 art/ground/ground-frames.json。地形按名字取帧，不认帧号 */
     private _groundNames = new Map<string, number>();
     private _loaded = false;
+    /** 建筑图集的倍率（贴图像素 / 世界单位） */
+    private _scale = 1;
 
     /** 已加载的建筑图数量（调试 / 测试用） */
     get count(): number {
@@ -49,6 +57,16 @@ export class ArtLibrary {
 
     get loaded(): boolean {
         return this._loaded;
+    }
+
+    /** 建筑 / 角色贴图的倍率：贴图像素 / 世界单位（D021 起是 4） */
+    get scale(): number {
+        return this._scale;
+    }
+
+    /** 一张建筑 / 角色贴图在世界里的宽高（贴图像素 ÷ 倍率） */
+    worldSize(frame: SpriteFrame): { width: number; height: number } {
+        return { width: frame.rect.width / this._scale, height: frame.rect.height / this._scale };
     }
 
     /** 某个建筑的贴图；没有图就是 null */
@@ -104,11 +122,13 @@ export class ArtLibrary {
         if (hasAtlas) {
             resources.load(BUILDING_ATLAS_FRAMES, JsonAsset, (e1, json) => {
                 resources.load(BUILDING_ATLAS, ImageAsset, (e2, image) => {
-                    const frames = json && json.json ? (json.json as { frames?: Record<string, number[]> }).frames : null;
+                    const meta = json && json.json ? (json.json as { frames?: Record<string, number[]>; scale?: number }) : null;
+                    const frames = meta ? meta.frames : null;
                     if (e1 || e2 || !image || !frames) {
                         console.warn('[ArtLibrary] 建筑图集加载失败，用色块代替', e1 || e2);
                     } else {
-                        const tex = ArtLibrary.makePixelTexture(image);
+                        this._scale = ArtLibrary.validScale(meta!.scale);
+                        const tex = ArtLibrary.makeTexture(image, this._scale);
                         for (const id of Object.keys(frames)) {
                             const [x, y, w, h] = frames[id];
                             if (!this._buildings.has(id)) this._buildings.set(id, ArtLibrary.rectFrame(tex, x, y, w, h));
@@ -126,48 +146,64 @@ export class ArtLibrary {
                 if (err || !image) {
                     console.warn(`[ArtLibrary] ${path} 加载失败，用色块代替`, err);
                 } else {
-                    this._buildings.set(id, ArtLibrary.makePixelFrame(ArtLibrary.makePixelTexture(image)));
+                    // 散图和图集同一倍率（图集先加载完才有准；散图只用来临时试图）
+                    this._buildings.set(id, ArtLibrary.makePixelFrame(ArtLibrary.makeTexture(image, this._scale)));
                 }
                 finish();
             });
         }
 
-        if (hasGround) {
+        // 地面：先读帧名表（里面有倍率和帧尺寸），再切图
+        const loadGroundImage = (scale: number, fw: number, fh: number) => {
             resources.load(GROUND_ATLAS, ImageAsset, (err, image) => {
                 if (err || !image) {
                     console.warn('[ArtLibrary] 地面图集加载失败，用色块代替', err);
                 } else {
-                    this._ground = ArtLibrary.slice(image, 32, 16);
+                    this._ground = ArtLibrary.slice(image, fw, fh, scale);
                 }
                 finish();
             });
-        }
-
+        };
         if (hasGroundFrames) {
             resources.load(GROUND_FRAMES, JsonAsset, (err, json) => {
+                let scale = 1, fw = 32, fh = 16;
                 if (err || !json || !json.json) {
                     console.warn('[ArtLibrary] ground-frames.json 加载失败，地形退回按帧号取', err);
                 } else {
-                    const frames = (json.json as { frames?: Record<string, number> }).frames;
-                    if (frames) {
-                        for (const name of Object.keys(frames)) {
-                            const i = Number(frames[name]);
+                    const meta = json.json as { frames?: Record<string, number>; scale?: number; frameWidth?: number; frameHeight?: number };
+                    scale = ArtLibrary.validScale(meta.scale);
+                    fw = Number(meta.frameWidth) > 0 ? Number(meta.frameWidth) : 32 * scale;
+                    fh = Number(meta.frameHeight) > 0 ? Number(meta.frameHeight) : 16 * scale;
+                    if (meta.frames) {
+                        for (const name of Object.keys(meta.frames)) {
+                            const i = Number(meta.frames[name]);
                             if (Number.isFinite(i)) this._groundNames.set(name, i);
                         }
                     }
                 }
                 finish();
+                if (hasGround) loadGroundImage(scale, fw, fh);
             });
+        } else if (hasGround) {
+            loadGroundImage(1, 32, 16);
         }
     }
 
-    /** 横排图集切成等宽帧，共用同一张纹理（同纹理的精灵能合批，整片地面一次绘制） */
-    private static slice(image: ImageAsset, fw: number, fh: number): SpriteFrame[] {
-        const tex = ArtLibrary.makePixelTexture(image);
-        const n = Math.floor(image.width / fw);
+    /** 图集按网格切成等大的帧（从左到右、从上到下），共用同一张纹理（同纹理的精灵能合批，整片地面一次绘制） */
+    private static slice(image: ImageAsset, fw: number, fh: number, scale: number): SpriteFrame[] {
+        const tex = ArtLibrary.makeTexture(image, scale);
+        const cols = Math.floor(image.width / fw);
+        const rows = Math.floor(image.height / fh);
         const frames: SpriteFrame[] = [];
-        for (let i = 0; i < n; i++) frames.push(ArtLibrary.rectFrame(tex, i * fw, 0, fw, fh));
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) frames.push(ArtLibrary.rectFrame(tex, c * fw, r * fh, fw, fh));
+        }
         return frames;
+    }
+
+    private static validScale(v: unknown): number {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : 1;
     }
 
     /** 图集里的一块。坐标原点左上，和 PIL / pack.py 一致 */
@@ -183,11 +219,12 @@ export class ArtLibrary {
         return f;
     }
 
-    /** 像素风专用纹理：最近邻、无 mipmap、边缘 Clamp */
-    static makePixelTexture(image: ImageAsset): Texture2D {
+    /** 倍率 1 是像素图：最近邻；倍率 > 1 是高分辨率渲染图：线性。都无 mipmap、边缘 Clamp */
+    static makeTexture(image: ImageAsset, scale: number): Texture2D {
         const tex = new Texture2D();
         tex.image = image;
-        tex.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
+        const f = scale > 1 ? Texture2D.Filter.LINEAR : Texture2D.Filter.NEAREST;
+        tex.setFilters(f, f);
         tex.setMipFilter(Texture2D.Filter.NONE);
         tex.setWrapMode(Texture2D.WrapMode.CLAMP_TO_EDGE, Texture2D.WrapMode.CLAMP_TO_EDGE);
         return tex;

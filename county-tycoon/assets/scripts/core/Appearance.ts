@@ -13,7 +13,7 @@ export const LOOKS: Record<BodyType, number> = {
 
 /** 体型的中文名（档案里用） */
 export const BODY_NAME: Record<BodyType, string> = {
-    boy: '男孩', girl: '女孩', man: '青年男', woman: '青年女', oldman: '老爷爷', oldwoman: '老奶奶',
+    boy: '男孩', girl: '女孩', man: '成年男', woman: '成年女', oldman: '老爷爷', oldwoman: '老奶奶',
 };
 
 export interface LookInput {

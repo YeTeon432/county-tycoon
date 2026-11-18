@@ -991,12 +991,70 @@ suite('研究 / 目标 / 心愿（D026 第二批）', () => {
         const f0 = sim.state.finance.funds;
         eq(sim.startResearch('r-bbq'), null);
         eq(sim.state.finance.funds, f0 - 5000);
-        ok(!!sim.startResearch('r-barber'), '一次只能一项');
+        ok(!!sim.startResearch('r-barber'), '研究位只有 1 个时一次只能一项');
         eq(sim.researchList().find((r) => r.id === 'r-bbq')!.state, 'active');
         const rep = sim.stepMonth();
         ok(sim.isUnlocked('bbq'), '1 天后解锁');
         ok(rep.notices!.some((n) => n.kind === 'research'));
         eq(rep.expense.research, 5000, '账单里有研究费');
+    });
+
+    test('D030 研究位：开第 2 个位后能同时研究两项，两项都按天推进', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 71 });
+        sim.state.finance.funds = 200000;
+        eq(sim.researchSlots().total, 1);
+        eq(sim.openResearchSlot(), null);
+        eq(sim.researchSlots().total, 2);
+        eq(sim.startResearch('r-bbq'), null);
+        eq(sim.startResearch('r-barber'), null, '第二个位能用');
+        ok(!!sim.startResearch('r-milk-tea'), '两个位都占了');
+        sim.stepMonth();
+        ok(sim.isUnlocked('bbq') && sim.isUnlocked('barber'), '两项都完成');
+        eq(sim.openResearchSlot(), null);
+        ok(!!sim.openResearchSlot(), '最多 3 个');
+    });
+
+    test('D030 加速研究：花钱立刻完成，研究位空出来', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 72 });
+        sim.state.finance.funds = 200000;
+        eq(sim.startResearch('r-brick'), null);
+        const f0 = sim.state.finance.funds;
+        eq(sim.rushResearch('r-brick'), null);
+        ok(sim.state.finance.funds < f0, '扣了钱');
+        ok((sim.state.researched ?? []).indexOf('r-brick') >= 0, '立刻完成');
+        eq(sim.state.research, null, '研究位空出来了');
+    });
+
+    test('D030 人才引进：当场来 6 人、学历对、扣钱、冷却 5 天', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        t.map.build('apartment', 2, 11, 2, 2);
+        t.map.build('apartment', 5, 11, 2, 2);
+        const sim = new Simulation(cfg, t.view, { seed: 73 });
+        sim.state.finance.funds = 200000;
+        const n0 = sim.state.residents.length;
+        const f0 = sim.state.finance.funds;
+        eq(sim.hireTalents(2), null);
+        const fresh = sim.state.residents.slice(n0);
+        eq(fresh.length, 6, '来了 6 人');
+        ok(fresh.every((r) => r.education === 2 && r.age >= 22 && r.age <= 30 && r.homeId !== null), '大专、年轻、有房');
+        eq(sim.state.finance.funds, f0 - 5000 * 6, '扣钱');
+        ok(!!sim.hireTalents(0), '冷却中');
+        for (let i = 0; i < 5; i++) sim.stepMonth();
+        ok(sim.talentStatus().ready, '5 天后能再招');
+    });
+
+    test('D030 人才引进：空房不够不让招，原因说清楚', () => {
+        const cfg = loadFullConfig();
+        const map = new MapBuilder(12, 12);
+        map.hRoad(1, 10, 5);
+        map.build('hut', 3, 4);                 // 只有一间土坯房，住 3 人
+        const sim = new Simulation(cfg, map.view(), { seed: 74 });
+        sim.state.finance.funds = 200000;
+        ok(/空房/.test(sim.hireTalents(0) ?? ''), '说清楚是空房不够');
+        eq(sim.state.finance.funds, 200000, '没扣钱');
     });
 
     test('研究前置：人口 / 等级 / 要有某栋楼，原因说清楚', () => {

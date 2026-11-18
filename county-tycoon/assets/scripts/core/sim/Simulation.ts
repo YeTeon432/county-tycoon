@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, MoneyFlows, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BuildingEcon, BuildingSim, Education, MoneyFlows, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -31,6 +31,8 @@ export class Simulation implements SimApi {
     private _constructionSpent = 0;
     /** 本月研究费（开始研究时已经扣了，账单里记一笔） */
     private _researchSpent = 0;
+    /** 本月人才引进花的钱（D030） */
+    private _talentSpent = 0;
     /** 本月招商：土地出让金收入、补贴支出（发生时已进出财政，账单里记一笔） */
     private _investIncome = 0;
     private _subsidySpent = 0;
@@ -50,7 +52,7 @@ export class Simulation implements SimApi {
     static emptyFlows(): MoneyFlows {
         return {
             inflow: { exports: 0, outsideCustomers: 0, immigrants: 0, bailout: 0, grants: 0, investment: 0 },
-            outflow: { goodsCost: 0, upkeep: 0, construction: 0, fuel: 0, leavers: 0, privateProfit: 0, research: 0, subsidy: 0 },
+            outflow: { goodsCost: 0, upkeep: 0, construction: 0, fuel: 0, leavers: 0, privateProfit: 0, research: 0, subsidy: 0, talent: 0 },
         };
     }
 
@@ -266,21 +268,66 @@ export class Simulation implements SimApi {
         if (!p) return [];
         const s = this.state;
         const done = new Set(s.researched ?? []);
+        const running = s.research ?? [];
         return p.research.map((r) => {
             let state: ResearchStatus['state'];
             let reason = '';
             let progress = 0;
+            const act = running.find((x) => x.id === r.id);
             if (done.has(r.id)) state = 'done';
-            else if (s.research && s.research.id === r.id) {
+            else if (act) {
                 state = 'active';
-                progress = (s.research.total - s.research.left) / s.research.total;
-                reason = `还要 ${s.research.left} 天`;
+                progress = (act.total - act.left) / act.total;
+                reason = `还要 ${act.left} 天`;
             } else {
                 reason = this.researchBlock(r);
                 state = reason ? 'locked' : 'ready';
             }
             return { id: r.id, name: r.name, unlocks: r.unlocks.slice(), cost: r.cost, days: r.days, level: r.level, state, reason, progress };
         });
+    }
+
+    /** 研究位（D030）：已开通几个、最多几个、下一个多少钱 */
+    researchSlots(): { used: number; total: number; nextCost: number | null } {
+        const s = this.state;
+        const total = Math.max(1, Math.min(MAX_SLOTS, s.researchSlots ?? 1));
+        const cost = SLOT_COSTS[total] ?? null;   // 下一个位的价格
+        return { used: (s.research ?? []).length, total, nextCost: cost };
+    }
+
+    /** 开通一个研究位（D030） */
+    openResearchSlot(): string | null {
+        const s = this.state;
+        const cur = Math.max(1, Math.min(MAX_SLOTS, s.researchSlots ?? 1));
+        if (cur >= MAX_SLOTS) return '研究位已开满';
+        const cost = SLOT_COSTS[cur];
+        if (cost === null || cost === undefined) return '研究位已开满';
+        if (s.finance.funds < cost) return `建设资金不够（还差 ¥${cost - s.finance.funds}）`;
+        s.finance.funds -= cost;
+        this._researchSpent += cost;
+        this._flows.outflow.research += cost;
+        s.researchSlots = cur + 1;
+        this.event(`开通了第 ${cur + 1} 个研究位，可以同时研究 ${cur + 1} 项`);
+        return null;
+    }
+
+    /** 加速研究：花钱让这项立刻完成（D030），价格 = 剩余天数 × 每天研究费 */
+    rushResearch(id: string): string | null {
+        const p = this._cfg.progress;
+        if (!p) return '没有研究';
+        const s = this.state;
+        const act = (s.research ?? []).find((x) => x.id === id);
+        if (!act) return '这项没在研究';
+        const r = p.research.find((x) => x.id === id);
+        if (!r) return '没有这项研究';
+        const cost = rushCost(r, act.left);
+        if (s.finance.funds < cost) return `建设资金不够（还差 ¥${cost - s.finance.funds}）`;
+        s.finance.funds -= cost;
+        this._researchSpent += cost;
+        this._flows.outflow.research += cost;
+        act.left = 0;
+        this.finishResearch(act, r);
+        return null;
     }
 
     startResearch(id: string): string | null {
@@ -290,27 +337,48 @@ export class Simulation implements SimApi {
         const s = this.state;
         if (!r) return '没有这项研究';
         if ((s.researched ?? []).indexOf(id) >= 0) return '已经研究过了';
-        if (s.research) return '一次只能研究一项';
+        if ((s.research ?? []).some((x) => x.id === id)) return '这项正在研究';
+        const slots = Math.max(1, Math.min(MAX_SLOTS, s.researchSlots ?? 1));
+        if ((s.research ?? []).length >= slots) {
+            return slots >= MAX_SLOTS ? '研究位都占满了，等一项做完' : '研究位都占满了（可以在上面再开一个研究位）';
+        }
         const block = this.researchBlock(r);
         if (block) return block;
         if (s.finance.funds < r.cost) return `建设资金不够（还差 ¥${r.cost - s.finance.funds}）`;
         s.finance.funds -= r.cost;
         this._researchSpent += r.cost;
         this._flows.outflow.research += r.cost;   // 请县外的专家，钱流出县外
-        s.research = { id, left: r.days, total: r.days };
+        (s.research ??= []).push({ id, left: r.days, total: r.days });
         return null;
     }
 
-    /** 新的一天：研究进度 −1，到 0 解锁 */
+    /** 新的一天：每一项研究进度 −1，到 0 解锁（D030 起可以同时跑多项） */
     private advanceResearch(): void {
         const s = this.state;
         const p = this._cfg.progress;
-        if (!p || !s.research) return;
-        s.research.left--;
-        if (s.research.left > 0) return;
-        const r = p.research.find((x) => x.id === s.research!.id);
-        s.research = null;
-        if (!r) return;
+        if (!p || !s.research || !s.research.length) return;
+        const still: NonNullable<typeof s.research> = [];
+        const finished = new Set<string>();
+        for (const act of s.research) {
+            act.left--;
+            if (act.left > 0) { still.push(act); continue; }
+            const r = p.research.find((x) => x.id === act.id);
+            if (r && !finished.has(r.id)) { finished.add(r.id); this.unlockResearch(r); }
+        }
+        s.research = still.length ? still : null;
+    }
+
+    /** 一项研究完成：记进已研究、解锁建筑、播公告。加速研究也走这里 */
+    private finishResearch(act: { id: string; left: number; total: number }, r: ResearchDef): void {
+        const s = this.state;
+        s.research = (s.research ?? []).filter((x) => x !== act);
+        if (!s.research.length) s.research = null;
+        if ((s.researched ?? []).indexOf(r.id) >= 0) return;
+        this.unlockResearch(r);
+    }
+
+    private unlockResearch(r: ResearchDef): void {
+        const s = this.state;
         (s.researched ??= []).push(r.id);
         const un = (s.unlocked ??= []);
         for (const id of r.unlocks) if (un.indexOf(id) < 0) un.push(id);
@@ -1136,12 +1204,13 @@ export class Simulation implements SimApi {
         const income: MonthlyReport['income'] = { business: 0, industry: 0, income: 0, land: 0, investment: 0, profit: 0, rent: 0 };
         const expense: MonthlyReport['expense'] = {
             construction: this._constructionSpent, upkeep: 0, publicWages: 0, pension: 0, promotion: 0,
-            research: this._researchSpent,
+            research: this._researchSpent, talent: this._talentSpent,
         };
         expense.promotion += this._subsidySpent;
         income.investment += this._investIncome;
         this._constructionSpent = 0;
         this._researchSpent = 0;
+        this._talentSpent = 0;
         this._subsidySpent = 0;
         this._investIncome = 0;
 
@@ -1368,20 +1437,22 @@ export class Simulation implements SimApi {
         }
     }
 
-    /** 5. 迁入：空岗位多、空房多、心情好，来的人就多（DESIGN 2.7） */
+    /** 5. 迁入：空岗位多、空房多、心情好，来的人就多（DESIGN 2.7、16.2） */
     private runImmigration(world: World): void {
         const s = this.state;
         const cfg = this._cfg.economy;
         const openJobs = this.countOpenJobs(world);
         const homeless = s.residents.filter((r) => r.homeId === null).length;
         const freeHomes = this.countFreeHousing() - homeless;
-        if (openJobs <= 0 || freeHomes <= 0) return;
+        if (freeHomes <= 0) return;
 
         // 县城幸福度越高、口碑越好，想来的人越多（D026，DESIGN 16.2）
         const sum = this.summary();
         const attract = curve(cfg.immigrationCurve, sum.avgMood) * Math.max(0, 1 + (s.buzz ?? 0))
             * (1 - (s.finance.taxRate.business - 0.05) * 2);
-        const expected = Math.min(openJobs, freeHomes) * cfg.immigrationRate * attract / 12;
+        // D030：没有空岗位时也来一点人（按空房的一半算），来了先失业、自己慢慢找活
+        const capacity = openJobs > 0 ? Math.min(openJobs, freeHomes) : freeHomes * 0.5;
+        const expected = capacity * cfg.immigrationRate * attract / 12;
         let n = Math.floor(expected);
         if (chance(this._rng, expected - n)) n++;
 
@@ -1416,6 +1487,62 @@ export class Simulation implements SimApi {
             this.notice('arrive', `${r.name}${partner ? '一家' : ''}搬到咱们县城了`, partner ? [r.id, partner.id] : [r.id], this.arriveReason(world));
             this.fillVacancies(world);
         }
+    }
+
+    /**
+     * 人才引进（D030，DESIGN 16.6）：花钱从县外招一批有学历的年轻人，当场到。
+     * 只要求有空房，不要求有空岗（来了自己找工作）；5 天冷却。
+     * @param edu 0 初中 / 1 高中 / 2 大专，价格见 economy.json 的 talentTiers
+     */
+    hireTalents(edu: Education): string | null {
+        const s = this.state;
+        const cfg = this._cfg.economy;
+        const now = s.month;
+        if ((s.talentReadyAt ?? 0) > now) return `刚招过一批，还要等 ${s.talentReadyAt! - now} 天`;
+        const tier = cfg.talentTiers.find((x) => x.edu === edu);
+        if (!tier) return '没有这一档';
+        const homeless = s.residents.filter((r) => r.homeId === null).length;
+        const freeHomes = this.countFreeHousing() - homeless;
+        if (freeHomes < tier.count) return `空房不够：要 ${tier.count} 间，现在只有 ${freeHomes} 间`;
+        const cost = tier.price * tier.count;
+        if (s.finance.funds < cost) return `建设资金不够（还差 ¥${cost - s.finance.funds}）`;
+
+        s.finance.funds -= cost;
+        this._talentSpent += cost;
+        this._flows.outflow.talent += cost;      // 安家费、路费，钱流出县外
+
+        const world = this.refreshWorld();
+        const ids: number[] = [];
+        for (let i = 0; i < tier.count; i++) {
+            const age = nextInt(this._rng, 22, 30);
+            const gender: 'M' | 'F' = chance(this._rng, 0.5) ? 'M' : 'F';
+            const r = this.createResident(null, gender, age);
+            r.education = edu as Education;
+            r.savings += Math.round(tier.price * 0.5);   // 自带一点存款，刚来就能过日子
+            s.residents.push(r);
+            this.assignHomes([r]);
+            if (r.homeId === null) { s.residents.pop(); continue; }
+            this.log(r, '通过人才引进来到县城');
+            ids.push(r.id);
+        }
+        if (!ids.length) return '没有空房，招来的人没地方住';
+        this._flows.inflow.immigrants += ids.reduce((a, id) => a + (this.resident(id)?.savings ?? 0), 0);
+        s.talentHires = (s.talentHires ?? 0) + 1;
+        s.talentReadyAt = now + TALENT_COOLDOWN;
+        this.fillVacancies(world);
+        this.notice('arrive', `人才引进：${ids.length} 位${EDU_NAME[edu]}学历的年轻人来到了县城`, ids,
+            '县里出钱招来的人');
+        this.event(`人才引进：${ids.length} 位${EDU_NAME[edu]}学历的年轻人来到县城`);
+        return null;
+    }
+
+    /** 人才引进现在能不能招：返回不能用时的原因，能用返回 null */
+    talentStatus(): { ready: boolean; reason: string; nextCost: number[] } {
+        const s = this.state;
+        const cfg = this._cfg.economy;
+        const nextCost = cfg.talentTiers.map((t) => t.price * t.count);
+        const wait = (s.talentReadyAt ?? 0) - s.month;
+        return { ready: wait <= 0, reason: wait > 0 ? `刚招过一批，还要等 ${wait} 天` : '', nextCost };
     }
 
     /** 城镇等级（DESIGN 6）。营商环境要等 M3，先只判人口和几栋关键建筑 */
@@ -2059,6 +2186,8 @@ export function normalizeSimState(state: SimState, cfg?: SimConfig): SimState {
     for (const c of state.construction ?? []) if (typeof c.startAt !== 'number') c.startAt = state.month - (c.total - c.left);
     for (const r of state.renovations ?? []) if (typeof r.startAt !== 'number') r.startAt = state.month - (r.total - r.left);
     if (cfg && state.finance && !state.finance.taxRate) state.finance.taxRate = { ...cfg.economy.taxRate };
+    // D030 以前的存档：research 是单个对象（一次一项），转成数组；研究位 1 个
+    if (state.research && !Array.isArray(state.research)) state.research = [state.research as any];
     // D026 以前的存档：没有研究记录 → 按当前城镇等级把该等级及以下的研究都算完成，地图上已有的楼也算解锁
     if (cfg && cfg.progress && !Array.isArray(state.unlocked)) {
         const lv = LEVEL_ORDER.indexOf(state.level);
@@ -2071,10 +2200,25 @@ export function normalizeSimState(state: SimState, cfg?: SimConfig): SimState {
         state.research = null;
         state.wishesDone = state.wishesDone ?? 0;
     }
+    // 老存档可能缺初始解锁（比如土坯农房没进 unlocked，底栏就把它当「没有研究能解锁」藏掉）
+    if (cfg && cfg.progress && Array.isArray(state.unlocked)) {
+        for (const id of cfg.progress.initialUnlocked) if (state.unlocked.indexOf(id) < 0) state.unlocked.push(id);
+    }
     return state;
 }
 
 const LEVEL_ORDER: TownLevel[] = ['village', 'town', 'county', 'city', 'top100'];
+/** 研究位（D030）：最多 3 个；SLOT_COSTS[n] = 开第 n+1 个位的价钱 */
+const MAX_SLOTS = 3;
+const SLOT_COSTS: Record<number, number> = { 1: 25000, 2: 60000 };
+/** 人才引进冷却：几天内只能招一次（D030） */
+const TALENT_COOLDOWN = 5;
+/** 加速研究：剩余每天折多少钱（至少收这么多） */
+const RUSH_MIN = 500;
+function rushCost(r: ResearchDef, left: number): number {
+    const perDay = r.days > 0 ? r.cost / r.days : r.cost;
+    return Math.max(RUSH_MIN, Math.ceil(left * perDay));
+}
 const EDU_NAME = ['没上过学', '初中', '高中', '大专'];
 const DEMAND_ORDER: Demand[] = ['food', 'daily', 'fun', 'other'];
 const WISH_SHOP_TEXT: Record<Demand, string> = {

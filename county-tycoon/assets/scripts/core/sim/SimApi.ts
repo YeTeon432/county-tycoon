@@ -1,4 +1,4 @@
-import { BuildingSim, MonthlyReport, Resident, SimState, TownLevel } from './types';
+import { BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
 
 /**
  * 画面层调用模拟层的唯一入口（合同，见 docs/PARALLEL.md）。
@@ -30,6 +30,17 @@ export interface SimApi {
     researchList?(): ResearchStatus[];
     /** 开始研究：成功 null，失败返回原因 */
     startResearch?(id: string): string | null;
+    // ── D030：并行研究 / 加速研究 / 人才引进 ──
+    /** 研究位：已开通几个、最多几个、下一个多少钱（null = 开满了） */
+    researchSlots?(): { used: number; total: number; nextCost: number | null };
+    /** 开通一个研究位：成功 null，失败返回原因 */
+    openResearchSlot?(): string | null;
+    /** 加速研究（花钱立刻完成）：成功 null，失败返回原因 */
+    rushResearch?(id: string): string | null;
+    /** 人才引进：招一批某个学历的人。成功 null，失败返回原因 */
+    hireTalents?(edu: Education): string | null;
+    /** 人才引进现在能不能招、各档价格 */
+    talentStatus?(): { ready: boolean; reason: string; nextCost: number[] };
     /** 当前等级的阶段目标和进度 */
     goals?(): GoalStatus[];
     /** 目标全部完成：升级。返回新等级，不能升返回 null */

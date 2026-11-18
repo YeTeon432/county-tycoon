@@ -160,7 +160,7 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
 
         // 0. D026：目标全完成就申请升级；没在研究就挑最便宜的能研究的（留够 2 万周转）
         if (sim.upgradeLevel) sim.upgradeLevel();
-        if (sim.researchList && sim.startResearch && !s.research) {
+        if (sim.researchList && sim.startResearch && !(s.research && s.research.length)) {
             const ready = sim.researchList().filter((r) => r.state === 'ready' && r.cost + 20000 <= s.finance.funds)
                 .sort((a, b) => a.cost - b.cost);
             if (ready.length) sim.startResearch(ready[0].id);

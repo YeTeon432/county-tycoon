@@ -200,6 +200,8 @@ export interface EconomyConfig {
     moveRentMonths: number;
     /** 每月迁入的基础吸引力 */
     immigrationRate: number;
+    /** 人才引进分档（D030，DESIGN 16.6）：每次招 count 人，每人 price */
+    talentTiers: { edu: Education; price: number; count: number }[];
     /** 开局给的启动资金 */
     startFunds: number;
     /** 破产时的救助钱（不会游戏结束，见 DESIGN 3） */
@@ -236,6 +238,9 @@ export interface VehicleTier {
     /** 每月油费（从可支配收入扣，不进财政） */
     fuel: number;
 }
+
+/** 人才引进一档（D030）：一次招一批同样学历的人 */
+export interface TalentTier { edu: Education; price: number; count: number }
 
 export interface VehicleConfig {
     /** 买车的年龄范围（含两端），还要有工作 */
@@ -404,6 +409,11 @@ const DEFAULT_ECONOMY: EconomyConfig = {
     moveChance: 0.1,
     moveRentMonths: 12,
     immigrationRate: 0.6,
+    talentTiers: [
+        { edu: 0, price: 1500, count: 6 },
+        { edu: 1, price: 3000, count: 6 },
+        { edu: 2, price: 5000, count: 6 },
+    ],
     startFunds: 100000,
     bailout: 8000,
     taxRange: { min: 0.02, max: 0.3 },
@@ -444,6 +454,22 @@ const DEFAULT_ECONOMY: EconomyConfig = {
         },
     },
 };
+
+/** 人才引进分档（D030）：JSON 里改价钱 / 人数 */
+function parseTalentTiers(raw: any, d: TalentTier[]): TalentTier[] {
+    if (!Array.isArray(raw) || !raw.length) return d;
+    const out: TalentTier[] = [];
+    for (const t of raw) {
+        if (!t || typeof t !== 'object') continue;
+        if (EDU.indexOf(t.edu as any) < 0) continue;
+        out.push({
+            edu: t.edu as Education,
+            price: Math.max(0, Math.round(num(t.price, 3000))),
+            count: Math.max(1, Math.floor(num(t.count, 6))),
+        });
+    }
+    return out.length ? out : d;
+}
 
 function parseVehicles(raw: any, d: VehicleConfig): VehicleConfig {
     const src = raw && typeof raw === 'object' ? raw : {};
@@ -573,6 +599,7 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         moveChance: clamp01(t.moveChance, d.moveChance),
         moveRentMonths: Math.max(0, num(t.moveRentMonths, d.moveRentMonths)),
         immigrationRate: Math.max(0, num(t.immigrationRate, d.immigrationRate)),
+        talentTiers: parseTalentTiers(t.talentTiers, d.talentTiers),
         startFunds: Math.max(0, num(src.startFunds, d.startFunds)),
         bailout: Math.max(0, num(t.bailout, d.bailout)),
         taxRange: {

@@ -183,7 +183,7 @@ export interface MonthlyReport {
     /** business / industry / income = 三种税；profit = 县属店铺工厂的经营利润（可为负）；rent = 县属住房房租 */
     income: { business: number; industry: number; income: number; land: number; investment: number; profit: number; rent: number };
     /** research = 研究费（D026），services = 公共服务（T532），旧存档没有 */
-    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number; research?: number; services?: number };
+    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number; research?: number; services?: number; talent?: number };
     populationBefore: number;
     populationAfter: number;
     events: LifeEvent[];         // 本月全县大事记（结婚、迁入、离开……）
@@ -197,7 +197,7 @@ export interface MonthlyReport {
  */
 export interface MoneyFlows {
     inflow: { exports: number; outsideCustomers: number; immigrants: number; bailout: number; grants: number; investment: number };
-    outflow: { goodsCost: number; upkeep: number; construction: number; fuel: number; leavers: number; privateProfit: number; research: number; subsidy: number };
+    outflow: { goodsCost: number; upkeep: number; construction: number; fuel: number; leavers: number; privateProfit: number; research: number; subsidy: number; talent: number };
 }
 
 export interface SimState {
@@ -214,8 +214,14 @@ export interface SimState {
     unlocked?: string[];
     /** 研究完的项目 id */
     researched?: string[];
-    /** 正在研究的项目 */
-    research?: { id: string; left: number; total: number } | null;
+    /** 正在研究的项目（D030 起可并行：数组，最多 = 研究位数） */
+    research?: { id: string; left: number; total: number }[] | null;
+    /** 已开通的研究位（1～3，D030）。旧存档没有：按 1 算 */
+    researchSlots?: number;
+    /** 人才引进冷却到哪一天（绝对月序号，D030）。没到就再招不了 */
+    talentReadyAt?: number;
+    /** 招过几次人才（统计用） */
+    talentHires?: number;
     /** 累计实现的心愿数（阶段目标用） */
     wishesDone?: number;
     /** 凑成的特色街道（每月重算，DESIGN 21） */

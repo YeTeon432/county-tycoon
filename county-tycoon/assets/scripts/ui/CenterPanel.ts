@@ -1,6 +1,6 @@
 import { _decorator, Color, Graphics, Label, Node } from 'cc';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
-import { TownLevel } from '../core/sim/types';
+import { Education, TownLevel } from '../core/sim/types';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
 import {
@@ -9,10 +9,11 @@ import {
 
 const { ccclass } = _decorator;
 
-type Tab = 'goals' | 'research' | 'invest' | 'streets';
+type Tab = 'goals' | 'research' | 'talent' | 'invest' | 'streets';
 const TABS: { key: Tab; label: string }[] = [
     { key: 'goals', label: '发展目标' },
     { key: 'research', label: '产业研究' },
+    { key: 'talent', label: '人才引进' },
     { key: 'invest', label: '招商引资' },
     { key: 'streets', label: '特色街道' },
 ];
@@ -109,6 +110,7 @@ export class CenterPanel extends Panel {
         this._body = body;
         if (this._tab === 'goals') this.fillGoals(body, H);
         else if (this._tab === 'research') this.fillResearch(body, H);
+        else if (this._tab === 'talent') this.fillTalent(body, H);
         else if (this._tab === 'streets') this.fillStreets(body, H);
         else this.fillInvest(body, H);
     }
@@ -182,11 +184,20 @@ export class CenterPanel extends Panel {
         // 正在研究的在最上面，然后能研究的、条件不够的，最后研究完的
         const order = { active: 0, ready: 1, locked: 2, done: 3 };
         const items = all.slice().sort((a, b) => order[a.state] - order[b.state]);
-        const intro = makeLabelLeft(body, 'Intro', '新产业要先研究才能盖。一次研究一项，研究期间照常经营。', UI_FONT.small, UI_COLOR.textDim, W);
+        const slots = sim.researchSlots ? sim.researchSlots() : { used: 0, total: 1, nextCost: null };
+        const intro = makeLabelLeft(body, 'Intro',
+            `研究位 ${slots.used}/${slots.total}：同时可以研究 ${slots.total} 项，研究期间照常经营。加速 = 花钱立刻做完。`,
+            UI_FONT.small, UI_COLOR.textDim, W - 230);
+        intro.overflow = Label.Overflow.SHRINK;
         intro.node.setPosition(-W / 2, H / 2 - 16, 0);
-        const listH = H - 44;
+        if (slots.nextCost !== null && sim.openResearchSlot) {
+            const btn = makeButton(body, 'AddSlot', `再开一个位 ${formatMoney(slots.nextCost)}`, 220, 52, 'secondary',
+                () => this.openSlot());
+            btn.node.setPosition(W / 2 - 10 - 110, H / 2 - 16, 0);
+        }
+        const listH = H - 52;
         const list = ScrollList.mount(body, 'List', W, listH);
-        list.node.setPosition(0, H / 2 - 44 - listH / 2, 0);
+        list.node.setPosition(0, H / 2 - 52 - listH / 2, 0);
         const rows: ListRow[] = items.map((r) => ({ height: 118, build: (row) => this.researchRow(row, W, r) }));
         list.setRows(rows);
     }
@@ -201,19 +212,23 @@ export class CenterPanel extends Panel {
         name.isBold = true;
         name.node.setPosition(-W / 2 + 20, 22, 0);
         const sub = r.state === 'done' ? '已研究，可以盖了'
-            : r.state === 'active' ? `研究中 · ${r.reason}`
+            : r.state === 'active' ? `${r.reason}（也可花钱加速）`
                 : r.state === 'locked' ? r.reason
                     : `${formatMoney(r.cost)} · ${r.days} 天`;
         const subL = makeLabelLeft(row, 'Sub', sub, UI_FONT.small, r.state === 'locked' ? UI_COLOR.down : UI_COLOR.textDim, W - 240);
         subL.node.setPosition(-W / 2 + 20, -20, 0);
         if (r.state === 'active') {
-            const bw = W - 260;
+            const bw = W - 420;
             g.fillColor = UI_COLOR.border;
             g.roundRect(-W / 2 + 20, -h / 2 + 12, bw, 8, 4);
             g.fill();
             g.fillColor = UI_PALETTE.blue;
             g.roundRect(-W / 2 + 20, -h / 2 + 12, Math.max(8, bw * r.progress), 8, 4);
             g.fill();
+            const left = Math.max(1, Math.round(r.days * (1 - r.progress)));
+            const btn = makeButton(row, 'Rush', `加速 ¥${Math.max(500, Math.ceil(r.cost / Math.max(1, r.days) * left))}`, 170, 60,
+                'primary', () => this.rush(r));
+            btn.node.setPosition(W / 2 - 20 - 85, 0, 0);
         }
         if (r.state === 'ready' || r.state === 'locked') {
             const btn = makeButton(row, 'Go', r.state === 'ready' ? `研究 ${formatMoney(r.cost)}` : `${formatMoney(r.cost)} · ${r.days} 天`, 210, 64,
@@ -229,6 +244,82 @@ export class CenterPanel extends Panel {
         const err = sim.startResearch(r.id);
         if (err) { if (this.onHint) this.onHint(err); return; }
         if (this.onHint) this.onHint(`开始研究「${r.name}」，${r.days} 天后完成`);
+        if (this.onChanged) this.onChanged();
+        this.fill();
+    }
+
+    private openSlot(): void {
+        const sim = this._sim;
+        if (!sim || !sim.openResearchSlot) return;
+        const err = sim.openResearchSlot();
+        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (this.onHint) this.onHint('研究位开好了，可以同时多研究一项');
+        if (this.onChanged) this.onChanged();
+        this.fill();
+    }
+
+    private rush(r: ResearchStatus): void {
+        const sim = this._sim;
+        if (!sim || !sim.rushResearch) return;
+        const err = sim.rushResearch(r.id);
+        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (this.onHint) this.onHint(`「${r.name}」研究好了`);
+        if (this.onChanged) this.onChanged();
+        this.fill();
+    }
+
+    // ───────────────────────── 人才引进（D030，DESIGN 16.6） ─────────────────────────
+
+    private fillTalent(body: Node, H: number): void {
+        const sim = this._sim!;
+        const W = this.W;
+        const st = sim.talentStatus ? sim.talentStatus() : { ready: true, reason: '', nextCost: [] };
+        const intro = makeLabelLeft(body, 'Intro',
+            '县里出钱，从外县招一批年轻人。当场到，只要有空房就行；来了自己去找工作。招一批要等 5 天。',
+            UI_FONT.small, UI_COLOR.textDim, W);
+        intro.overflow = Label.Overflow.SHRINK;
+        intro.node.setPosition(-W / 2, H / 2 - 16, 0);
+
+        const TIERS: { edu: Education; label: string; desc: string }[] = [
+            { edu: 0, label: '初中', desc: '进工厂、当店员、干体力活' },
+            { edu: 1, label: '高中', desc: '技术员、收银、老师助理' },
+            { edu: 2, label: '大专', desc: '老师、工程师、银行柜员' },
+        ];
+        let y = H / 2 - 62;
+        const rowH = 150;
+        for (let i = 0; i < TIERS.length; i++) {
+            const t = TIERS[i];
+            const price = st.nextCost[i] ?? 0;
+            const row = makePanelNode(body, `Tier${t.edu}`, W, rowH - 12);
+            row.setPosition(0, y - (rowH - 12) / 2, 0);
+            const g = row.addComponent(Graphics);
+            g.fillColor = UI_COLOR.block;
+            g.roundRect(-W / 2, -(rowH - 12) / 2, W, rowH - 12, UI_RADIUS);
+            g.fill();
+            const name = makeLabelLeft(row, 'Name', `${t.label}学历 · 一次来 6 人`, UI_FONT.body, UI_COLOR.text, W - 260);
+            name.isBold = true;
+            name.node.setPosition(-W / 2 + 20, 26, 0);
+            const sub = makeLabelLeft(row, 'Sub', t.desc, UI_FONT.small, UI_COLOR.textDim, W - 260);
+            sub.node.setPosition(-W / 2 + 20, -12, 0);
+            const cost = makeLabelLeft(row, 'Cost', `共 ${formatMoney(price)}`, UI_FONT.small, UI_COLOR.gold, W - 260);
+            cost.node.setPosition(-W / 2 + 20, -44, 0);
+            const btn = makeButton(row, 'Hire', '引进', 160, 64, 'primary', () => this.hire(t.edu, t.label));
+            btn.setEnabled(st.ready);
+            btn.node.setPosition(W / 2 - 20 - 80, 0, 0);
+            y -= rowH;
+        }
+        if (!st.ready) {
+            const why = makeLabelLeft(body, 'Why', st.reason, UI_FONT.small, UI_COLOR.down, W);
+            why.node.setPosition(-W / 2, y + 24, 0);
+        }
+    }
+
+    private hire(edu: Education, label: string): void {
+        const sim = this._sim;
+        if (!sim || !sim.hireTalents) return;
+        const err = sim.hireTalents(edu);
+        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (this.onHint) this.onHint(`招来 6 位${label}学历的年轻人，已经安排住下`);
         if (this.onChanged) this.onChanged();
         this.fill();
     }

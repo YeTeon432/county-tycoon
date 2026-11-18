@@ -735,8 +735,8 @@ export class LifeLayer extends Component {
         node.addComponent(UITransform);
         const label = node.addComponent(Label);
         label.string = `+¥${price}`;
-        label.fontSize = 20;
-        label.lineHeight = 24;
+        label.fontSize = 13;
+        label.lineHeight = 16;
         label.color = new Color(246, 201, 56, 255);
         label.horizontalAlign = Label.HorizontalAlign.CENTER;
         label.isBold = true;

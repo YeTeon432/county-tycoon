@@ -38,6 +38,13 @@ export const GROUND_FRAME_COUNT = 36;
  */
 export const GROUND_FRAME_COUNT_TERRAIN = 69;
 
+/** atlas-frames.json：第一张图集的帧 + 其余几张（D031 背面图） */
+interface AtlasMeta {
+    scale?: number;
+    frames?: Record<string, number[]>;
+    pages?: { image?: string; frames?: Record<string, number[]> }[];
+}
+
 export class ArtLibrary {
     private readonly _buildings = new Map<string, SpriteFrame>();
     private _ground: SpriteFrame[] = [];
@@ -126,19 +133,22 @@ export class ArtLibrary {
         if (hasAtlas) {
             resources.load(BUILDING_ATLAS_FRAMES, JsonAsset, (e1, json) => {
                 resources.load(BUILDING_ATLAS, ImageAsset, (e2, image) => {
-                    const meta = json && json.json ? (json.json as { frames?: Record<string, number[]>; scale?: number }) : null;
+                    const meta = json && json.json ? (json.json as AtlasMeta) : null;
                     const frames = meta ? meta.frames : null;
                     if (e1 || e2 || !image || !frames) {
                         console.warn('[ArtLibrary] 建筑图集加载失败，用色块代替', e1 || e2);
                     } else {
                         this._scale = ArtLibrary.validScale(meta!.scale);
-                        const tex = ArtLibrary.makeTexture(image, this._scale);
-                        for (const id of Object.keys(frames)) {
-                            const [x, y, w, h, k] = frames[id];
-                            if (this._buildings.has(id)) continue;
-                            const f = ArtLibrary.rectFrame(tex, x, y, w, h);
-                            if (Number(k) > 0) this._frameScale.set(f, Number(k));
-                            this._buildings.set(id, f);
+                        this.addFrames(ArtLibrary.makeTexture(image, this._scale), frames);
+                        // D031：背面图在后面几张图集里（视角转到背面才用）
+                        for (const page of meta!.pages ?? []) {
+                            if (!page || !page.image || !page.frames) continue;
+                            pending++;
+                            resources.load(page.image, ImageAsset, (e3, img) => {
+                                if (e3 || !img) console.warn(`[ArtLibrary] ${page.image} 加载失败，背面用正面图代替`, e3);
+                                else this.addFrames(ArtLibrary.makeTexture(img, this._scale), page.frames!);
+                                finish();
+                            });
                         }
                     }
                     finish();
@@ -193,6 +203,17 @@ export class ArtLibrary {
             });
         } else if (hasGround) {
             loadGroundImage(1, 32, 16);
+        }
+    }
+
+    /** 一张图集里的帧登记进来；散图已经占了的名字不覆盖 */
+    private addFrames(tex: Texture2D, frames: Record<string, number[]>): void {
+        for (const id of Object.keys(frames)) {
+            const [x, y, w, h, k] = frames[id];
+            if (this._buildings.has(id)) continue;
+            const f = ArtLibrary.rectFrame(tex, x, y, w, h);
+            if (Number(k) > 0) this._frameScale.set(f, Number(k));
+            this._buildings.set(id, f);
         }
     }
 

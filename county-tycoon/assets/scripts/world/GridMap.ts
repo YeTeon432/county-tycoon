@@ -92,7 +92,7 @@ export class GridMap extends Component {
         // 道路优先：道路是玩家放的建筑，盖在地形上面
         const kind = this.roadKind(col, row);
         if (kind) {
-            const name = roadName(kind, neighborMask((c, r) => this.isRoad(c, r), col, row));
+            const name = roadName(kind, this.viewMask((c, r) => this.isRoad(c, r), col, row));
             if (art.hasGroundNames) {
                 return art.groundByName(name) ?? art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
             }
@@ -135,20 +135,18 @@ export class GridMap extends Component {
         // 桥（玩家放的建筑）压在地面上：这格画桥面，不画水
         const here = this._model ? this._model.getAt(col, row) : null;
         if (here && here.def.id === 'bridge') {
-            return art.groundByName(
-                bridgeName((c, r) => this.isBridgeable(c, r), col, row),
-            );
+            return art.groundByName(this.viewBridge(col, row));
         }
 
         const t = terrain.typeAt(col, row);
         if (t === 'river') {
             // 水的 mask：位 = 四邻是陆地，有岸的那几条边
-            const name = `water-${neighborMask((c, r) => !this.isWater(c, r), col, row)}`;
+            const name = `water-${this.viewMask((c, r) => !this.isWater(c, r), col, row)}`;
             return art.groundByName(name) ?? art.groundByName('water-0');
         }
         if (t === 'bridge') {
             // map.json 里手工画的桥位（还没放桥建筑）
-            return art.groundByName(bridgeName((c, r) => this.isBridgeable(c, r), col, row))
+            return art.groundByName(this.viewBridge(col, row))
                 ?? art.groundByName('water-0');
         }
         return art.groundByName(terrainName(t, col, row));
@@ -166,7 +164,27 @@ export class GridMap extends Component {
     }
 
     private roadMask(col: number, row: number): number {
-        return neighborMask((c, r) => this.isRoad(c, r), col, row);
+        return this.viewMask((c, r) => this.isRoad(c, r), col, row);
+    }
+
+    /**
+     * 四邻 mask 的位是**屏幕方向**（1 左上 / 2 右上 / 4 右下 / 8 左下），所以要在视图格子里数邻居（D031）：
+     * 模型格 → 视图格，在视图里取四邻，再换回模型格去判断。
+     */
+    private viewMask(test: (c: number, r: number) => boolean, col: number, row: number): number {
+        const iso = this._iso;
+        if (!iso) return neighborMask(test, col, row);
+        const [vc, vr] = iso.viewCell(col, row);
+        return neighborMask((x, y) => { const m = iso.modelCell(x, y); return test(m[0], m[1]); }, vc, vr);
+    }
+
+    /** 桥面方向同理：gx / gy 指的是屏幕上的走向，在视图格子里判断 */
+    private viewBridge(col: number, row: number): string {
+        const iso = this._iso;
+        const same = (c: number, r: number) => this.isBridgeable(c, r);
+        if (!iso) return bridgeName(same, col, row);
+        const [vc, vr] = iso.viewCell(col, row);
+        return bridgeName((x, y) => { const m = iso.modelCell(x, y); return same(m[0], m[1]); }, vc, vr);
     }
 
     private isWater(col: number, row: number): boolean {
@@ -206,7 +224,8 @@ export class GridMap extends Component {
                     const ui = n.addComponent(UITransform);
                     ui.setAnchorPoint(new Vec2(0.5, 1));
                     ui.setContentSize(iso.hw * 2, iso.hh * 2);
-                    iso.cellTop(col, row, p);
+                    // 瓦片固定在「视图格子」上，转视角时不挪，换成转过来的那一格的图（D031）
+                    iso.project(col, row, p);
                     n.setPosition(p.x, p.y, 0);
                     const s = n.addComponent(Sprite);
                     s.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -219,7 +238,8 @@ export class GridMap extends Component {
         for (let row = 0; row < iso.rows; row++) {
             for (let col = 0; col < iso.cols; col++) {
                 const s = this._tiles[row * iso.cols + col];
-                const f: SpriteFrame | null = this.frameFor(col, row);
+                const [mc, mr] = iso.modelCell(col, row);
+                const f: SpriteFrame | null = this.frameFor(mc, mr);
                 if (s.spriteFrame !== f) s.spriteFrame = f;
             }
         }

@@ -241,6 +241,11 @@ export class LifeLayer extends Component {
         this._townDirty = true;
     }
 
+    /** 视角转了（D031）：所有人车按新视角重摆一次（暂停时也要对） */
+    relayout(): void {
+        for (const a of this._agents) this.place(a);
+    }
+
     protected update(dt: number): void {
         const art = this._art;
         if (!art || !art.loaded || !this._layer || !this._model) return;
@@ -668,11 +673,13 @@ export class LifeLayer extends Component {
         iso.toLocal(gx, gy, this._p);
         // 不取整：D021 起是 3D 预渲染图（线性过滤），取整到世界像素在 ×4 缩放下会一跳 4 个屏幕像素，走路一抽一抽
         a.node.setPosition(this._p.x, this._p.y, 0);
-        this._layer!.setActorDepth(a.node, gx + gy);
+        this._layer!.setActorDepth(a.node, iso.depthAt(gx, gy));
 
-        // 朝向：+gx 正面，+gy 正面翻转，-gx 背面，-gy 背面翻转（车：沿 gy 翻转）
-        const flip = dy !== 0;
-        const front = dx > 0 || dy > 0 || (dx === 0 && dy === 0);
+        // 朝向看的是屏幕上往哪走（D031 转视角后按视图方向）：
+        // +vx 正面，+vy 正面翻转，-vx 背面，-vy 背面翻转（车：沿 vy 翻转）
+        const [vdx, vdy] = iso.viewDir(dx, dy);
+        const flip = vdy !== 0;
+        const front = vdx > 0 || vdy > 0 || (dx === 0 && dy === 0);
         let name: string;
         if (a.kind === 'ped') {
             const f = Math.floor(a.anim / LifeLayer.STRIDE) % 2;

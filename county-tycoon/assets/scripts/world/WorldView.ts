@@ -1,4 +1,4 @@
-import { Color, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director } from 'cc';
+import { Color, Tween, tween, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
@@ -67,6 +67,20 @@ export class WorldView extends Component {
     /** 捏合开始时两指中点下面是地图的哪个点（地图本地坐标），缩放全程钉住它 */
     private _pinchMapX = 0;
     private _pinchMapY = 0;
+    /**
+     * 双指手势是捏还是扭（D031）：开头先不动，等两指距离变化或转过的弧长先超过阈值，定了就锁住。
+     * 'twist' 时不缩放；转过 TWIST_ANGLE 就转一档视角，一次手势只转一次。
+     */
+    private _gesture: 'none' | 'pinch' | 'twist' = 'none';
+    private _twistStartAngle = 0;
+    private _twistDone = false;
+    /** 判定捏 / 扭的阈值（UI 像素） */
+    private static readonly GESTURE_SLOP = 14;
+    /** 扭多少度转一档 */
+    private static readonly TWIST_ANGLE = Math.PI / 6;
+    /** 视角转了（D031），给 HUD 用 */
+    onViewRotated: ((rot: number) => void) | null = null;
+
     /** 当前按着的手指：id → UI 坐标 */
     private readonly _touches = new Map<number, Vec2>();
     /** 单指拖动的上一个位置 */
@@ -303,10 +317,28 @@ export class WorldView extends Component {
         if (this._touches.size >= 2) {
             const [a, b] = this.firstTwo();
             const dist = Math.hypot(b.x - a.x, b.y - a.y);
-            if (this._pinchStartDist > 0 && dist > 0) {
-                const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
-                this.setZoomAround(this._pinchStartZoom * (dist / this._pinchStartDist), anchor.x, anchor.y, this._pinchMapX, this._pinchMapY);
+            if (this._pinchStartDist <= 0 || dist <= 0) return;
+            const turn = WorldView.angleDiff(Math.atan2(b.y - a.y, b.x - a.x), this._twistStartAngle);
+            if (this._gesture === 'none') {
+                // 捏：两指距离变了多少；扭：两指绕中点转过的弧长。谁先过阈值就是谁
+                const pinch = Math.abs(dist - this._pinchStartDist);
+                const twist = Math.abs(turn) * dist / 2;
+                if (Math.max(pinch, twist) < WorldView.GESTURE_SLOP) return;
+                this._gesture = twist > pinch && this.canRotateView ? 'twist' : 'pinch';
+                // 判定之前手指已经挪了一点：从现在起算缩放，画面不跳
+                this.rebaseGesture();
+                return;
             }
+            if (this._gesture === 'twist') {
+                if (!this._twistDone && Math.abs(turn) >= WorldView.TWIST_ANGLE) {
+                    this._twistDone = true;
+                    // UI 坐标 y 朝上，手指逆时针转 turn > 0 → 地图跟着逆时针转一档
+                    this.rotateView(turn > 0 ? -1 : 1);
+                }
+                return;
+            }
+            const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
+            this.setZoomAround(this._pinchStartZoom * (dist / this._pinchStartDist), anchor.x, anchor.y, this._pinchMapX, this._pinchMapY);
             return;
         }
 
@@ -332,6 +364,7 @@ export class WorldView extends Component {
     private onTouchEnd(event: EventTouch): void {
         const wasPinch = this._touches.size >= 2;
         for (const t of event.getTouches()) this._touches.delete(t.getID());
+        if (this._touches.size < 2) { this._gesture = 'none'; this._twistDone = false; }
         if (this._touches.size > 0) {
             // 还有手指按着：换基准接着拖 / 捏
             if (wasPinch) { this._velX = 0; this._velY = 0; }
@@ -355,6 +388,7 @@ export class WorldView extends Component {
             const [a, b] = this.firstTwo();
             this._pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y);
             this._pinchStartZoom = this._zoom;
+            if (this._gesture !== 'twist') this._twistStartAngle = Math.atan2(b.y - a.y, b.x - a.x);
             const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
             const w = this._world ? this._world.position : Vec3.ZERO;
             this._pinchMapX = (anchor.x - w.x) / this._zoom;
@@ -370,6 +404,51 @@ export class WorldView extends Component {
     private firstTwo(): [Vec2, Vec2] {
         const it = this._touches.values();
         return [it.next().value as Vec2, it.next().value as Vec2];
+    }
+
+    /** 两个角度之差，落在 (-π, π] */
+    private static angleDiff(a: number, b: number): number {
+        let d = a - b;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d <= -Math.PI) d += Math.PI * 2;
+        return d;
+    }
+
+    get viewRotation(): number {
+        return this._iso ? this._iso.rot : 0;
+    }
+
+    get canRotateView(): boolean {
+        return !!this._iso && this._iso.canRotate;
+    }
+
+    /**
+     * 转视角（D031）：dir = 1 顺时针 90°，-1 逆时针。
+     * 屏幕中心那一点转完还在屏幕中心；所有图层换图重摆；带一个 0.2 秒的小摆动提示转的方向。
+     */
+    rotateView(dir: 1 | -1): void {
+        const iso = this._iso, world = this._world;
+        if (!iso || !world || !iso.canRotate) return;
+        // 屏幕中心（本节点原点）下面是地图上哪一点
+        const w = world.position;
+        const [gx, gy] = iso.fromLocal(-w.x / this._zoom, -w.y / this._zoom);
+        iso.rot = iso.rot + dir;
+        const p = iso.toLocal(gx, gy);
+        world.setPosition(-p.x * this._zoom, -p.y * this._zoom, w.z);
+        this.clampPosition();
+        this._velX = 0; this._velY = 0;
+
+        if (this._map) this._map.redraw();
+        if (this._buildings) this._buildings.relayout();
+        if (this._life) this._life.relayout();
+        this._hoverCol = -1; this._hoverRow = -1;
+        this.refreshGhost();
+
+        // 过渡：整块画面从反方向摆一点回正（以屏幕中心为轴）
+        Tween.stopAllByTarget(this.node);
+        this.node.angle = dir * 10;
+        tween(this.node).to(0.2, { angle: 0 }, { easing: 'quadOut' }).start();
+        if (this.onViewRotated) this.onViewRotated(iso.rot);
     }
 
     /** UI 坐标 → 本节点本地坐标（屏幕中心为原点） */
@@ -572,7 +651,7 @@ export class WorldView extends Component {
         const trans = this.node.getComponent(UITransform);
         if (!p || !iso || !world || !trans) return null;
         const foot = iso.footBottom(p.col, p.row, p.def.width, p.def.height);
-        const frame = this._art.get(p.facing === 'R' ? `${p.def.id}_r` : p.def.id) ?? this._art.get(p.def.id);
+        const frame = this._art.get(`${p.def.id}${iso.frameSuffix(p.facing)}`) ?? this._art.get(p.def.id);
         const h = frame ? this._art.worldSize(frame).height : (p.def.width + p.def.height) * iso.hh;
         const wp = world.position;
         out.set(wp.x + foot.x * this._zoom, wp.y + (foot.y + h) * this._zoom, 0);

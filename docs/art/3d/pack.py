@@ -5,6 +5,9 @@ D021 3D 渲染版图集打包（由 docs/art/gen/pack.py 改来）：倍率 4、
   art/atlas.png          所有建筑图，按高度排的货架式装箱，每张四周留 2 像素透明边防串色
   art/atlas-frames.json  {"scale": 4, "frames": {"<文件名>": [x, y, w, h]}}，坐标原点在左上；
                          人车 / 影子 / 金币是 8 倍图，写成 [x, y, w, h, 8]（头像 face-* 不加）
+  art/atlas-1.png        D031：背面图（*_b / *_br，视角转到背面才用）单独一张，2048 宽、高按需补成 2 的幂；
+                         帧表写在 atlas-frames.json 的 "pages": [{"image": "art/atlas-1", "frames": {...}}]。
+                         正面图和人车留在第一张：不转视角时跟以前一样只用一张纹理，合批不受影响。
 地面图集 ground.png 原样拷过去（它自己就是一张图集）。
 """
 import json, os, shutil, sys
@@ -24,28 +27,42 @@ for sub in ('buildings', 'actors'):
             if sub == 'actors' and not f.startswith('face-'):
                 HIRES.add(f[:-4])
 assert len({n for n, _ in ims}) == len(ims), '建筑和角色有重名'
-ims.sort(key=lambda t: (-t[1].height, t[0]))
-x = y = shelf = 0; place = {}
-for name, im in ims:
-    w, h = im.width + PAD * 2, im.height + PAD * 2
-    if x + w > MAXW:
-        x, y, shelf = 0, y + shelf, 0
-    place[name] = (x + PAD, y + PAD, im.width, im.height)
-    x += w; shelf = max(shelf, h)
-H = y + shelf
-H2 = 1
-while H2 < H: H2 *= 2          # 高度补成 2 的幂，老机器上纹理更稳
-atlas = Image.new('RGBA', (MAXW, H2), (0, 0, 0, 0))
-for name, im in ims:
-    px, py, _, _ = place[name]; atlas.paste(im, (px, py))
+def is_back(n):
+    return n.endswith('_b') or n.endswith('_br')
+
+
+def pack(group, out):
+    """货架式装箱：按高度排，一行放满换行。返回 {名字: (x, y, w, h)} 和图集高（补成 2 的幂）。"""
+    group = sorted(group, key=lambda t: (-t[1].height, t[0]))
+    x = y = shelf = 0; place = {}
+    for name, im in group:
+        w, h = im.width + PAD * 2, im.height + PAD * 2
+        if x + w > MAXW:
+            x, y, shelf = 0, y + shelf, 0
+        place[name] = (x + PAD, y + PAD, im.width, im.height)
+        x += w; shelf = max(shelf, h)
+    used = y + shelf
+    H2 = 1
+    while H2 < used: H2 *= 2          # 高度补成 2 的幂，老机器上纹理更稳
+    assert H2 <= 4096, f'{out} 高 {H2} 超过 4096'
+    atlas = Image.new('RGBA', (MAXW, H2), (0, 0, 0, 0))
+    for name, im in group:
+        px, py, _, _ = place[name]; atlas.paste(im, (px, py))
+    atlas.save(os.path.join(RES, 'art', out + '.png'))
+    print(f'{len(group)} 张 → {out}.png {MAXW}×{H2}（用到 {used} 行）')
+    return place
+
+
 os.makedirs(os.path.join(RES, 'art', 'ground'), exist_ok=True)
-atlas.save(os.path.join(RES, 'art', 'atlas.png'))
+place = pack([t for t in ims if not is_back(t[0])], 'atlas')
+back = pack([t for t in ims if is_back(t[0])], 'atlas-1')
 frames = {n: list(v) + ([HISCALE] if n in HIRES else []) for n, v in place.items()}
-json.dump({'scale': SCALE, 'frames': frames}, open(os.path.join(RES, 'art', 'atlas-frames.json'), 'w'), indent=1, sort_keys=True)
+meta = {'scale': SCALE, 'frames': frames,
+        'pages': [{'image': 'art/atlas-1', 'frames': {n: list(v) for n, v in back.items()}}]}
+json.dump(meta, open(os.path.join(RES, 'art', 'atlas-frames.json'), 'w'), indent=1, sort_keys=True)
 shutil.copy(os.path.join(SRC, 'ground', 'ground.png'), os.path.join(RES, 'art', 'ground', 'ground.png'))
 # 地面帧名表（T231）：支线 D 按名字取帧，不认帧号
 gf = os.path.join(SRC, 'ground', 'ground-frames.json')
 if os.path.exists(gf):
     shutil.copy(gf, os.path.join(RES, 'art', 'ground', 'ground-frames.json'))
-assert H2 <= 4096, f'图集高 {H2} 超过 4096'
-print(f'{len(ims)} 张（{len(HIRES)} 张 8 倍）→ atlas.png {MAXW}×{H2}（用到 {H} 行）')
+print(f'共 {len(ims)} 张（{len(HIRES)} 张 8 倍）')

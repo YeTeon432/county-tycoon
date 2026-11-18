@@ -602,6 +602,15 @@ def school_house():
             box(x0 + sx - 0.004, y0 + i * cw + 0.03, z + 0.04, 0.02, cw - 0.06, fh - 0.08, bglass)
             if f and i == 1 and f % 2:
                 ac_unit(x0 + sx + 0.016, y0 + i * cw + 0.04, z + 0.01, face='side')
+        # 背面 / 左面（D031）：同样的蓝玻璃窗，背面隔层挂空调
+        for i in range(cols_f):
+            cw = sx / cols_f
+            box(x0 + i * cw + 0.03, y0 + sy - 0.004, z + 0.04, cw - 0.06, 0.02, fh - 0.08, bglass)
+            if f and i in (1, 2) and f % 2 == 0:
+                box(x0 + i * cw + cw / 2 - 0.07, y0 + sy, z + 0.01, 0.14, 0.07, 0.1, 'white', bevel=0.005)
+        for i in range(cols_s):
+            cw = sy / cols_s
+            box(x0 - 0.016, y0 + i * cw + 0.03, z + 0.04, 0.02, cw - 0.06, fh - 0.08, bglass)
     # 入口
     cw = sx / cols_f
     box(x0 + cw + 0.04, y0 - 0.012, Z0, 2 * cw - 0.08, 0.02, fh - 0.06, 'frame')
@@ -727,6 +736,23 @@ def supermarket():
     box(x0 + sx - 0.004, y0 + 0.1, Z0 + 0.06, 0.012, 0.6, 0.44, 'paint_grey')
     for k in range(3):
         ac_unit(x0 + sx, y0 + 0.16 + k * 0.2, Z0 + 0.2, face='side')
+    # 背面 / 左面（D031）：卸货口 + 卷帘门、二楼小窗、红腰线；左面一排高窗
+    yb = y0 + sy
+    box(x0 + 0.04, yb, Z0 + 0.62, sx - 0.08, 0.02, 0.04, 'red')    # 两头收进去：右后角会从正面图的轮廓边露出来
+    for k in range(2):
+        dx = x0 + 0.3 + k * 0.5
+        box(dx, yb, Z0, 0.36, 0.012, 0.42, 'steel')
+        for j in range(10):
+            box(dx, yb + 0.006, Z0 + 0.02 + j * 0.04, 0.36, 0.008, 0.004, 'frame')
+    box(x0 + 0.2, yb, Z0 + 0.46, 1.1, 0.16, 0.03, 'paint_grey')                           # 卸货雨棚
+    box(x0 + 1.42, yb, Z0, 0.14, 0.012, 0.3, 'frame')                                     # 员工门
+    for i in range(6):
+        window_back(x0 + 0.12 + i * 0.27, Z0 + 0.86, 0.18, 0.3, yb, sill=False)
+    for k in range(2):
+        box(x0 + 1.36 + k * 0.16, yb, Z0 + 0.2, 0.14, 0.07, 0.1, 'white', bevel=0.005)
+    box(x0 - 0.008, y0 + 0.08, Z0 + 0.62, 0.012, sy - 0.16, 0.04, 'red')
+    for i in range(4):
+        window_left(y0 + 0.1 + i * 0.24, Z0 + 0.86, 0.18, 0.3, x0, sill=False)
     # 屋顶
     parapet(x0, y0, top, sx, sy, m='paint_grey')
     for k in range(3):

@@ -203,6 +203,7 @@ def lot(w, h, m='pave', z=Z0):
 
 def window_front(x, z, sx, sz, y=0.0, frame='frame', glass='glass', sill=True):
     """正面（y=常数，朝 -Y）开一扇窗：窗框 + 玻璃略凹。"""
+    _OPENINGS.append(('front', x, z, sx, sz, y, frame, glass, sill))
     box(x, y - 0.012, z, sx, 0.02, sz, frame)
     box(x + 0.02, y - 0.02, z + 0.02, sx - 0.04, 0.02, sz - 0.04, glass)
     if sill:
@@ -211,6 +212,7 @@ def window_front(x, z, sx, sz, y=0.0, frame='frame', glass='glass', sill=True):
 
 def window_side(y, z, sy, sz, x, frame='frame', glass='glass', sill=True):
     """侧面（x=常数，朝 +X）开一扇窗。"""
+    _OPENINGS.append(('side', y, z, sy, sz, x, frame, glass, sill))
     box(x - 0.008, y, z, 0.02, sy, sz, frame)
     box(x, y + 0.02, z + 0.02, 0.02, sy - 0.04, sz - 0.04, glass)
     if sill:
@@ -289,12 +291,142 @@ def solar_heater(x, y, z, w=0.5):
     o = cyl(x + w / 2, y + 0.2, z, 0.045, w, 'steel', 16, rot=(0, math.pi / 2, 0)); o.location.z = z + 0.17
 
 
+
+# ---------------------------------------------------------------- 背面 / 左面自动开窗（D031）
+# 原来只建看得见的正面（y=0 一侧）和侧面（x=w 一侧）。视角能转以后背面也会露出来，
+# 所以 window_front / window_side 开的每扇窗都记下来，渲染前往楼里打一条射线找到对面那堵墙，
+# 在同样的位置、高度补一扇窗；楼上隔一扇再挂一台空调外机。某栋楼要自己画背面就 no_auto_back()。
+_OPENINGS = []
+_AUTO_BACK = [True]
+
+
+def no_auto_back():
+    """这栋楼的背面自己画了，不要自动补窗。"""
+    _AUTO_BACK[0] = False
+
+
+def window_back(x, z, sx, sz, y, frame='frame', glass='glass', sill=True):
+    """背面（y=常数，朝 +Y）开一扇窗。"""
+    box(x, y - 0.008, z, sx, 0.02, sz, frame)
+    box(x + 0.02, y, z + 0.02, sx - 0.04, 0.02, sz - 0.04, glass)
+    if sill:
+        box(x - 0.01, y, z - 0.02, sx + 0.02, 0.04, 0.02, 'curb')
+
+
+def window_left(y, z, sy, sz, x, frame='frame', glass='glass', sill=True):
+    """左面（x=常数，朝 -X）开一扇窗。"""
+    box(x - 0.012, y, z, 0.02, sy, sz, frame)
+    box(x - 0.02, y + 0.02, z + 0.02, 0.02, sy - 0.04, sz - 0.04, glass)
+    if sill:
+        box(x - 0.04, y - 0.01, z - 0.02, 0.04, sy + 0.02, 0.02, 'curb')
+
+
+def curtain_front(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
+    """正面玻璃幕墙：一整片玻璃 + 竖横框。"""
+    _OPENINGS.append(('cfront', x, z, sx, sz, y, nx, nz, glass, mull))
+    box(x, y - 0.012, z, sx, 0.012, sz, glass)
+    for i in range(nx + 1):
+        box(x + i * sx / nx - 0.008, y - 0.022, z, 0.016, 0.014, sz, mull)
+    for j in range(nz + 1):
+        box(x, y - 0.022, z + j * sz / nz - 0.008, sx, 0.014, 0.016, mull)
+
+
+def curtain_side(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
+    """侧面（x=常数，朝 +X）玻璃幕墙。"""
+    _OPENINGS.append(('cside', y, z, sy, sz, x, ny, nz, glass, mull))
+    box(x, y, z, 0.012, sy, sz, glass)
+    for i in range(ny + 1):
+        box(x + 0.008, y + i * sy / ny - 0.008, z, 0.014, 0.016, sz, mull)
+    for j in range(nz + 1):
+        box(x + 0.008, y, z + j * sz / nz - 0.008, 0.014, sy, 0.016, mull)
+
+
+def curtain_back(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
+    """背面（y=常数，朝 +Y）玻璃幕墙。"""
+    box(x, y, z, sx, 0.012, sz, glass)
+    for i in range(nx + 1):
+        box(x + i * sx / nx - 0.008, y + 0.008, z, 0.016, 0.014, sz, mull)
+    for j in range(nz + 1):
+        box(x, y + 0.008, z + j * sz / nz - 0.008, sx, 0.014, 0.016, mull)
+
+
+def curtain_left(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
+    """左面（x=常数，朝 -X）玻璃幕墙。"""
+    box(x - 0.012, y, z, 0.012, sy, sz, glass)
+    for i in range(ny + 1):
+        box(x - 0.022, y + i * sy / ny - 0.008, z, 0.014, 0.016, sz, mull)
+    for j in range(nz + 1):
+        box(x - 0.022, y, z + j * sz / nz - 0.008, 0.014, sy, 0.016, mull)
+
+
+def _far_wall(kind, a, z, sa, sz):
+    """从楼外面朝楼打射线，找到这扇窗对面那堵外墙；返回墙的坐标（back 是 y，left 是 x），找不到返回 None。
+    撞到的东西必须够大、能把整扇窗盖住（排除树、栏杆、路灯）。"""
+    sc = bpy.context.scene
+    dg = bpy.context.evaluated_depsgraph_get()
+    if kind == 'back':
+        origin, d = Vector((a + sa / 2, 50.0, z + sz / 2)), Vector((0, -1, 0))
+    else:
+        origin, d = Vector((-50.0, a + sa / 2, z + sz / 2)), Vector((1, 0, 0))
+    hit, loc, nrm, _i, obj, _m = sc.ray_cast(dg, origin, d, distance=100.0)
+    if not hit or nrm.dot(d) > -0.9:
+        return None
+    ws = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    lo = Vector((min(p.x for p in ws), min(p.y for p in ws), min(p.z for p in ws)))
+    hi = Vector((max(p.x for p in ws), max(p.y for p in ws), max(p.z for p in ws)))
+    ax = 0 if kind == 'back' else 1
+    if lo.z > z + 0.005 or hi.z < z + sz - 0.005 or lo[ax] > a + 0.005 or hi[ax] < a + sa - 0.005:
+        return None
+    return loc.y if kind == 'back' else loc.x
+
+
+def _auto_back():
+    if not _AUTO_BACK[0] or not _OPENINGS:
+        return
+    bpy.context.view_layer.update()
+    plan = []
+    for o in _OPENINGS:
+        if o[0] in ('cfront', 'cside'):
+            kind, a, z, sa, sz, wall, n1, n2, glass, mull = o
+            if kind == 'cfront':
+                far = _far_wall('back', a, z, sa, sz)
+                if far is not None and far - wall > 0.08:
+                    curtain_back(a, z, sa, sz, far, n1, n2, glass, mull)
+            else:
+                far = _far_wall('left', a, z, sa, sz)
+                if far is not None and wall - far > 0.08:
+                    curtain_left(a, z, sa, sz, far, n1, n2, glass, mull)
+            continue
+        kind, a, z, sa, sz, wall, frame, glass, sill = o
+        if kind == 'front':
+            far = _far_wall('back', a, z, sa, sz)
+            if far is not None and far - wall > 0.08:
+                plan.append(('back', a, z, sa, sz, far, frame, glass, sill))
+        else:
+            far = _far_wall('left', a, z, sa, sz)
+            if far is not None and wall - far > 0.08:
+                plan.append(('left', a, z, sa, sz, far, frame, glass, sill))
+    seen = set()
+    for i, (kind, a, z, sa, sz, wall, frame, glass, sill) in enumerate(plan):
+        key = (kind, round(a, 3), round(z, 3), round(wall, 3))
+        if key in seen:
+            continue
+        seen.add(key)
+        if kind == 'back':
+            window_back(a, z, sa, sz, wall, frame, glass, sill)
+            if i % 2 == 1 and z > Z0 + 0.15 and sa >= 0.14:
+                box(a + sa / 2 - 0.07, wall, z + 0.01, 0.14, 0.07, 0.1, 'white', bevel=0.005)
+        else:
+            window_left(a, z, sa, sz, wall, frame, glass, sill)
+            if i % 2 == 1 and z > Z0 + 0.15 and sa >= 0.14:
+                box(wall - 0.07, a + sa / 2 - 0.07, z + 0.01, 0.07, 0.14, 0.1, 'white', bevel=0.005)
+
 # ---------------------------------------------------------------- 登记 & 渲染
 _SPRITES = []
 
 
 def sprite(name, w, h, facing=True):
-    """登记一张建筑图。facing=True 会多出一张 <name>_r（门面朝右下）。"""
+    """登记一张建筑图。facing=True 会多出 <name>_r（门面朝右下）、_b（朝右上）、_br（朝左上）三张（D031）。"""
     def deco(fn):
         _SPRITES.append((name, w, h, facing, fn, None))
         return fn
@@ -314,6 +446,7 @@ def actor(name, width_px, px_scale=1):
 def _reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     _MATS.clear()
+    _OPENINGS.clear(); _AUTO_BACK[0] = True
     sc = bpy.context.scene
     sc.render.engine = 'BLENDER_EEVEE_NEXT'
     sc.render.film_transparent = True
@@ -349,24 +482,34 @@ def _model_objects():
     return [o for o in bpy.context.scene.objects if o.type in ('MESH', 'FONT', 'CURVE')]
 
 
-def _render_one(name, w, h, fn, turn, out_dir, width_px=None):
+def _render_one(name, w, h, fn, variant, out_dir, width_px=None):
     px_scale = 1
     if isinstance(width_px, tuple):
         width_px, px_scale = width_px
     u = U / px_scale                            # 这张图一个像素是多少世界单位
     _reset()
     fn()
+    if not width_px:
+        _auto_back()
     objs = _model_objects()
-    if turn:
-        # 沿占地对角线镜像：(x, y) → (w − y, h − x)。正面 y=0 → 右下墙 x=w，侧面 x=w → 左下墙 y=0，
-        # 两面看得见的墙都还有窗；光不动，仍是左亮右暗。字再左右翻一次，免得成反字。
+    if variant:
+        # 四种「门面在屏幕上朝哪」（D031）：
+        #   ''   默认，门面朝左下
+        #   _r   沿占地对角线镜像 (x, y) → (w − y, h − x)：正面 y=0 → 右下墙 x=w，侧面 x=w → 左下墙 y=0，
+        #        两面看得见的墙都还有窗；光不动，仍是左亮右暗。字再左右翻一次，免得成反字。
+        #   _b   绕占地中心转 180°：(x, y) → (w − x, h − y)，看到背面（左下）和左面（右下），门面朝右上
+        #   _br  先转 180° 再镜像：门面朝左上
+        # 光照始终跟着相机不动（从屏幕左上来），四张亮暗面一致。
         from mathutils import Matrix
-        R = Matrix(((0, -1, 0, w), (-1, 0, 0, h), (0, 0, 1, 0), (0, 0, 0, 1)))
+        I = Matrix.Identity(4)
+        M = Matrix(((0, -1, 0, w), (-1, 0, 0, h), (0, 0, 1, 0), (0, 0, 0, 1)))
+        T = Matrix(((-1, 0, 0, w), (0, -1, 0, h), (0, 0, 1, 0), (0, 0, 0, 1)))
         F = Matrix.Diagonal((-1, 1, 1, 1))
+        R, mirror = {'_r': (M, True), '_b': (T, False), '_br': (M @ T, True)}[variant]
         bpy.context.view_layer.update()
         for o in objs:
             if o.parent is None:
-                o.matrix_world = R @ o.matrix_world @ (F if o.type == 'FONT' else Matrix.Identity(4))
+                o.matrix_world = R @ o.matrix_world @ (F if (mirror and o.type == 'FONT') else I)
     bpy.context.view_layer.update()
 
     right, up, fwd = _cam_axes()
@@ -399,7 +542,7 @@ def _render_one(name, w, h, fn, turn, out_dir, width_px=None):
     cam.data.sensor_fit = 'AUTO'
     cam.location = pb + up * (resy / 2 * u) - fwd * 40
     cam.data.clip_start = 0.1; cam.data.clip_end = 100
-    path = os.path.join(out_dir, name + ('_r' if turn else '') + '.png')
+    path = os.path.join(out_dir, name + variant + '.png')
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True)
     print(f'[ok] {os.path.basename(path)} {resx}×{resy}')
@@ -413,6 +556,7 @@ def run():
     for name, w, h, facing, fn, width_px in _SPRITES:
         if only and name not in only:
             continue
-        _render_one(name, w, h, fn, False, out_dir, width_px)
+        _render_one(name, w, h, fn, '', out_dir, width_px)
         if facing:
-            _render_one(name, w, h, fn, True, out_dir)
+            for v in ('_r', '_b', '_br'):
+                _render_one(name, w, h, fn, v, out_dir)

@@ -107,23 +107,6 @@ def sawtooth(x0, y0, z, sx, sy, n, th, roof, glass='glass'):
             box(x0 + k * sx / int(sx / 0.18) - 0.006, ya - 0.018, z + 0.015, 0.012, 0.012, th - 0.04, 'white')
 
 
-def curtain_front(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
-    """正面玻璃幕墙：一整片玻璃 + 竖横框。"""
-    box(x, y - 0.012, z, sx, 0.012, sz, glass)
-    for i in range(nx + 1):
-        box(x + i * sx / nx - 0.008, y - 0.022, z, 0.016, 0.014, sz, mull)
-    for j in range(nz + 1):
-        box(x, y - 0.022, z + j * sz / nz - 0.008, sx, 0.014, 0.016, mull)
-
-
-def curtain_side(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
-    box(x, y, z, 0.012, sy, sz, glass)
-    for i in range(ny + 1):
-        box(x + 0.008, y + i * sy / ny - 0.008, z, 0.014, 0.016, sz, mull)
-    for j in range(nz + 1):
-        box(x + 0.008, y, z + j * sz / nz - 0.008, 0.014, sy, 0.016, mull)
-
-
 def sign_front(s, cx, y, z, sw, sh, board, ink, size=None):
     """正面招牌：(cx, z) 是牌子中心，y 是贴墙的面。"""
     box(cx - sw / 2, y - 0.03, z - sh / 2, sw, 0.03, sh, board)
@@ -483,6 +466,13 @@ def electronics():
             box(x + sx, y + 0.05, z + 0.08, 0.012, sy - 0.1, 0.15, blueg)
             for k in range(1, ns):
                 box(x + sx + 0.002, y + 0.05 + k * (sy - 0.1) / ns, z + 0.08, 0.01, 0.01, 0.15, wall)
+            # 背面 / 左面（D031 视角旋转后看得见）
+            box(x + 0.04, y + sy, z + 0.08, sx - 0.08, 0.012, 0.15, blueg)
+            for k in range(1, nf):
+                box(x + 0.04 + k * (sx - 0.08) / nf, y + sy + 0.01, z + 0.08, 0.01, 0.01, 0.15, wall)
+            box(x - 0.012, y + 0.05, z + 0.08, 0.012, sy - 0.1, 0.15, blueg)
+            for k in range(1, ns):
+                box(x - 0.012, y + 0.05 + k * (sy - 0.1) / ns, z + 0.08, 0.01, 0.01, 0.15, wall)
         parapet(x, y, Z0 + h, sx, sy, h=0.05, m=trim)
         return Z0 + h
 
@@ -930,6 +920,15 @@ def car_factory():
     box(x1, yf + 0.1, Z0, 0.012, 0.3, 0.3, 'steel')
     for k in range(8):
         box(x1 + 0.006, yf + 0.1, Z0 + 0.02 + k * 0.035, 0.008, 0.3, 0.004, 'frame')
+    # 背面（D031）：一排高窗 + 两个卷帘门 + 红色条带
+    for (bz, bh) in ((Z0 + 0.6, 0.06), (Z0 + 0.7, 0.02)):
+        box(x0, yb - 0.004, bz, x1 - x0, 0.01, bh, red)
+    for i in range(8):
+        curtain_back(x0 + 0.08 + i * 0.22, Z0 + 0.36, 0.17, 0.18, yb, 2, 1, glass=M('#6db4ea', rough=0.05, metal=0.3))
+    for dx in (x0 + 0.25, x0 + 1.1):
+        box(dx, yb, Z0, 0.4, 0.012, 0.3, 'steel')
+        for k in range(8):
+            box(dx, yb + 0.006, Z0 + 0.02 + k * 0.035, 0.4, 0.008, 0.004, 'frame')
     # 屋顶：采光带 + 设备
     for k in range(3):
         box(0.85, yf + 0.15 + k * 0.3, top, 0.95, 0.1, 0.04, M('#8fcaf0', rough=0.05, metal=0.3), bevel=0.01)

@@ -6,7 +6,7 @@ import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
 import { ZoomButtons } from '../ui/ZoomButtons';
 import { InputGuard } from './InputGuard';
-import { makeButton } from '../ui/UiTheme';
+import { makeButton, makeRoundButton } from '../ui/UiTheme';
 import { UiRoot } from '../ui/UiRoot';
 import { SimApi } from '../core/sim/SimApi';
 import { createSimulation, loadSimJson } from '../core/SimLoader';
@@ -367,6 +367,13 @@ export class GameRoot extends Component {
         });
         envBtn.node.setPosition(zp.x - 0, zp.y + ZoomButtons.totalHeight() / 2 + 24 + 26, 0);
         InputGuard.add(envBtn.node);
+
+        // 「环境」上面：转视角（D031）。双指扭转也能转，这个按钮兜底 + 让人知道能转
+        if (this._view && this._view.canRotateView) {
+            const rotBtn = makeRoundButton(this.node, 'RotateBtn', 'rotate', 64, () => { if (this._view) this._view.rotateView(1); });
+            rotBtn.node.setPosition(zp.x, envBtn.node.position.y + 26 + 12 + 32, 0);
+            InputGuard.add(rotBtn.node);
+        }
     }
 
 }

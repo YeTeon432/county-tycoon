@@ -13,7 +13,7 @@ const { ccclass } = _decorator;
  * 每栋建筑一个子节点，节点原点 = 占地菱形的最下顶点：
  *   - 有贴图：Sprite，锚点在图的底边中点
  *   - 没贴图：Graphics 画一个等距色块（屋顶 + 左墙 + 右墙），颜色取 buildings.json 的 color
- * 每次重画后按 IsoMath.depth 排兄弟顺序，后面的建筑压住前面的。
+ * 每次重画后按 iso.depth 排兄弟顺序，后面的建筑压住前面的。
  * 贴地的东西（马路，def.flat）不在这里画，交给 GridMap。
  *
  * 放置预览是单独一层 Graphics（Ghost 节点），永远压在最上面。
@@ -149,7 +149,7 @@ export class BuildingLayer extends Component {
                 s.sizeMode = Sprite.SizeMode.CUSTOM;
                 s.trim = false;
                 s.spriteFrame = frame;
-                this._depth.set(node, IsoMath.depth(c, r, 1, 1));
+                this._depth.set(node, iso.depth(c, r, 1, 1));
                 this._terrainNodes.push(node);
             }
         }
@@ -409,6 +409,7 @@ export class BuildingLayer extends Component {
      * 环境视图（看全县）和放工厂时的污染范围预览共用。
      */
     drawEnv(cells: [number, number, number][]): void {
+        this._envCells = cells;
         const g = this._envG, iso = this._iso;
         if (!g || !iso) return;
         g.clear();
@@ -447,6 +448,45 @@ export class BuildingLayer extends Component {
         g.fillColor = color;
         g.moveTo(0, 12); g.lineTo(8, 9.5); g.lineTo(0, 7); g.close();
         g.fill();
+    }
+
+    /** 上一次 drawEnv 的格子，转视角后重画用 */
+    private _envCells: [number, number, number][] = [];
+
+    /**
+     * 视角转了（D031）：所有楼换成对应方向的图、挪到新位置、重算前后顺序；
+     * 山 / 树林重建；环境图层重画。楼顶气泡、小旗、工地都是楼节点的子节点，跟着走，只按新图高度重摆。
+     */
+    relayout(): void {
+        const model = this._model, iso = this._iso;
+        if (!model || !iso) return;
+        for (const b of model.allBuildings()) {
+            const node = this._nodes.get(b.uid);
+            if (!node) continue;
+            const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
+            node.setPosition(p.x, p.y, 0);
+            this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
+            const sprite = node.getComponent(Sprite);
+            const frame = this.usableFrame(b.def, b.facing);
+            if (!sprite || !frame || this._shown.get(b.uid) === frame) continue;
+            sprite.spriteFrame = frame;
+            const sz = this._art!.worldSize(frame);
+            node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
+            this._shown.set(b.uid, frame);
+            // 气泡按新高度重建（心愿气泡的上下浮动是绝对坐标，挪不了，只能重来）
+            const alert = node.getChildByName('Alert');
+            if (alert) {
+                const kind = (alert as any)._kind as 'leave' | 'wish';
+                alert.removeFromParent();
+                alert.destroy();
+                this.setAlert(b.uid, kind);
+            }
+            const flag = node.getChildByName('Flag');
+            if (flag) flag.setPosition(-sz.width * 0.28, sz.height - 4, 0);
+        }
+        this.syncTerrainObjects();
+        this.drawEnv(this._envCells);
+        this.sortAll();
     }
 
     /** 某栋建筑的节点（金币特效找位置用） */
@@ -518,11 +558,15 @@ export class BuildingLayer extends Component {
         this.sortAll();
     }
 
-    /** 能用的贴图：要有图，且宽度符合 (w+h)·半宽·倍率；朝右的图缺了就用默认图 */
-    private usableFrame(def: BuildingDef, right: boolean) {
+    /**
+     * 能用的贴图：要有图，且宽度符合 (w+h)·半宽·倍率。
+     * 按朝向 + 视角取后缀（D031：'' / _r / _b / _br），缺了就用默认图。
+     */
+    private usableFrame(def: BuildingDef, facing: Facing | null) {
         const art = this._art;
         const iso = this._iso!;
-        const frame = art ? ((right ? art.get(`${def.id}_r`) : null) ?? art.get(def.id)) : null;
+        const suffix = iso.frameSuffix(facing);
+        const frame = art ? ((suffix ? art.get(`${def.id}${suffix}`) : null) ?? art.get(def.id)) : null;
         if (!frame) return null;
         const want = (def.width + def.height) * iso.hw * art!.scale;
         const fw = frame.rect.width;
@@ -539,7 +583,7 @@ export class BuildingLayer extends Component {
     private syncNode(b: PlacedBuilding): void {
         const iso = this._iso!;
         // 朝向由 TownModel 定好并锁住，这里只读（null = 还没挨过路，先用默认图）
-        const frame = this.usableFrame(b.def, b.facing === 'R');
+        const frame = this.usableFrame(b.def, b.facing);
         let node = this._nodes.get(b.uid);
         if (node && this._shown.get(b.uid) === frame) return;
         if (node) {
@@ -549,7 +593,7 @@ export class BuildingLayer extends Component {
 
         if (node) this._depth.delete(node);
         node = BuildingLayer.makeChild(this._objRoot!, `B${b.uid}_${b.def.id}`);
-        this._depth.set(node, IsoMath.depth(b.col, b.row, b.def.width, b.def.height));
+        this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
         const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
         node.setPosition(p.x, p.y, 0);
 
@@ -638,7 +682,7 @@ export class BuildingLayer extends Component {
         this.showGhostShape(def, col, row, ok);
         const gs = this._ghostSprite, iso = this._iso;
         if (!gs || !iso) return;
-        const frame = def.flat ? null : this.usableFrame(def, facing === 'R');
+        const frame = def.flat ? null : this.usableFrame(def, facing);
         if (!frame) { gs.node.active = false; return; }
         const sz = this._art!.worldSize(frame);
         gs.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);

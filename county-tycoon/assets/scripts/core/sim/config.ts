@@ -62,6 +62,8 @@ export interface InvestConfig {
     valid: number;
     landFeeRate: number;
     subsidyRate: number;
+    /** 补贴路线的成功率加成（D032） */
+    subsidyChanceBonus: number;
     envWeight: number;
     taxBreakBonus: number;
     taxBreakMonths: number;
@@ -127,7 +129,7 @@ export function parseProgress(json: any): ProgressConfig | null {
         invest: {
             every: Math.max(1, Math.floor(num(iv.every, 3))), max: Math.max(1, Math.floor(num(iv.max, 3))),
             valid: Math.max(1, Math.floor(num(iv.valid, 7))), landFeeRate: num(iv.landFeeRate, 0.6),
-            subsidyRate: num(iv.subsidyRate, 0.5), envWeight: num(iv.envWeight, 0.9), taxBreakBonus: num(iv.taxBreakBonus, 0.2),
+            subsidyRate: num(iv.subsidyRate, 0.5), subsidyChanceBonus: num(iv.subsidyChanceBonus, 0.15), envWeight: num(iv.envWeight, 0.9), taxBreakBonus: num(iv.taxBreakBonus, 0.2),
             taxBreakMonths: Math.max(0, Math.floor(num(iv.taxBreakMonths, 12))), maxChance: clamp01(iv.maxChance, 0.9),
             pool, companies: strList(iv.companies).length ? strList(iv.companies) : ['外地'],
         },

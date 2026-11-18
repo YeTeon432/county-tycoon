@@ -56,11 +56,13 @@ export interface SimApi {
     envAt?(col: number, row: number): number;
     /** 营商环境分项和总分（0～100） */
     businessEnv?(): { total: number; parts: { label: string; value: number; max: number }[] };
-    /** 招商：签约。mode = land 供地 / subsidy 补贴；成功 null，失败返回理由 */
+    /** 招商：签约。mode = land 供地 / subsidy 补贴（两条都要选址盖楼，D032）；成功 null，失败返回理由 */
     acceptOffer?(offerId: number, mode: 'land' | 'subsidy', taxBreak: boolean): string | null;
-    /** 某份意向的成功率（0～1） */
-    offerChance?(offerId: number, taxBreak: boolean): number;
-    /** 放弃供地选址 */
+    /** 某份意向的成功率（0～1）；mode 不传按供地算 */
+    offerChance?(offerId: number, taxBreak: boolean, mode?: 'land' | 'subsidy'): number;
+    /** 签约前检查：这条路线现在能不能签，不能的话差什么（能签返回 ''）。确认卡片把按钮变灰用 */
+    offerBlock?(offerId: number, mode: 'land' | 'subsidy'): string;
+    /** 放弃选址（这份签约作废） */
     cancelPendingDeal?(): void;
     /** 能不能盖（资金、城镇等级） */
     canAfford(defId: string): boolean;

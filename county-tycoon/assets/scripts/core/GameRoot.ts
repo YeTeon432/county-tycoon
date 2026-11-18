@@ -161,8 +161,12 @@ export class GameRoot extends Component {
                     for (const st of sim.state.streets ?? []) for (const u of st.uids) m.set(u, flagColors[st.kind] ?? flagColors.daily);
                     return m;
                 };
+                // 招商签约后（D032）：选中那栋楼，自动挑一块挨路、离住宅近的空地放好预览
                 ui.requestPlace = (defId) => {
-                    if (this._bar && this._bar.selectById(defId)) this.updatePlacementHint();
+                    if (!this._bar || !this._bar.selectById(defId)) return false;
+                    const ok = view.suggestPlacement();
+                    this.updatePlacementHint();
+                    return ok;
                 };
                 ui.toggleEnvView = () => { view.envView = !view.envView; return view.envView; };
             }
@@ -213,7 +217,8 @@ export class GameRoot extends Component {
         const street = p && p.ok && sim && sim.streetHint ? sim.streetHint(p.def.id, p.col, p.row, p.def.width, p.def.height) : null;
         const deal = sim && sim.state.pendingDeal;
         if (deal && view.selectedBuilding && view.selectedBuilding.id === deal.defId) {
-            ui.setPlacementHint(`招商选址：给${deal.company}划一块地建${view.selectedBuilding.name}（对方出钱）`);
+            const pay = deal.mode === 'subsidy' ? `拨补贴 ¥${deal.subsidy ?? 0}` : `收出让金 ¥${deal.landFee}`;
+            ui.setPlacementHint(`给${deal.company}划地建${view.selectedBuilding.name}：按「确定」交地（${pay}），点别处换位置`);
         } else if (street) {
             ui.setPlacementHint(street);
         } else if (view.demolishing) {

@@ -71,6 +71,30 @@ export interface Wish {
     until: number;
 }
 
+/** 招商签约后等交地的那一份（DESIGN 20，D032） */
+export interface PendingDeal {
+    offerId: number;
+    defId: string;
+    company: string;
+    /** 供地：交地时收的出让金；补贴路线 = 0 */
+    landFee: number;
+    taxBreak: boolean;
+    mode?: 'land' | 'subsidy';
+    /** 补贴路线：交地时拨的补贴 */
+    subsidy?: number;
+    /** 补贴路线：厂建成时带来的工人数、学历 */
+    workers?: number;
+    workerEdu?: Education;
+}
+
+/** 招商的厂施工期间记着：建成后是私营、让不让税、带不带工人（D032） */
+export interface DealOwner {
+    company: string;
+    taxBreak: boolean;
+    workers: number;
+    workerEdu: Education;
+}
+
 /** 招商意向（DESIGN 20） */
 export interface Offer {
     id: number;
@@ -78,9 +102,9 @@ export interface Offer {
     defId: string;
     /** 供地：对方交的土地出让金 */
     landFee: number;
-    /** 补贴：我们出的钱 */
+    /** 补贴：交地时我们出的钱（D032：补贴路线也盖楼，没有出让金） */
     subsidy: number;
-    /** 补贴签约时对方带来几位工人（各带家属） */
+    /** 补贴路线：厂建成时对方带来几位熟练工人 */
     workers: number;
     workerEdu: Education;
     /** 对方要求县里至少有几个能招的工人（供地时检查） */
@@ -230,15 +254,15 @@ export interface SimState {
     renovations?: { uid: number; to: string; left: number; total: number; startAt?: number }[];
     /** 招商意向（DESIGN 20） */
     offers?: Offer[];
-    /** 供地签约成功、等玩家选址的那一份 */
-    pendingDeal?: { offerId: number; defId: string; company: string; landFee: number; taxBreak: boolean } | null;
+    /** 签约成功、等玩家选址交地的那一份（D032：供地、补贴都要选址；mode 旧存档没有 = land） */
+    pendingDeal?: PendingDeal | null;
     dealsDone?: number;
     nextOfferId?: number;
     /**
      * 施工中的楼（D026，DESIGN 24）：完工前不进 buildings，不住人、不招工。旧存档没有。
      * startAt = 开工那一刻本月的进度（0..1）：进度条和工期都从这一刻算，不从月初算。
      */
-    construction?: { uid: number; defId: string; left: number; total: number; startAt?: number }[];
+    construction?: { uid: number; defId: string; left: number; total: number; startAt?: number; deal?: DealOwner }[];
     /** 口碑（D026，DESIGN 16.2）：满足心愿 +，有人走 −，每月衰减；加在迁入吸引力上。旧存档没有 = 0 */
     buzz?: number;
 }

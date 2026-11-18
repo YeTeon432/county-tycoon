@@ -3,7 +3,7 @@ import { SimpleTownView } from '../../assets/scripts/core/sim/townView';
 import { buildWorld } from '../../assets/scripts/core/sim/world';
 import { staffing, positionsOf, openingsFor } from '../../assets/scripts/core/sim/labor';
 import { parseEconomy, parseNames, makeSimConfig } from '../../assets/scripts/core/sim/config';
-import { Simulation } from '../../assets/scripts/core/sim/Simulation';
+import { DEF_NAMES, Simulation } from '../../assets/scripts/core/sim/Simulation';
 import { SimConfig } from '../../assets/scripts/core/sim/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -1245,7 +1245,7 @@ suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () =>
         void before;
     });
 
-    test('招商补贴：花钱、来工人、守恒；空房不够时拒绝', () => {
+    test('招商补贴（D032）：签约不扣钱 → 选址交地扣补贴、没有出让金 → 建成私营 + 带工人、守恒', () => {
         const cfg = loadFullConfig();
         cfg.progress!.invest.maxChance = 1; cfg.progress!.invest.envWeight = 100;
         const t = basicTown(cfg);
@@ -1253,15 +1253,77 @@ suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () =>
         for (let i = 0; i < 3; i++) sim.stepMonth();
         const o = sim.state.offers![0];
         o.workers = 1;
-        const before = sim.moneyInCounty();
+        sim.state.finance.funds = o.subsidy + 1000;
         const pop = sim.state.residents.length;
-        const err = sim.acceptOffer(o.id, 'subsidy', false);
-        if (err) { ok(/空房/.test(err), err); return; }
-        eq(sim.state.residents.length, pop + 1, '来了工人');
+        const f0 = sim.state.finance.funds;
+        eq(sim.offerBlock(o.id, 'subsidy'), '', '资金够就能签');
+        eq(sim.acceptOffer(o.id, 'subsidy', false), null, '签约成功');
+        eq(sim.state.finance.funds, f0, '签约时不扣钱');
+        eq(sim.state.pendingDeal!.mode, 'subsidy');
+        ok(sim.canAfford(o.defId), '钱够补贴就能交地');
+        // 交地时钱不够 → 盖不下
+        sim.state.finance.funds = o.subsidy - 1;
+        ok(!sim.canAfford(o.defId), '钱不够补贴不能交地');
+        sim.state.finance.funds = f0;
+        // 腾一间空房给工人
+        const hut = t.map.build('hut', 20, 6);
+        sim.onBuilt(hut, 'hut');
+        for (let i = 0; i < 2; i++) sim.stepMonth();
+        sim.state.finance.funds = o.subsidy + 50000;
+        const fb = sim.state.finance.funds;
+        const e = cfg.building(o.defId)!;
+        const w = ['textile', 'food-factory', 'supermarket', 'hotpot', 'moto-factory', 'electronics', 'car-factory', 'port', 'mine', 'plaza'].indexOf(o.defId) >= 0 ? 2 : 1;
+        const uid = t.map.build(o.defId, 15, 6, w, w);
+        ok(sim.onBuilt(uid, o.defId), '盖得下');
+        eq(sim.state.finance.funds, fb - o.subsidy, '只扣补贴，不扣造价，也没有出让金');
+        eq(sim.state.pendingDeal, null);
+        ok(sim.isUnlocked(o.defId), '产业解锁');
+        // 施工中途存档读档，招商信息不能丢
+        const saved = JSON.parse(JSON.stringify(sim.state));
+        const s2 = new Simulation(cfg, t.view, { state: saved });
+        for (let i = 0; i < e.buildDays; i++) s2.stepMonth();
+        eq(s2.building(uid)!.owner, 'private', '建成私营');
+        ok(s2.state.residents.length >= pop + 1, '对方带工人来了');
+    });
+
+    test('招商补贴：守恒（交地那个月补贴算流出）', () => {
+        const cfg = loadFullConfig();
+        cfg.progress!.invest.maxChance = 1; cfg.progress!.invest.envWeight = 100;
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 80 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const o = sim.state.offers![0];
+        sim.state.finance.funds = o.subsidy + 5000;
+        eq(sim.acceptOffer(o.id, 'subsidy', false), null);
+        sim.stepMonth();
+        const before = sim.moneyInCounty();
+        const w = ['textile', 'food-factory', 'supermarket', 'hotpot', 'moto-factory', 'electronics', 'car-factory', 'port', 'mine', 'plaza'].indexOf(o.defId) >= 0 ? 2 : 1;
+        const uid = t.map.build(o.defId, 15, 6, w, w);
+        ok(sim.onBuilt(uid, o.defId));
         sim.stepMonth();
         const f = sim.lastFlows;
         ok(f.outflow.subsidy === o.subsidy, '补贴算流出');
         near(sim.moneyInCounty() - before, sumf(f.inflow) - sumf(f.outflow), 1e-6 * Math.abs(before), '守恒');
+    });
+
+    test('招商签约前检查：能招的工人不够时说还差几个，不扣意向', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 81 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const o = sim.state.offers![0];
+        o.needLabor = 999;
+        const why = sim.offerBlock(o.id, 'land');
+        ok(/还差 \d+ 个能招的工人/.test(why), why);
+        eq(sim.acceptOffer(o.id, 'land', false), why);
+        ok(sim.state.offers!.some((x) => x.id === o.id), '没白丢意向');
+        ok(sim.offerChance(o.id, false, 'subsidy') > sim.offerChance(o.id, false, 'land') || sim.offerChance(o.id, false, 'land') >= cfg.progress!.invest.maxChance, '补贴成功率更高');
+    });
+
+    test('模拟层的建筑名和 buildings.json 一致（公告不能露出 hut 这种内部编号）', () => {
+        const defs = JSON.parse(readFileSync(join(process.cwd(), 'assets/resources/config/buildings.json'), 'utf8'));
+        const list: { id: string; name: string }[] = Array.isArray(defs) ? defs : defs.buildings;
+        for (const d of list) eq(DEF_NAMES[d.id], d.name, d.id);
     });
 
     test('招商失败：说出最弱的一项', () => {

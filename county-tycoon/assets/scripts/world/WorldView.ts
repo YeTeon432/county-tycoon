@@ -884,6 +884,28 @@ export class WorldView extends Component {
         }
     }
 
+    /**
+     * 招商选址引导（D032）：给当前选中的建筑挑一块挨着路、离住宅最近的空地，直接放好预览、镜头移过去。
+     * 玩家可以点别处换位置。找不到空地返回 false。
+     */
+    suggestPlacement(): boolean {
+        const model = this._model, def = this._selected;
+        if (!model || !def || def.flat) return false;
+        const all = model.allBuildings().filter((b) => !b.def.flat);
+        const homes = all.filter((b) => b.def.category === '住宅');
+        const ref = homes.length ? homes : all;
+        let nc = model.width / 2, nr = model.height / 2;
+        if (ref.length) {
+            nc = ref.reduce((a, b) => a + b.col + b.def.width / 2, 0) / ref.length;
+            nr = ref.reduce((a, b) => a + b.row + b.def.height / 2, 0) / ref.length;
+        }
+        const spot = model.findSpot(def, nc, nr);
+        if (!spot) return false;
+        this.previewAt(def, spot.col, spot.row);
+        this.focusCell(spot.col + (def.width - 1) / 2, spot.row + (def.height - 1) / 2);
+        return true;
+    }
+
     /** 镜头对准某一格（开局对准出生点用） */
     focusCell(col: number, row: number): void {
         const world = this._world, iso = this._iso;

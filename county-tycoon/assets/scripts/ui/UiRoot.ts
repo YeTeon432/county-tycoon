@@ -51,7 +51,7 @@ export class UiRoot extends Component {
      */
     requestToggleFacing: ((uid: number) => boolean) | null = null;
     /** 招商供地：让玩家去地图上选址（GameRoot 接到底栏 + WorldView） */
-    requestPlace: ((defId: string) => void) | null = null;
+    requestPlace: ((defId: string) => boolean) | null = null;
     /** 环境视图开关（GameRoot 接到 WorldView），返回开着没 */
     toggleEnvView: (() => boolean) | null = null;
     /** 居民追踪（T425，GameRoot 接到 WorldView）：开始 / 结束（null） */
@@ -222,7 +222,20 @@ export class UiRoot extends Component {
      * 盖好一栋楼（集成可以在 WorldView.onBuilt 成功后调；不调也行，update 里会数楼）。
      * 第一次盖非道路的楼 → 收起开局箭头。
      */
+    /**
+     * 县发展中心按钮的红点：发展目标全完成可以升级，或者有签了约还没交地的招商（D032）。
+     * 月底、盖楼、招商面板改动后都调。
+     */
+    refreshCenterDot(): void {
+        const sim = this.sim, bar = this._topBar;
+        if (!sim || !bar) return;
+        const g = sim.goals ? sim.goals() : [];
+        const ready = g.length > 0 && g.every((x) => x.done);
+        bar.setCenterReady(ready || !!sim.state.pendingDeal);
+    }
+
     notifyBuilt(): void {
+        this.refreshCenterDot();
         if (this._topBar) this._topBar.refresh();
         if (!this._waitFirstBuild) return;
         if (this.countBuildings() > this._baseBuildings) {
@@ -241,10 +254,9 @@ export class UiRoot extends Component {
         if (this._waitFirstBuild) this.notifyBuilt();
         if (this._notices && this.sim && this.sim.goals) {
             const g = this.sim.goals();
-            const done = g.filter((x) => x.done).length;
-            this._notices.setGoals(done, g.length);
-            if (this._topBar) this._topBar.setCenterReady(g.length > 0 && done >= g.length);
+            this._notices.setGoals(g.filter((x) => x.done).length, g.length);
         }
+        this.refreshCenterDot();
         if (this._bar && !this._bar.hasArt) this.findSiblings();
     }
 
@@ -260,7 +272,8 @@ export class UiRoot extends Component {
         };
         bar.onReportTap = () => this.openReport();
         bar.onPopulationTap = () => this.openResidentList();
-        bar.onCenterTap = () => this.openCenter('goals');
+        // 有签了约还没交地的招商（D032）→ 直接开招商页
+        bar.onCenterTap = () => this.openCenter(this.sim && this.sim.state.pendingDeal ? 'invest' : 'goals');
         this._topBar = bar;
     }
 
@@ -480,13 +493,15 @@ export class UiRoot extends Component {
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
         p.onHint = (t) => { if (this._notices) this._notices.say('info', t); };
-        p.onChanged = () => { if (this._topBar) this._topBar.refresh(); };
+        p.onChanged = () => { if (this._topBar) this._topBar.refresh(); this.refreshCenterDot(); };
         p.onUpgraded = (lv) => this.onLevelUp(lv);
         if (this._bar) { const defs = this._bar.defs; p.nameOf = (id) => defs.find((d) => d.id === id)?.name ?? id; p.fill(); }
         p.onPlace = (defId) => {
             this.closeTopPanel();
-            if (this.requestPlace) this.requestPlace(defId);
-            if (this._notices) this._notices.say('info', '在地图上点一块挨着路的地，按「确定」——对方出钱盖');
+            const placed = this.requestPlace ? this.requestPlace(defId) : false;
+            if (this._notices) this._notices.say('info', placed
+                ? '签约了！已经挑好一块地，按「确定」交地；想换位置就点别处，✕ 稍后再选'
+                : '签约了！在地图上点一块挨着路的空地，按「确定」交地');
         };
         p.onClosed = () => { if (this._centerPanel === p) this._centerPanel = null; };
         this._centerPanel = p;

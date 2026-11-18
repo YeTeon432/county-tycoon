@@ -499,12 +499,13 @@
     ]
   },
   "invest": {
-    "_说明": "招商（DESIGN 20）：每 every 天来 1～max 份意向，valid 天内有效。landFee / subsidy = 该建筑造价 × 比例。成功率 = 营商环境 / 100 × envWeight + 让税 taxBreakBonus，封顶 maxChance",
+    "_说明": "招商（DESIGN 20，D032）：每 every 天来 1～max 份意向，valid 天内有效。landFee / subsidy = 该建筑造价 × 比例（两条路线都盖楼：供地收出让金，补贴我们出补贴款）。成功率 = 营商环境 / 100 × envWeight + 让税 taxBreakBonus + 补贴 subsidyChanceBonus，封顶 maxChance",
     "every": 3,
     "max": 3,
     "valid": 7,
     "landFeeRate": 0.6,
     "subsidyRate": 0.5,
+    "subsidyChanceBonus": 0.15,
     "envWeight": 0.9,
     "taxBreakBonus": 0.2,
     "taxBreakMonths": 12,

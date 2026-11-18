@@ -123,6 +123,26 @@ export class TownModel {
     }
 
     /**
+     * 找一块放得下、挨着路、离 (nearCol, nearRow) 最近的空地（招商选址引导用，D032）。
+     * 找不到挨路的就退一步，只要放得下；都没有返回 null。
+     */
+    findSpot(def: BuildingDef, nearCol: number, nearRow: number): { col: number; row: number } | null {
+        let best: { col: number; row: number } | null = null, bestD = Infinity;
+        let loose: { col: number; row: number } | null = null, looseD = Infinity;
+        const cx = nearCol - def.width / 2, cy = nearRow - def.height / 2;
+        for (let row = 0; row + def.height <= this.height; row++) {
+            for (let col = 0; col + def.width <= this.width; col++) {
+                if (!this.canPlace(def, col, row)) continue;
+                const d = (col - cx) * (col - cx) + (row - cy) * (row - cy);
+                if (this.facingByRoads(def, col, row)) {
+                    if (d < bestD) { bestD = d; best = { col, row }; }
+                } else if (d < looseD) { looseD = d; loose = { col, row }; }
+            }
+        }
+        return best ?? loose;
+    }
+
+    /**
      * 按四周的路算一个朝向（不改任何东西）；四周没路返回 null。
      * 放置预览用它给默认朝向，settleFacings 用它定朝向，两边规则一致。
      */

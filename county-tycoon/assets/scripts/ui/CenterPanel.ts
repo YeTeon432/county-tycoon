@@ -1,6 +1,6 @@
 import { _decorator, Color, Graphics, Label, Node } from 'cc';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
-import { Education, TownLevel } from '../core/sim/types';
+import { Education, Offer, TownLevel } from '../core/sim/types';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
 import {
@@ -40,11 +40,13 @@ export class CenterPanel extends Panel {
     onChanged: (() => void) | null = null;
     /** 研究失败的原因等（UiRoot 接到提示条） */
     onHint: ((text: string) => void) | null = null;
-    /** 招商供地签约后：去地图上选址（UiRoot 关面板 + 选中建筑） */
+    /** 招商签约后：去地图上选址交地（UiRoot 关面板 + 自动挑一块地放好预览） */
     onPlace: ((defId: string) => void) | null = null;
     /** 建筑 id → 名字 */
     nameOf: (id: string) => string = (id) => id;
     private _taxBreak = false;
+    /** 招商确认 / 结果卡片（盖在面板上） */
+    private _modal: Node | null = null;
 
     static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null): CenterPanel {
         const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level]);
@@ -400,21 +402,20 @@ export class CenterPanel extends Panel {
             g.fillColor = new Color(232, 246, 232, 255);
             g.roundRect(-W / 2, -dh / 2, W, dh, UI_RADIUS);
             g.fill();
-            const l = makeLabelLeft(n, 'T', `已和${deal.company}签约：给他们划块地建${this.nameOf(deal.defId)}`, UI_FONT.small, UI_COLOR.up, W - 330);
+            const pay = deal.mode === 'subsidy' && deal.subsidy ? `，交地时拨补贴 ${formatMoney(deal.subsidy)}` : deal.landFee ? `，交地收 ${formatMoney(deal.landFee)}` : '';
+            const l = makeLabelLeft(n, 'T', `已和${deal.company}签约：还没给他们划地建${this.nameOf(deal.defId)}${pay}`, UI_FONT.small, UI_COLOR.up, W - 370);
             l.overflow = Label.Overflow.SHRINK;
             l.node.setPosition(-W / 2 + 16, 0, 0);
             const go = makeButton(n, 'Go', '去选址', 150, 60, 'primary', () => { if (this.onPlace) this.onPlace(deal.defId); });
             go.node.setPosition(W / 2 - 16 - 75 - 150 - 12, 0, 0);
-            const no = makeButton(n, 'No', '放弃', 150, 60, 'secondary', () => { if (sim.cancelPendingDeal) sim.cancelPendingDeal(); this.fill(); });
+            const no = makeButton(n, 'No', '放弃', 150, 60, 'secondary', () => {
+                if (sim.cancelPendingDeal) sim.cancelPendingDeal();
+                if (this.onChanged) this.onChanged();
+                this.fill();
+            });
             no.node.setPosition(W / 2 - 16 - 75, 0, 0);
             y -= dh + 12;
         }
-
-        // 让税开关
-        const tb = makeButton(body, 'Tax', this._taxBreak ? '✓ 附加让税（头 12 天企业税减半，成功率 +20%）' : '附加让税（头 12 天企业税减半，成功率 +20%）', W, 56,
-            this._taxBreak ? 'primary' : 'secondary', () => { this._taxBreak = !this._taxBreak; this.fill(); });
-        tb.node.setPosition(0, y - 28, 0);
-        y -= 72;
 
         const offers = sim.state.offers ?? [];
         if (!offers.length) {
@@ -432,37 +433,149 @@ export class CenterPanel extends Panel {
             g.fillColor = UI_COLOR.block;
             g.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
             g.fill();
-            const chance = sim.offerChance ? Math.round(sim.offerChance(o.id, this._taxBreak) * 100) : 0;
             const left = Math.max(0, o.until - sim.state.month);
-            const t = makeLabelLeft(row, 'T', `${o.company}：想建${this.nameOf(o.defId)}`, UI_FONT.body, UI_COLOR.text, W - 220);
+            const t = makeLabelLeft(row, 'T', `${o.company}：想建${this.nameOf(o.defId)}`, UI_FONT.body, UI_COLOR.text, W - 200);
             t.isBold = true;
             t.node.setPosition(-W / 2 + 20, 76, 0);
-            const c = makeLabelRight(row, 'C', `成功率 ${chance}% · ${left} 天内`, UI_FONT.small, UI_COLOR.textDim, 220);
+            const c = makeLabelRight(row, 'C', `${left} 天内有效`, UI_FONT.small, UI_COLOR.textDim, 180);
             c.node.setPosition(W / 2 - 20, 76, 0);
-            const l1 = makeLabelLeft(row, 'L1', `供地：对方交土地出让金 ${formatMoney(o.landFee)}，自己出钱建厂（私营），要县里有 ${o.needLabor} 个能招的工人`, 18, UI_COLOR.text, W - 40);
+            const pct = (m: 'land' | 'subsidy') => (sim.offerChance ? Math.round(sim.offerChance(o.id, false, m) * 100) : 0);
+            const l1 = makeLabelLeft(row, 'L1', `供地：我们出地，对方交出让金 ${formatMoney(o.landFee)}、全额出钱建（成功率 ${pct('land')}%）`, 18, UI_COLOR.text, W - 40);
             l1.overflow = Label.Overflow.SHRINK;
             l1.node.setPosition(-W / 2 + 20, 34, 0);
-            const l2 = makeLabelLeft(row, 'L2', `补贴：我们出 ${formatMoney(o.subsidy)}，对方送来 ${o.workers} 位熟练工人（要有空房）`, 18, UI_COLOR.text, W - 40);
+            const l2 = makeLabelLeft(row, 'L2', `补贴：我们出地 + 补贴 ${formatMoney(o.subsidy)}，建成后带 ${o.workers} 位熟练工人来（成功率 ${pct('subsidy')}%）`, 18, UI_COLOR.text, W - 40);
             l2.overflow = Label.Overflow.SHRINK;
             l2.node.setPosition(-W / 2 + 20, 2, 0);
             const bw = (W - 52) / 2;
-            const b1 = makeButton(row, 'Land', '供地签约', bw, 64, 'primary', () => this.deal(o.id, 'land'));
+            const b1 = makeButton(row, 'Land', '供地签约…', bw, 64, 'primary', () => this.openConfirm(o, 'land'));
             b1.node.setPosition(-W / 2 + 16 + bw / 2, -62, 0);
-            const b2 = makeButton(row, 'Sub', `补贴 ${formatMoney(o.subsidy)}`, bw, 64, 'secondary', () => this.deal(o.id, 'subsidy'));
+            const b2 = makeButton(row, 'Sub', '补贴签约…', bw, 64, 'secondary', () => this.openConfirm(o, 'subsidy'));
             b2.node.setPosition(W / 2 - 16 - bw / 2, -62, 0);
+            // 条件不够的那条按钮变灰（点了还是能看到差什么）
+            if (sim.offerBlock && sim.offerBlock(o.id, 'land')) b1.setStyle('secondary');
         } })));
     }
 
-    private deal(id: number, mode: 'land' | 'subsidy'): void {
+    // ── 招商确认 / 结果卡片（D032）──
+
+    private closeModal(): void {
+        if (this._modal && this._modal.isValid) this._modal.destroy();
+        this._modal = null;
+    }
+
+    /** 盖在面板上的一张小卡片：遮罩吃掉点击，返回卡片节点和宽 */
+    private makeModal(h: number): { card: Node; w: number } {
+        this.closeModal();
+        const host = this.card!;
+        const CW = this.cardW, CH = this.cardH;
+        const root = makePanelNode(host, 'Modal', CW, CH);
+        this._modal = root;
+        const sg = root.addComponent(Graphics);
+        sg.fillColor = UI_COLOR.shade;
+        sg.rect(-CW / 2, -CH / 2, CW, CH);
+        sg.fill();
+        root.on(Node.EventType.TOUCH_END, () => {}, this);   // 吃掉点击，不穿到下面的列表
+        const w = Math.min(CW - 48, 660);
+        const card = makePanelNode(root, 'Card', w, h);
+        const g = card.addComponent(Graphics);
+        g.fillColor = UI_COLOR.panel;
+        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS * 2);
+        g.fill();
+        g.strokeColor = UI_COLOR.border;
+        g.lineWidth = 2;
+        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS * 2);
+        g.stroke();
+        return { card, w };
+    }
+
+    /** 签约确认：写清楚建什么、我们拿到什么、付出什么、成功率；条件不够时签约按钮变灰并写差什么 */
+    private openConfirm(o: Offer, mode: 'land' | 'subsidy'): void {
         const sim = this._sim;
         if (!sim || !sim.acceptOffer) return;
-        const err = sim.acceptOffer(id, mode, this._taxBreak);
-        if (err) { if (this.onHint) this.onHint(err); this.fill(); return; }
+        const lines: { text: string; color?: Color }[] = [];
+        const name = this.nameOf(o.defId);
+        const taxMonths = 12;
+        lines.push({ text: `建什么：${name}（建成后是对方的私营企业）` });
+        lines.push({ text: '这个产业从此解锁；员工工资、企业税留在县里', color: UI_COLOR.textDim });
+        if (mode === 'land') {
+            lines.push({ text: `我们出：一块挨着路的地` });
+            lines.push({ text: `我们得：交地时土地出让金 ${formatMoney(o.landFee)} 进财政`, color: UI_COLOR.up });
+            lines.push({ text: `对方要求：县里有 ${o.needLabor} 个能招的工人（对方在本地招人）`, color: UI_COLOR.textDim });
+        } else {
+            lines.push({ text: `我们出：一块挨着路的地 + 补贴 ${formatMoney(o.subsidy)}（交地时拨付）` });
+            lines.push({ text: `我们得：厂建成时对方带 ${o.workers} 位熟练工人来${o.workerEdu > 0 ? `（${['', '初中', '高中', '大专'][o.workerEdu]}学历）` : ''}`, color: UI_COLOR.up });
+            lines.push({ text: '工人要有空房才住得下，住不下的不来', color: UI_COLOR.textDim });
+        }
+        if (this._taxBreak) lines.push({ text: `附加让税：头 ${taxMonths} 天企业税减半`, color: UI_COLOR.textDim });
+
+        const lineH = 40;
+        const h = 150 + lines.length * lineH + 84 + 56 + 110;
+        const { card, w } = this.makeModal(h);
+        let y = h / 2 - 50;
+        const title = makeLabelLeft(card, 'Title', `和${o.company}签约 · ${mode === 'land' ? '供地' : '补贴'}`, UI_FONT.body + 4, UI_COLOR.text, w - 64);
+        title.isBold = true;
+        title.overflow = Label.Overflow.SHRINK;
+        title.node.setPosition(-w / 2 + 32, y, 0);
+        y -= 60;
+        for (const ln of lines) {
+            const l = makeLabelLeft(card, 'Line', ln.text, 20, ln.color ?? UI_COLOR.text, w - 64);
+            l.overflow = Label.Overflow.SHRINK;
+            l.node.setPosition(-w / 2 + 32, y, 0);
+            y -= lineH;
+        }
+        y -= 10;
+        // 让税开关（改成功率，重画卡片）
+        const tb = makeButton(card, 'Tax', `${this._taxBreak ? '✓ ' : ''}附加让税：头 ${taxMonths} 天企业税减半，成功率更高`, w - 64, 56,
+            this._taxBreak ? 'primary' : 'secondary', () => { this._taxBreak = !this._taxBreak; this.openConfirm(o, mode); });
+        tb.node.setPosition(0, y - 28, 0);
+        y -= 84;
+        const pct = sim.offerChance ? Math.round(sim.offerChance(o.id, this._taxBreak, mode) * 100) : 0;
+        const block = sim.offerBlock ? sim.offerBlock(o.id, mode) : '';
+        const info = makeLabelLeft(card, 'Chance', block ? `签不了：${block}` : `成功率 ${pct}%（谈不成这份意向就作废）`,
+            UI_FONT.small, block ? UI_COLOR.down : UI_COLOR.text, w - 64);
+        info.isBold = true;
+        info.overflow = Label.Overflow.SHRINK;
+        info.node.setPosition(-w / 2 + 32, y - 10, 0);
+        // 按钮
+        const bw = (w - 64 - 16) / 2;
+        const by = -h / 2 + 32 + 32;
+        const no = makeButton(card, 'No', '再想想', bw, 64, 'secondary', () => this.closeModal());
+        no.node.setPosition(-w / 2 + 32 + bw / 2, by, 0);
+        const yes = makeButton(card, 'Yes', '签约', bw, 64, 'primary', () => this.deal(o, mode));
+        yes.node.setPosition(w / 2 - 32 - bw / 2, by, 0);
+        if (block) yes.setEnabled(false);
+    }
+
+    private deal(o: Offer, mode: 'land' | 'subsidy'): void {
+        const sim = this._sim;
+        if (!sim || !sim.acceptOffer) return;
+        const err = sim.acceptOffer(o.id, mode, this._taxBreak);
         if (this.onChanged) this.onChanged();
+        if (err) {
+            // 条件不够（按钮本该是灰的，资金可能刚变过）→ 重画确认卡片；谈不成 → 结果卡片
+            if (sim.state.offers && sim.state.offers.some((x) => x.id === o.id)) { this.openConfirm(o, mode); return; }
+            this.fill();
+            this.openResult(`没和${o.company}谈成`, err);
+            return;
+        }
+        this.closeModal();
         const deal = sim.state.pendingDeal;
-        if (mode === 'land' && deal && this.onPlace) { this.onPlace(deal.defId); return; }
-        if (this.onHint) this.onHint('签约成功，工人已经到了');
+        if (deal && this.onPlace) { this.onPlace(deal.defId); return; }
         this.fill();
+    }
+
+    /** 结果卡片：谈不成的原因和怎么补 */
+    private openResult(title: string, text: string): void {
+        const h = 330;
+        const { card, w } = this.makeModal(h);
+        const t = makeLabel(card, 'Title', title, UI_FONT.body + 4, UI_COLOR.text, w - 64);
+        t.isBold = true;
+        t.node.setPosition(0, h / 2 - 54, 0);
+        const l = makeLabel(card, 'Text', text, UI_FONT.small, UI_COLOR.textDim, w - 80);
+        l.overflow = Label.Overflow.RESIZE_HEIGHT;
+        l.node.setPosition(0, 20, 0);
+        const ok = makeButton(card, 'Ok', '知道了', 240, 64, 'primary', () => this.closeModal());
+        ok.node.setPosition(0, -h / 2 + 64, 0);
     }
 
     private fillSoon(body: Node, H: number, text: string): void {

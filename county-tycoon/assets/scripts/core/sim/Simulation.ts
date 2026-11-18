@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, Education, MoneyFlows, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BuildingEcon, BuildingSim, DealOwner, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -37,7 +37,6 @@ export class Simulation implements SimApi {
     private _investIncome = 0;
     private _subsidySpent = 0;
     /** 招商来的、还在施工的楼：uid → 让不让税（完工时记成私营）。存档里靠 construction + owner 恢复不了，读档后当县属 */
-    private readonly _dealOwners = new Map<number, boolean>();
     /** 本月每家店服务人次 / 营业额 / 在岗人数 */
     private readonly _served = new Map<number, number>();
     private readonly _revenue = new Map<number, number>();
@@ -181,23 +180,31 @@ export class Simulation implements SimApi {
         if (!this.isUnlocked(defId)) return false;   // 没研究过（D026）
         if (econ && econ.selfBuilt) return false;     // 只能住户自己翻盖得到
         const deal = s.pendingDeal && s.pendingDeal.defId === defId ? s.pendingDeal : null;
-        const cost = deal ? 0 : econ ? econ.cost : 0;  // 招商供地：对方出钱盖
+        // 招商（D032）：对方出钱盖；补贴路线交地时我们拨补贴款
+        const cost = deal ? dealCost(deal) : econ ? econ.cost : 0;
         if (cost > s.finance.funds) return false;
 
         s.finance.funds -= cost;
-        this._constructionSpent += cost;
-        this._flows.outflow.construction += cost;     // 施工队、建材都在县外（D026）
-        if (deal) this.closeLandDeal(uid, deal);
+        if (deal) {
+            this._subsidySpent += cost;
+            this._flows.outflow.subsidy += cost;
+        } else {
+            this._constructionSpent += cost;
+            this._flows.outflow.construction += cost;     // 施工队、建材都在县外（D026）
+        }
+        const owner = deal ? this.closeLandDeal(deal) : undefined;
         // 有工期的先进工地，完工那天才变成能用的楼（D026，DESIGN 24）
         const days = econ ? econ.buildDays : 0;
         if (days > 0) {
-            (s.construction ??= []).push({ uid, defId, left: days, total: days, startAt: s.month + clamp01(dayProgress) });
+            const c: NonNullable<SimState['construction']>[number] = { uid, defId, left: days, total: days, startAt: s.month + clamp01(dayProgress) };
+            if (owner) c.deal = owner;   // 记在工地上：施工中途存档也不丢
+            (s.construction ??= []).push(c);
             this._town.refresh?.();   // 工地也占着路边：特色街道提示要算到它
             this.syncRng();
             return true;
         }
         s.buildings.push(Simulation.newBuilding(uid, defId));
-        this.applyDealOwner(uid);
+        this.applyDealOwner(uid, owner);
         this._town.refresh?.();
         // 有了新楼，先把没工作的人配上去（不等下个月）
         const world = this.refreshWorld();
@@ -832,62 +839,52 @@ export class Simulation implements SimApi {
         if (s.offers.length > before) this.notice('offer', `有外地企业想来投资，去县发展中心「招商引资」看看`, []);
     }
 
-    offerChance(offerId: number, taxBreak: boolean): number {
+    offerChance(offerId: number, taxBreak: boolean, mode: 'land' | 'subsidy' = 'land'): number {
         const p = this._cfg.progress;
         if (!p) return 0;
         const iv = p.invest;
-        return Math.min(iv.maxChance, this.businessEnv().total / 100 * iv.envWeight + (taxBreak ? iv.taxBreakBonus : 0));
+        return Math.min(iv.maxChance, this.businessEnv().total / 100 * iv.envWeight
+            + (taxBreak ? iv.taxBreakBonus : 0) + (mode === 'subsidy' ? iv.subsidyChanceBonus : 0));
+    }
+
+    /** 签约前检查（D032）：能签返回 ''，不能返回差什么 */
+    offerBlock(offerId: number, mode: 'land' | 'subsidy'): string {
+        const s = this.state;
+        if (!this._cfg.progress) return '没有招商';
+        const o = (s.offers ?? []).find((x) => x.id === offerId);
+        if (!o) return '这份意向已经过期了';
+        if (s.pendingDeal) return `先给${s.pendingDeal.company}把地交了（或者放弃那一份）`;
+        if (mode === 'land') {
+            const n = this.availableLabor();
+            if (n < o.needLabor) return `还差 ${o.needLabor - n} 个能招的工人（对方要 ${o.needLabor} 个，现在 ${n} 个）`;
+        } else if (s.finance.funds < o.subsidy) {
+            return `建设资金还差 ${o.subsidy - s.finance.funds}（补贴要 ¥${o.subsidy}）`;
+        }
+        return '';
     }
 
     acceptOffer(offerId: number, mode: 'land' | 'subsidy', taxBreak: boolean): string | null {
-        const p = this._cfg.progress;
         const s = this.state;
-        if (!p) return '没有招商';
-        const o = (s.offers ?? []).find((x) => x.id === offerId);
-        if (!o) return '这份意向已经过期了';
-        if (s.pendingDeal) return '先把上一份签约的地选好';
-        if (mode === 'land' && this.availableLabor() < o.needLabor) {
-            return `对方要求县里至少有 ${o.needLabor} 个能招的工人（现在 ${this.availableLabor()}）`;
-        }
-        if (mode === 'subsidy') {
-            if (s.finance.funds < o.subsidy) return `建设资金不够（补贴要 ¥${o.subsidy}）`;
-            if (this.countFreeHousing() < o.workers) return `县里空房不够住下 ${o.workers} 位工人`;
-        }
-        // 谈：失败就说最弱的一项
+        const block = this.offerBlock(offerId, mode);
+        if (block) return block;
+        const o = s.offers!.find((x) => x.id === offerId)!;
+        // 谈：失败就说最弱的一项，意向作废
         s.offers = s.offers!.filter((x) => x.id !== offerId);
-        if (!chance(this._rng, this.offerChance(offerId, taxBreak))) {
+        if (!chance(this._rng, this.offerChance(offerId, taxBreak, mode))) {
             const weak = this.businessEnv().parts.slice().sort((a, b) => a.value / a.max - b.value / b.max)[0];
             const why: Record<string, string> = {
                 '城市道路': '对方嫌这儿没有像样的城市道路', '能招到的工人': '对方担心招不到工人', '居民学历': '对方嫌这儿有文化的人太少',
                 '派出所': '对方担心治安', '港口': '对方嫌运货不方便', '税率': '对方嫌税太重', '县城幸福度': '对方听说这儿的人过得不太好',
             };
-            this.notice('info', `${o.company}没谈成：${why[weak.label] ?? '条件没谈拢'}`, []);
+            const reason = weak ? why[weak.label] ?? '条件没谈拢' : '条件没谈拢';
+            this.notice('info', `${o.company}没谈成：${reason}`, []);
             this.syncRng();
-            return `没谈成：${why[weak.label] ?? '条件没谈拢'}（补「${weak.label}」能提高成功率）`;
+            return weak ? `没谈成：${reason}（把「${weak.label}」补上去，下次更容易谈成）` : `没谈成：${reason}`;
         }
-        if (mode === 'land') {
-            s.pendingDeal = { offerId, defId: o.defId, company: o.company, landFee: o.landFee, taxBreak };
-            this.notice('deal', `和${o.company}签约了！在地图上给他们划一块地建${this.buildingName(o.defId)}`, []);
-        } else {
-            s.finance.funds -= o.subsidy;
-            this._flows.outflow.subsidy += o.subsidy;
-            this._subsidySpent += o.subsidy;
-            const world = this.refreshWorld();
-            const came: Resident[] = [];
-            for (let i = 0; i < o.workers; i++) {
-                const r = this.createResident(null, chance(this._rng, 0.5) ? 'M' : 'F', nextInt(this._rng, 22, 40));
-                r.education = Math.max(r.education, o.workerEdu) as 0 | 1 | 2 | 3;
-                s.residents.push(r);
-                this.assignHomes([r]);
-                if (r.homeId === null) { s.residents.pop(); continue; }
-                this._flows.inflow.immigrants += r.savings;
-                came.push(r);
-            }
-            this.fillVacancies(world);
-            s.dealsDone = (s.dealsDone ?? 0) + 1;
-            this.notice('arrive', `${o.company}送来了 ${came.length} 位熟练工人`, came.map((x) => x.id), '企业介绍过来的');
-            this.event(`招商：${o.company}送来 ${came.length} 位工人`);
-        }
+        s.pendingDeal = mode === 'land'
+            ? { offerId, defId: o.defId, company: o.company, landFee: o.landFee, taxBreak, mode }
+            : { offerId, defId: o.defId, company: o.company, landFee: 0, taxBreak, mode, subsidy: o.subsidy, workers: o.workers, workerEdu: o.workerEdu };
+        this.notice('deal', `和${o.company}签约了！在地图上给他们划一块地建${this.buildingName(o.defId)}`, []);
         this.syncRng();
         return null;
     }
@@ -896,29 +893,51 @@ export class Simulation implements SimApi {
         this.state.pendingDeal = null;
     }
 
-    /** 供地选址完成：收土地出让金、解锁这个产业、记成私营 */
-    private closeLandDeal(uid: number, deal: NonNullable<SimState['pendingDeal']>): void {
+    /** 选址交地（D032）：供地收出让金；补贴款在 onBuilt 里已扣。解锁这个产业，返回建成后要记上的东西 */
+    private closeLandDeal(deal: PendingDeal): DealOwner {
         const s = this.state;
-        s.finance.funds += deal.landFee;
-        this._investIncome += deal.landFee;
-        this._flows.inflow.investment += deal.landFee;
+        if (deal.landFee > 0) {
+            s.finance.funds += deal.landFee;
+            this._investIncome += deal.landFee;
+            this._flows.inflow.investment += deal.landFee;
+        }
         const un = (s.unlocked ??= []);
         if (un.indexOf(deal.defId) < 0) un.push(deal.defId);
         s.dealsDone = (s.dealsDone ?? 0) + 1;
-        this._dealOwners.set(uid, deal.taxBreak);
         s.pendingDeal = null;
-        this.notice('deal', `${deal.company}的${this.buildingName(deal.defId)}开工了，土地出让金 ¥${deal.landFee} 已入账`, []);
-        this.event(`招商：${deal.company}投资建${this.buildingName(deal.defId)}`);
+        const name = this.buildingName(deal.defId);
+        this.notice('deal', deal.landFee > 0
+            ? `${deal.company}的${name}开工了，土地出让金 ¥${deal.landFee} 已入账`
+            : `${deal.company}的${name}开工了，补贴 ¥${dealCost(deal)} 已拨付，建成后对方会带工人来`, []);
+        this.event(`招商：${deal.company}投资建${name}`);
+        const workers = deal.mode === 'subsidy' ? deal.workers ?? 0 : 0;
+        return { company: deal.company, taxBreak: deal.taxBreak, workers, workerEdu: deal.workerEdu ?? 0 };
     }
 
-    /** 招商来的楼：完工后记成私营；让税的话头 N 个月企业税减半 */
-    private applyDealOwner(uid: number): void {
-        if (!this._dealOwners.has(uid)) return;
-        const b = this.state.buildings.find((x) => x.uid === uid);
+    /** 招商来的楼建成：记成私营；让税的话头 N 个月企业税减半；补贴路线对方带工人来（有空房才住得下） */
+    private applyDealOwner(uid: number, owner: DealOwner | undefined): void {
+        if (!owner) return;
+        const s = this.state;
+        const b = s.buildings.find((x) => x.uid === uid);
         if (!b) return;
         b.owner = 'private';
-        if (this._dealOwners.get(uid)) b.taxBreakUntil = this.state.month + (this._cfg.progress?.invest.taxBreakMonths ?? 12);
-        this._dealOwners.delete(uid);
+        if (owner.taxBreak) b.taxBreakUntil = s.month + (this._cfg.progress?.invest.taxBreakMonths ?? 12);
+        if (owner.workers <= 0) return;
+        const came: Resident[] = [];
+        for (let i = 0; i < owner.workers; i++) {
+            const r = this.createResident(null, chance(this._rng, 0.5) ? 'M' : 'F', nextInt(this._rng, 22, 40));
+            r.education = Math.max(r.education, owner.workerEdu) as Education;
+            s.residents.push(r);
+            this.assignHomes([r]);
+            if (r.homeId === null) { s.residents.pop(); break; }   // 没空房了，剩下的不来
+            this._flows.inflow.immigrants += r.savings;
+            came.push(r);
+        }
+        this.fillVacancies(this.refreshWorld());
+        const short = owner.workers - came.length;
+        this.notice('arrive', short > 0
+            ? `${owner.company}带来了 ${came.length} 位熟练工人（还有 ${short} 位没空房，没来）`
+            : `${owner.company}带来了 ${came.length} 位熟练工人`, came.map((x) => x.id), '企业介绍过来的');
     }
 
     /** 某类消费有哪些店（按造价从便宜到贵） */
@@ -965,7 +984,8 @@ export class Simulation implements SimApi {
     }
 
     canAfford(defId: string): boolean {
-        if (this.state.pendingDeal && this.state.pendingDeal.defId === defId) return true;
+        const deal = this.state.pendingDeal;
+        if (deal && deal.defId === defId) return this.state.finance.funds >= dealCost(deal);
         const econ = this._cfg.building(defId);
         if (!econ) return true;
         return this.state.finance.funds >= econ.cost;
@@ -1050,7 +1070,7 @@ export class Simulation implements SimApi {
         for (const c of s.construction) c.left = constructionLeft(s, c);
         for (const c of s.construction.filter((x) => x.left <= 0)) {
             s.buildings.push(Simulation.newBuilding(c.uid, c.defId));
-            this.applyDealOwner(c.uid);
+            this.applyDealOwner(c.uid, c.deal);
             this.notice('info', `${this.buildingName(c.defId)}完工了`, []);
         }
         s.construction = s.construction.filter((x) => x.left > 0);
@@ -2119,8 +2139,9 @@ function clamp(min: number, max: number, v: number): number {
 }
 
 /** 日志里用的建筑名。模拟层不读 buildings.json，这里留一份小表 */
-const DEF_NAMES: Record<string, string> = {
-    house: '自建房', apartment: '商品房小区', 'school-house': '学区房',
+/** 和 buildings.json 的 name 保持一致（模拟层不读那个表）；测试会对一遍 */
+export const DEF_NAMES: Record<string, string> = {
+    hut: '土坯农房', brick: '砖瓦房', house: '自建小楼', apartment: '商品房小区', detached: '独栋', villa: '别墅', 'school-house': '学区房',
     breakfast: '早餐铺', 'milk-tea': '奶茶店', bbq: '烧烤摊', hotpot: '火锅店',
     parcel: '快递驿站', supermarket: '超市', 'net-cafe': '网吧', 'phone-shop': '手机店',
     barber: '理发店', tutoring: '补习班',
@@ -2128,7 +2149,13 @@ const DEF_NAMES: Record<string, string> = {
     center: '县发展中心', school: '学校', clinic: '卫生院', police: '派出所', bank: '银行',
     bridge: '桥', port: '港口', mine: '矿场', plaza: '广场', tree: '行道树',
     'moto-factory': '摩托车厂', 'car-factory': '汽车厂',
+    'dirt-road': '土路', road: '城市道路', 'dirt-tile': '泥土地', flagstone: '石板路', 'flower-bed': '花坛',
 };
+
+/** 交地时我们要出的钱：补贴路线 = 补贴款，供地 = 0 */
+function dealCost(d: PendingDeal): number {
+    return d.mode === 'subsidy' ? d.subsidy ?? 0 : 0;
+}
 
 const VEHICLE_NAME: Record<Vehicle, string> = {
     walk: '', ebike: '电动车', moto: '摩托车', car: '汽车',

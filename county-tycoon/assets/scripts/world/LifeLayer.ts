@@ -775,29 +775,39 @@ export class LifeLayer extends Component {
         }
     }
 
-    /** 在一个人头上冒一个「…」气泡，1.5 秒后淡出 */
+    /**
+     * 两人聊天时头顶飘一个小音符，往上飘 1.5 秒后淡出。纯装饰，不能点。
+     * 故意不用对话框 +「…」：楼顶心愿气泡也是对话框，玩家会看混。
+     */
     private spawnChatBubble(a: Agent): void {
         const node = new Node('ChatBubble');
         node.layer = Layers.Enum.UI_2D;
         const ui = node.addComponent(UITransform);
-        ui.setContentSize(18, 22);
+        ui.setContentSize(14, 16);
         ui.setAnchorPoint(0.5, 0);
         const g = node.addComponent(Graphics);
-        g.fillColor = new Color(255, 255, 255, 240);
-        g.roundRect(-9, 0, 18, 13, 5);
-        g.moveTo(-3, 1); g.lineTo(0, -4); g.lineTo(3, 1); g.close();
-        g.fill();
-        g.fillColor = new Color(120, 126, 138, 255);
-        for (const x of [-4, 0, 4]) g.circle(x, 6.5, 1.4);
-        g.fill();
+        // 先画深色描边（同形状放粗），再画白色本体，草地 / 路面上都看得见
+        const note = (c: Color, pad: number) => {
+            g.fillColor = c;
+            g.ellipse(-2, 3, 3 + pad, 2.2 + pad);          // 符头
+            g.fill();
+            g.rect(0.2 - pad, 3, 1.6 + pad * 2, 9 + pad);  // 符干
+            g.fill();
+            g.moveTo(1.8 - pad, 12 + pad); g.lineTo(5.5 + pad, 9.5); g.lineTo(5.5 + pad, 7.5 - pad); g.lineTo(1.8 - pad, 9.8 - pad); g.close();
+            g.fill();                                      // 符尾
+        };
+        note(new Color(70, 74, 86, 200), 0.9);
+        note(new Color(255, 255, 255, 255), 0);
         const op = node.addComponent(UIOpacity);
         op.opacity = 0;
         // 挂在行人节点上，跟着人走
         a.node.addChild(node);
-        node.setPosition(0, 94, 0);   // 行人图高约 94 世界像素（8 倍图 64×96），气泡在头顶
-        node.setScale(0.7, 0.7, 1);
-        tween(op).to(0.15, { opacity: 255 }).delay(1.2).to(0.3, { opacity: 0 })
-            .call(() => node.destroy())
+        const x = Math.random() < 0.5 ? -6 : 6;
+        node.setPosition(x, 92, 0);   // 行人图高约 94 世界像素（8 倍图 64×96），音符在头顶偏一侧
+        node.setScale(0.6, 0.6, 1);
+        tween(node).to(1.5, { position: new Vec3(x * 1.5, 104, 0) }).start();
+        tween(op).to(0.15, { opacity: 230 }).delay(1.0).to(0.35, { opacity: 0 })
+            .call(() => { Tween.stopAllByTarget(node); node.destroy(); })
             .start();
     }
 }

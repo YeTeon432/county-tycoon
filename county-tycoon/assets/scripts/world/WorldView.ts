@@ -468,11 +468,18 @@ export class WorldView extends Component {
             if (this._selected.flat) this.doPlace(this._selected, col, row);
             else this.previewAt(this._selected, col, row);
         } else {
-            // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做
-            const b = this._model ? this._model.getAt(col, row) : null;
+            // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做。
+            // 先按楼的画面轮廓找（点楼身也算），找不到再看脚下那一格
+            const lp = this.uiToLocal(uiX, uiY);
+            const hitUid = lp && this._buildings ? this._buildings.pickBuildingAt(lp.x, lp.y) : null;
+            const b = this._model
+                ? (hitUid !== null ? this._model.allBuildings().find((x) => x.uid === hitUid) ?? null : this._model.getAt(col, row))
+                : null;
             if (b && !b.def.flat) {
+                // 气泡只在点中气泡本身时才接管，点楼身还是看住户 / 员工
                 const k = this._alerts.get(b.uid);
-                if (k && this.onAlertTapped && this.onAlertTapped(b.uid, k)) return;
+                if (k && this.onAlertTapped && lp && this._buildings && this._buildings.hitAlert(b.uid, lp.x, lp.y)
+                    && this.onAlertTapped(b.uid, k)) return;
                 if (this.onBuildingTapped) this.onBuildingTapped(b.uid);
             }
             return;

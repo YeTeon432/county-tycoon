@@ -371,7 +371,10 @@ export class BuildingLayer extends Component {
         g.fill();
     }
 
-    /** 蓝色心愿气泡：圆角对话框 + 三个点，轻轻上下浮 */
+    /**
+     * 心愿气泡：蓝底对话框 + 白色五角星，上下浮 + 一呼一吸地放大缩小。
+     * 不用「…」：行人闲聊气泡（LifeLayer）以前也是「…」，玩家会把两者看混。
+     */
     private wishBubble(node: Node): void {
         const b = BuildingLayer.makeChild(node, 'Alert');
         (b as any)._kind = 'wish';
@@ -387,10 +390,18 @@ export class BuildingLayer extends Component {
         g.roundRect(-8, -5, 16, 10, 5);
         g.moveTo(-2, -4.5); g.lineTo(0, -9); g.lineTo(2, -4.5); g.close();
         g.fill();
-        g.fillColor = new Color(255, 255, 255, 255);
-        for (const x of [-4, 0, 4]) g.circle(x, 0, 1.3);
+        // 五角星：外半径 4.2、内半径 1.8，尖朝上
+        g.fillColor = new Color(255, 214, 72, 255);
+        for (let i = 0; i < 10; i++) {
+            const r = i % 2 === 0 ? 4.2 : 1.8;
+            const a = Math.PI / 2 + (i * Math.PI) / 5;
+            const px = Math.cos(a) * r, py = Math.sin(a) * r + 0.2;
+            if (i === 0) g.moveTo(px, py); else g.lineTo(px, py);
+        }
+        g.close();
         g.fill();
         tween(b).repeatForever(tween(b).to(0.8, { position: new Vec3(0, y0 + 2, 0) }).to(0.8, { position: new Vec3(0, y0, 0) })).start();
+        tween(b).repeatForever(tween(b).to(0.5, { scale: new Vec3(1.12, 1.12, 1) }).to(0.5, { scale: new Vec3(1, 1, 1) }).delay(0.6)).start();
     }
 
     /**
@@ -441,6 +452,39 @@ export class BuildingLayer extends Component {
     /** 某栋建筑的节点（金币特效找位置用） */
     nodeOf(uid: number): Node | null {
         return this._nodes.get(uid) ?? null;
+    }
+
+    /**
+     * 按画面点楼（坐标同行人：Objects 节点里的本地坐标）。
+     * 等距下楼身立在占地格的上方，只按地面格子判定的话，点楼身其实点到的是楼后面的格子。
+     * 轮廓近似成「图的矩形去掉底下两个角」：底边是占地菱形的下两条边。重叠时取前面的（排序键大的）。
+     */
+    pickBuildingAt(x: number, y: number): number | null {
+        const iso = this._iso;
+        if (!iso) return null;
+        const slope = iso.hh / iso.hw;
+        let best: number | null = null, bestDepth = -Infinity;
+        this._nodes.forEach((node, uid) => {
+            if (!node.isValid) return;
+            const ui = node.getComponent(UITransform)!;
+            const w = ui.contentSize.width, h = ui.contentSize.height;
+            if (w <= 0 || h <= 0) return;           // 色块楼没有尺寸，交给按格子判定
+            const dx = x - node.position.x, dy = y - node.position.y;
+            const top = h + (node.getChildByName('Alert') ? 28 : 0);   // 楼顶气泡也算这栋
+            if (dx < -w / 2 || dx > w / 2 || dy > top || dy < Math.abs(dx) * slope - 2) return;
+            const d = this._depth.get(node) ?? 0;
+            if (d > bestDepth) { bestDepth = d; best = uid; }
+        });
+        return best;
+    }
+
+    /** 点的位置是不是楼顶气泡（气泡中心在楼顶上方 12，留宽一点好点中） */
+    hitAlert(uid: number, x: number, y: number): boolean {
+        const node = this._nodes.get(uid);
+        if (!node || !node.getChildByName('Alert')) return false;
+        const h = node.getComponent(UITransform)!.contentSize.height;
+        const dx = x - node.position.x, dy = y - node.position.y - h - 12;
+        return Math.abs(dx) <= 16 && Math.abs(dy) <= 16;
     }
 
     /** 会动的东西（行人、车）挂进同一个父节点，才能和建筑互相遮挡 */

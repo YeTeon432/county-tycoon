@@ -1,5 +1,6 @@
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
+import { TopBar } from './TopBar';
 import {
     drawCard, formatNumber, IconName, makeIcon, makeLabel, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE,
 } from './UiTheme';
@@ -65,10 +66,10 @@ export class IntroCards extends Component {
         tween(so).to(0.3, { opacity: 255 }).start();
         this.node.on(Node.EventType.TOUCH_END, () => this.next(), this);
 
-        // 右上「跳过」：白色胶囊。放在顶栏下面（顶栏高 158），不和资金胶囊叠在一起
+        // 右上「跳过」：白色胶囊。放在顶栏下面（顶栏高度含灵动岛 / 胶囊避让），不和资金胶囊叠在一起
         const sw = 112, sh = 52;
         const skip = makePanelNode(this.node, 'Skip', sw, sh);
-        skip.setPosition(W / 2 - 24 - sw / 2, H / 2 - 176 - sh / 2, 0);
+        skip.setPosition(W / 2 - 24 - sw / 2, H / 2 - TopBar.HEIGHT - 18 - sh / 2, 0);
         const sg = skip.addComponent(Graphics);
         sg.fillColor = new Color(255, 255, 255, 230);
         sg.roundRect(-sw / 2, -sh / 2, sw, sh, sh / 2);

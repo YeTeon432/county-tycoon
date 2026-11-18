@@ -41,6 +41,8 @@ export interface TownView {
     gridDistance(a: number, b: number): number;
     /** 地图变了（盖楼 / 拆楼 / 拆路）之后调一次。可选，模拟层会尽量自己调 */
     refresh?(): void;
+    /** 一块还没盖的地（col,row,w,h）沿路走到某栋楼几步（放置预览的特色街道提示用，D026） */
+    spotDistance?(col: number, row: number, w: number, h: number, uid: number): number;
 }
 
 /** 每次 refresh 时重新读一遍地图，所以接 TownModel 只需要一个取建筑的函数 */
@@ -153,6 +155,26 @@ export class SimpleTownView implements TownView {
     private isRoadCell(col: number, row: number): boolean {
         if (!this.inBounds(col, row)) return false;
         return this._roadCells.has(row * this.width + col);
+    }
+
+    spotDistance(col: number, row: number, w: number, h: number, uid: number): number {
+        const start = this.doorsOf({ uid: -1, defId: '', col, row, width: w, height: h, road: false });
+        const goal = new Set(this._doors.get(uid) ?? []);
+        if (!start.length || !goal.size) return NO_ROAD;
+        const dist = new Map<number, number>();
+        const queue: number[] = [];
+        for (const c of start) if (!dist.has(c)) { dist.set(c, 1); queue.push(c); }
+        for (let head = 0; head < queue.length; head++) {
+            const cell = queue[head];
+            const d = dist.get(cell) as number;
+            if (goal.has(cell)) return d;
+            for (const next of this.neighbours(cell)) {
+                if (dist.has(next)) continue;
+                dist.set(next, d + 1);
+                queue.push(next);
+            }
+        }
+        return NO_ROAD;
     }
 
     /** 从 a 的门口出发，沿道路走到能到达的每一栋楼 */

@@ -13,7 +13,7 @@ const { ccclass } = _decorator;
  * 谁来决定什么时候调它是画面层的事（DESIGN 1）。
  *
  * secondsPerMonth 照 CLAUDE.md 的约定不写死在这里：优先用 economy.json 里的值，
- * 读不到时用 20 秒（DESIGN 1 的初值）。economy.json 由支线 A 建，读法做成容错，
+ * 读不到时用 60 秒（DESIGN 1，D025）。economy.json 由支线 A 建，读法做成容错，
  * 不存在也不影响。
  *
  * 倍速的实现是"累积时间乘以倍率"，不是"把 stepMonth 调快"——
@@ -22,7 +22,7 @@ const { ccclass } = _decorator;
 @ccclass('TimeController')
 export class TimeController extends Component {
     /** 一个游戏月对应的现实秒数 */
-    static readonly DEFAULT_SECONDS_PER_MONTH = 20;
+    static readonly DEFAULT_SECONDS_PER_MONTH = 60;
 
     /** 每次结算完一个月后回调（账单、顶栏刷新用） */
     onMonthStepped: ((report: MonthlyReport) => void) | null = null;

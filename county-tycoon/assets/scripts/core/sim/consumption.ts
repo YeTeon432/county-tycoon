@@ -30,12 +30,11 @@ export interface ConsumptionResult {
 }
 
 /**
- * 店里的服务能力。
- *
- * 按在岗比例折算，但留 40% 的保底：小店没人来上班时老板自己撑着门面，
- * 不能因为招不到人就一分钱不挣（否则新手期整条街都是 0 收入，玩家看不到反馈）。
+ * 店里的服务能力（人次 / 月）= capacity × 在岗比例。
+ * D026 真实账目起没有「老板自己撑门面」的保底：没人上班就不营业（工资也不用发）。
+ * 新手期的店靠过路客（outsideShare）和少量店员维持，见 DESIGN 25。
  */
-export const OWNER_RUN_MIN = 0.4;
+export const OWNER_RUN_MIN = 0;
 
 export function shopCapacity(b: BuildingSim, econ: BuildingEcon, staff: number): number {
     let required = 0;
@@ -106,10 +105,18 @@ export function consumeForResident(
             const cap = shopCapacity(s.building, econ, ctx.staff.get(s.building.uid) ?? 0);
             const servedNow = ctx.served.get(s.building.uid) ?? 0;
             if (servedNow >= cap) continue;
-            const share = amount * (s.weight / totalW);
-            const pay = Math.min(share, left);
+            // 人次 = 花的钱 ÷ 客单价（D026）；不能超过店里剩下的接待能力。免费的地方（广场）算 1 人次、不花钱
+            let pay = Math.min(amount * (s.weight / totalW), left);
+            let visits = 1;
+            if (econ.price > 0) {
+                pay = Math.min(pay, (cap - servedNow) * econ.price);
+                visits = pay / econ.price;
+            } else {
+                pay = 0;
+            }
             ctx.revenue.set(s.building.uid, (ctx.revenue.get(s.building.uid) ?? 0) + pay);
-            ctx.served.set(s.building.uid, servedNow + 1);
+            ctx.served.set(s.building.uid, servedNow + visits);
+            if (econ.price <= 0) { left = 0; continue; }
             left -= pay;
             result.spent += pay;
         }

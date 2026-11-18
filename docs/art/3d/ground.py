@@ -6,6 +6,7 @@
   0~3    草地（3 号带花）            4~19 城市道路 4+mask        20~35 土路 20+mask
   36~51  水 36+mask（mask = 四邻是陆地的位，有岸）              52 bridge-gx  53 bridge-gy
   54~56  mountain-0..2 石地   57~58 ore-0..1 矿点   59~62 forest-0..3 林地   63~64 farm-0..1   65 pond
+  66 dirt-tile 泥土地   67 flagstone 石板路   68 flower-bed 花坛（T218，玩家可铺的装饰地块）
 道路 mask 位：1 左上邻(col-1)  2 右上邻(row-1)  4 右下邻(col+1)  8 左下邻(row+1)
 
 画法：每个像素反算格内坐标 (u, v)（u 沿 gx 往右下、v 沿 gy 往左下，0..1），按 (u, v) 取色。
@@ -278,6 +279,70 @@ def pond_fn():
         return c
     return f
 
+# ---------------------------------------------------------------- 装饰地块（T218）
+def dirt_tile_fn():
+    """泥土地：整格夯实的土，深浅斑驳 + 碎石，没有车辙（和土路区分开）。"""
+    pebbles = scatter(511, 10, 0.08, 0.92)
+    def f(u, v):
+        t = per_noise(u, v, 17) * 0.5 + 0.5
+        c = mix(C['dirt_d'], C['dirt'], 0.3 + 0.7 * t)
+        for cu, cv, k in pebbles:
+            a, b = pdist(u, v, cu, cv)
+            sx, sy = a - b, (a + b) * 2
+            r = 0.018 + 0.014 * k
+            if sx * sx + sy * sy < r * r:
+                c = C['dirt_l'] if sy < 0 else C['dirt_d']
+        return c
+    return f
+
+def flagstone_fn():
+    """石板路：3×3 错缝方石板，浅灰带一点深浅，缝里冒点草。"""
+    def f(u, v):
+        n = 3
+        row = int(v * n)
+        uu = (u * n + (0.5 if row % 2 else 0.0)) % 1      # 隔行错半块
+        vv = (v * n) % 1
+        gap = 0.07
+        if uu < gap or vv < gap:
+            k = per_noise(u, v, 23)
+            return C['grass_d'] if k > 0.45 else C['stone_d']
+        cell = (int(u * n + (0.5 if row % 2 else 0.0)) * 7 + row * 13) % 5   # 每块石板深浅不同
+        base = mix(C['stone'], C['stone_l'], 0.25 + cell * 0.15)
+        t = per_noise(u, v, 29) * 0.5 + 0.5
+        c = mix(base, C['stone_d'], 0.15 * (1 - t))
+        if uu < gap + 0.04 or vv < gap + 0.04:            # 石板上边缘受光
+            c = mix(c, C['curb'], 0.35)
+        return c
+    return f
+
+def flower_bed_fn():
+    """花坛：一圈矮砖沿，里面深色土 + 成丛的小花（红黄粉白）和叶子。"""
+    blooms = scatter(733, 70, 0.16, 0.84)
+    leaves = scatter(734, 40, 0.14, 0.86)
+    cols = [(232, 84, 74), C['flower_y'], C['flower_p'], C['flower_w']]
+    def f(u, v):
+        edge = min(u, v, 1 - u, 1 - v)
+        if edge < 0.06:
+            return C['grass_d'] if edge < 0.02 else C['pave']           # 外沿草边 + 浅色砖沿
+        if edge < 0.1:
+            return C['pave_d']                                         # 砖沿内侧阴影
+        t = per_noise(u, v, 41) * 0.5 + 0.5
+        c = mix(C['soil_d'], C['soil'], 0.4 + 0.6 * t)
+        for cu, cv, k in leaves:
+            a, b = pdist(u, v, cu, cv)
+            sx, sy = a - b, (a + b) * 2
+            if sx * sx + sy * sy < 0.0045:
+                c = C['forest_d'] if sy > 0 else C['forest']
+        for cu, cv, k in blooms:
+            a, b = pdist(u, v, cu, cv)
+            sx, sy = a - b, (a + b) * 2
+            d = sx * sx + sy * sy
+            if d < 0.0024:
+                c = cols[int(k * 4)]
+                if d < 0.0004: c = C['flower_y'] if int(k * 4) != 1 else (232, 140, 40)   # 花心
+        return c
+    return f
+
 # ---------------------------------------------------------------- 组装
 frames = []; names = {}
 def add(name, fn):
@@ -297,7 +362,8 @@ for i in range(2): add(f'ore-{i}', ore_fn(300 + i))
 for i in range(4): add(f'forest-{i}', forest_fn(400 + i))
 for i in range(2): add(f'farm-{i}', farm_fn(i))
 add('pond', pond_fn())
-assert len(frames) == 66, len(frames)
+add('dirt-tile', dirt_tile_fn()); add('flagstone', flagstone_fn()); add('flower-bed', flower_bed_fn())
+assert len(frames) == 69, len(frames)
 
 COLS = 16                       # 每行 16 帧 → 图集宽 2048（手机 GPU 纹理上限常见 4096）
 rows = (len(frames) + COLS - 1) // COLS

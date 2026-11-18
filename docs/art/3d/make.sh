@@ -6,7 +6,7 @@ cd "$(dirname "$0")/../../.."
 BL=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 B=docs/art/build3d; R=county-tycoon/assets/resources
 mkdir -p $B/buildings $B/actors $B/ground
-for s in homes_shops civic_industry terrain_obj; do
+for s in homes_shops civic_industry terrain_obj construction housing; do
   "$BL" -b -P docs/art/3d/$s.py -- $B/buildings "$@" 2>&1 | grep -E '^\[(ok|warn)\]|Error|Traceback' || true
 done
 "$BL" -b -P docs/art/3d/actors.py -- $B/actors "$@" 2>&1 | grep -E '^\[(ok|warn)\]|Error|Traceback' || true

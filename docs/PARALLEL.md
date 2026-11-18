@@ -26,7 +26,7 @@
 **通用检查**（所有线合并前都要过）：
 ```sh
 cd county-tycoon
-node "$(find /Applications/Cocos/Creator/3.8.8 -path '*node_modules/typescript/bin/tsc' | head -1)" --noEmit --skipLibCheck -p tsconfig.json
+node /Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/Resources/app.asar.unpacked/node_modules/typescript/bin/tsc --noEmit --skipLibCheck -p tsconfig.json   # 要 5.8 版；find 有时先找到 4.x 那个，会报 cc.d.ts 语法错
 ```
 没有输出 = 通过。
 

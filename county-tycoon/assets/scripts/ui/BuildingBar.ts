@@ -30,13 +30,14 @@ const LEVEL_NAME: Record<TownLevel, string> = {
 };
 
 /** economy.json 里建造栏要用的两项 */
-interface Econ { cost: number; unlock: TownLevel }
+interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean }
 
 interface Card {
     def: BuildingDef;
     tab: string;
     node: Node;
-    g: Graphics;
+    /** 选中（卡片底在共用的 _bgG 里画，见 drawAllBgs） */
+    selected: boolean;
     /** 缩略图（拿到 ArtLibrary 之后才有图） */
     thumb: Sprite;
     /** 没有贴图时的色块 */
@@ -45,6 +46,8 @@ interface Card {
     price: Label;
     coin: Sprite;
     lock: Sprite;
+    /** 分层合批（T212）：这张卡在 底 / 图 / 图标 / 文字 四层里的影子节点，每帧跟 node 同步位置和显隐 */
+    holders: Node[];
     /** 上次画的状态，变了才重画 */
     state: string;
 }
@@ -93,6 +96,15 @@ export class BuildingBar extends Component {
     private _tab = BAR_TABS[1].key;
     private _tabs: { key: string; node: Node; g: Graphics; label: Label; w: number }[] = [];
     private _cardLayer: Node | null = null;
+    /**
+     * 分层合批（T212）：所有卡片的底色画在一层、缩略图一层、图标一层、文字一层。
+     * 以前每张卡「底 → 图 → 字 → 图标 → 字」交替，换一种就断一次合批，10 张卡约 50 次绘制；
+     * 分层后同一层挨着画，能合的都合上。卡片节点本身只管位置、显隐和点击。
+     */
+    private _layers: Node[] = [];
+    private _bgG: Graphics | null = null;
+    /** 上次画卡片底时的「位置 + 选中」签名，变了才重画 */
+    private _bgSig = '';
 
     private _scrollX = 0;
     private _dragging = false;
@@ -125,6 +137,10 @@ export class BuildingBar extends Component {
         this.buildTabs(W, H);
         this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H);
         this._cardLayer.setPosition(0, -H / 2 + 20 + BuildingBar.ITEM_H / 2, 0);
+        // 金币和小锁是两张图：分两层，不然一张卡里交替出现就断批
+        this._layers = ['BgLayer', 'ThumbLayer', 'CoinLayer', 'LockLayer', 'TextLayer'].map((n) => makePanelNode(this._cardLayer!, n, W, BuildingBar.ITEM_H));
+        // 所有卡片的白底画在同一个 Graphics 里（一个 Graphics 一次绘制，十个就是十次）
+        this._bgG = makePanelNode(this._layers[0], 'AllBgs', W, BuildingBar.ITEM_H).addComponent(Graphics);
         for (const def of defs) this._cards.push(this.buildCard(def));
         this.buildDemolishButton(W, H);
         this.registerBarScroll();
@@ -139,7 +155,7 @@ export class BuildingBar extends Component {
     /** 接模拟层：买得起吗、城镇等级。可以晚于 build 调 */
     bindSim(sim: SimApi): void {
         this._sim = sim;
-        this.refreshCards(true);
+        this.applyTab();
     }
 
     /** 接贴图仓库（WorldView 的那一份，别新建，省一份纹理内存）。贴图没加载完也可以先给 */
@@ -165,16 +181,17 @@ export class BuildingBar extends Component {
     private loadEconomy(): void {
         resources.load('config/economy', JsonAsset, (err, asset) => {
             if (err || !asset || !asset.json) return;
-            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel }[] }).buildings;
+            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean }[] }).buildings;
             if (!Array.isArray(list)) return;
             for (const b of list) {
                 if (!b || typeof b.id !== 'string') continue;
                 this._econ.set(b.id, {
                     cost: typeof b.cost === 'number' ? b.cost : 0,
                     unlock: LEVEL_ORDER.indexOf(b.unlock as TownLevel) >= 0 ? b.unlock as TownLevel : 'village',
+                    selfBuilt: b.selfBuilt === true,
                 });
             }
-            this.refreshCards(true);
+            this.applyTab();
         });
     }
 
@@ -237,7 +254,7 @@ export class BuildingBar extends Component {
             t.g.fill();
             t.label.color = on ? UI_PALETTE.white : UI_COLOR.textDim;
         }
-        for (const c of this._cards) c.node.active = c.tab === this._tab;
+        for (const c of this._cards) c.node.active = c.tab === this._tab && !this.isHidden(c.def);
         this.applyScroll();
         this.refreshCards(true);
     }
@@ -253,32 +270,35 @@ export class BuildingBar extends Component {
         const w = BuildingBar.ITEM_W;
         const h = BuildingBar.ITEM_H;
         const node = makePanelNode(this._cardLayer!, `Item_${def.id}`, w, h);
-        const g = node.addComponent(Graphics);
+        const holders = this._layers.map((l) => makePanelNode(l, `Item_${def.id}`, w, h));
+        const [bgH, thumbH, coinH, lockH, textH] = holders;
 
         // 图区：卡片上部 116×96
         const imgW = w - 16, imgH = 96;
         const imgY = h / 2 - 8 - imgH / 2;
-        const swatchNode = makePanelNode(node, 'Swatch', imgW, imgH);
+        const swatchNode = makePanelNode(bgH, 'Swatch', imgW, imgH);
         swatchNode.setPosition(0, imgY, 0);
         const swatch = swatchNode.addComponent(Graphics);
         this.drawSwatch(swatch, def, imgW, imgH);
 
-        const thumbNode = makePanelNode(node, 'Thumb', imgW, imgH);
+        const thumbNode = makePanelNode(thumbH, 'Thumb', imgW, imgH);
         thumbNode.setPosition(0, imgY, 0);
         const thumb = thumbNode.addComponent(Sprite);
         thumb.sizeMode = Sprite.SizeMode.CUSTOM;
         thumbNode.active = false;
 
-        const lock = makeIcon(node, 'lock', 24, UI_COLOR.textDim);
+        const lock = makeIcon(lockH, 'lock', 24, UI_COLOR.textDim);
         lock.node.setPosition(-imgW / 2 + 16, imgY + imgH / 2 - 16, 0);   // 图区左上角的小锁，不挡缩略图
         lock.node.active = false;
 
-        const name = makeLabel(node, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
+        const name = makeLabel(textH, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
         name.isBold = true;
+        name.cacheMode = Label.CacheMode.BITMAP;   // 进动态合图，卡片文字能连成一批（T212）
         name.node.setPosition(0, -h / 2 + 52, 0);
 
-        const coin = makeIcon(node, 'coin', 22);
-        const price = makeLabel(node, 'Price', '', UI_FONT.small - 1, UI_COLOR.text, w - 40);
+        const coin = makeIcon(coinH, 'coin', 22);
+        const price = makeLabel(textH, 'Price', '', UI_FONT.small - 1, UI_COLOR.text, w - 40);
+        price.cacheMode = Label.CacheMode.BITMAP;
         price.node.setPosition(10, -h / 2 + 22, 0);
         coin.node.setPosition(-w / 2 + 18, -h / 2 + 22, 0);
 
@@ -287,7 +307,7 @@ export class BuildingBar extends Component {
             this.handleItemClick(def);
         }, this);
 
-        return { def, tab: BuildingBar.tabOf(def), node, g, thumb, swatch, name, price, coin, lock, state: '' };
+        return { def, tab: BuildingBar.tabOf(def), node, selected: false, thumb, swatch, name, price, coin, lock, holders, state: '' };
     }
 
     /** 没有贴图时的占位：一块等距菱形色块（按占格画大小），比方块更像"一块地上的楼" */
@@ -346,6 +366,12 @@ export class BuildingBar extends Component {
 
     /** 盖不了的原因（放置预览用）：没解锁 → 「镇上解锁」；钱不够 → 「预算不够」；能盖 → null */
     blockReason(def: BuildingDef): string | null {
+        const sim0 = this._sim;
+        if (sim0 && sim0.isUnlocked && !sim0.isUnlocked(def.id)) {
+            // D026：没研究过
+            const r = sim0.researchList ? sim0.researchList().find((x) => x.unlocks.indexOf(def.id) >= 0) : null;
+            return r ? `先在县发展中心研究「${r.name}」` : '还不能盖';
+        }
         const locked = this.isLocked(def);
         if (locked) return `${LEVEL_NAME[locked.unlock]}解锁`;
         if (this._sim && !this._sim.canAfford(def.id)) {
@@ -355,9 +381,23 @@ export class BuildingBar extends Component {
         return null;
     }
 
+    /** 既没解锁、也没有研究能解锁它（县发展中心这种开局自带的）：不在底栏出现 */
+    private isHidden(def: BuildingDef): boolean {
+        if (this._econ.get(def.id)?.selfBuilt) return true;   // 砖瓦房、自建小楼：只能住户自己翻盖（D026）
+        const sim = this._sim;
+        if (!sim || !sim.isUnlocked || !sim.researchList || sim.isUnlocked(def.id)) return false;
+        return !sim.researchList().some((r) => r.unlocks.indexOf(def.id) >= 0);
+    }
+
+    /** 研究完了要刷新底栏（UiRoot 在研究完成时调） */
+    refreshUnlocks(): void {
+        this.applyTab();
+    }
+
     private isLocked(def: BuildingDef): Econ | null {
         const e = this._econ.get(def.id);
         const sim = this._sim;
+        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village' });
         if (!e || !sim) return null;
         return LEVEL_ORDER.indexOf(e.unlock) > LEVEL_ORDER.indexOf(sim.state.level) ? e : null;
     }
@@ -377,28 +417,9 @@ export class BuildingBar extends Component {
     }
 
     private drawCard(c: Card, locked: boolean, afford: boolean, selected: boolean): void {
-        const w = BuildingBar.ITEM_W, h = BuildingBar.ITEM_H;
-        const g = c.g;
-        g.clear();
-        if (selected) drawShadow(g, -w / 2, -h / 2, w, h, UI_RADIUS, 3);
-        g.fillColor = selected ? UI_COLOR.selectedFill : UI_PALETTE.white;
-        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS);
-        g.fill();
-        g.lineWidth = selected ? 4 : 2;
-        g.strokeColor = selected ? UI_PALETTE.blue : UI_COLOR.border;
-        g.roundRect(-w / 2, -h / 2, w, h, UI_RADIUS);
-        g.stroke();
-        // 图区浅底
-        const imgW = w - 16, imgH = 96, imgY = h / 2 - 8 - imgH / 2;
-        g.fillColor = selected ? new Color(214, 232, 250, 255) : UI_COLOR.block;
-        g.roundRect(-imgW / 2, imgY - imgH / 2, imgW, imgH, 12);
-        g.fill();
-        if (selected) {
-            // 右上角对勾徽章
-            g.fillColor = UI_PALETTE.blue;
-            g.circle(w / 2 - 14, h / 2 - 14, 15);
-            g.fill();
-        }
+        const h = BuildingBar.ITEM_H;
+        c.selected = selected;
+        this._bgSig = '';   // 底色在 lateUpdate 里统一重画
         this.setCheck(c, selected);
 
         // 用户要求（2026-11-14）：卡片一律正常显示、都标价，不变灰；
@@ -421,9 +442,10 @@ export class BuildingBar extends Component {
     }
 
     private setCheck(c: Card, on: boolean): void {
-        let check = c.node.getChildByName('Icon_check');
+        const iconH = c.holders[2];   // 对勾和金币一层（都是小图标，放哪层都行）
+        let check = iconH.getChildByName('Icon_check');
         if (!check && on) {
-            const s = makeIcon(c.node, 'check', 18);
+            const s = makeIcon(iconH, 'check', 18);
             s.node.setPosition(BuildingBar.ITEM_W / 2 - 14, BuildingBar.ITEM_H / 2 - 14, 0);
             check = s.node;
         }
@@ -452,7 +474,7 @@ export class BuildingBar extends Component {
     }
 
     private visibleCards(): Card[] {
-        return this._cards.filter((c) => c.tab === this._tab);
+        return this._cards.filter((c) => c.tab === this._tab && c.node.active);
     }
 
     private contentWidth(): number {
@@ -522,6 +544,22 @@ export class BuildingBar extends Component {
         InputGuard.add(btn.node);
     }
 
+    get defs(): readonly BuildingDef[] {
+        return this._defs;
+    }
+
+    /** 外部选中某种建筑（招商供地选址用）：切到它的页签并选中 */
+    selectById(id: string): boolean {
+        const c = this._cards.find((x) => x.def.id === id);
+        if (!c) return false;
+        this._tab = c.tab;
+        this.applyTab();
+        if (!c.node.active) { c.node.active = true; this.applyScroll(); }
+        if (this._selectedId === id) return true;
+        this.handleItemClick(c.def);
+        return true;
+    }
+
     /** 取消所有选中（放好一栋 / 外部取消时调） */
     clearSelection(): void {
         this._selectedId = null;
@@ -570,6 +608,51 @@ export class BuildingBar extends Component {
         if (this._pollT >= 0.3) {
             this._pollT = 0;
             if (this._sim) this.refreshCards();
+        }
+    }
+
+    /** 卡片挪了位置 / 换了页签：四层里的影子节点跟上（点击、滚动都在 update 之前处理，这里同帧生效） */
+    protected lateUpdate(): void {
+        let sig = '';
+        for (const c of this._cards) {
+            const p = c.node.position, on = c.node.active;
+            for (const h of c.holders) {
+                if (h.active !== on) h.active = on;
+                if (on && (h.position.x !== p.x || h.position.y !== p.y)) h.setPosition(p);
+            }
+            if (on) sig += `${Math.round(p.x)},${p.y},${c.selected ? 1 : 0};`;
+        }
+        if (sig !== this._bgSig) { this._bgSig = sig; this.drawAllBgs(); }
+    }
+
+    /** 所有可见卡片的白底 + 描边 + 图区浅底 + 选中的投影和对勾徽章，一个 Graphics 画完 */
+    private drawAllBgs(): void {
+        const g = this._bgG;
+        if (!g) return;
+        g.clear();
+        const w = BuildingBar.ITEM_W, h = BuildingBar.ITEM_H;
+        const imgW = w - 16, imgH = 96, imgY = h / 2 - 8 - imgH / 2;
+        const vw = view.getVisibleSize().width;
+        for (const c of this._cards) {
+            if (!c.node.active) continue;
+            const x = c.node.position.x, y = c.node.position.y, sel = c.selected;
+            if (x < -vw / 2 - w || x > vw / 2 + w) continue;   // 屏幕外的不画
+            if (sel) drawShadow(g, x - w / 2, y - h / 2, w, h, UI_RADIUS, 3);
+            g.fillColor = sel ? UI_COLOR.selectedFill : UI_PALETTE.white;
+            g.roundRect(x - w / 2, y - h / 2, w, h, UI_RADIUS);
+            g.fill();
+            g.lineWidth = sel ? 4 : 2;
+            g.strokeColor = sel ? UI_PALETTE.blue : UI_COLOR.border;
+            g.roundRect(x - w / 2, y - h / 2, w, h, UI_RADIUS);
+            g.stroke();
+            g.fillColor = sel ? new Color(214, 232, 250, 255) : UI_COLOR.block;
+            g.roundRect(x - imgW / 2, y + imgY - imgH / 2, imgW, imgH, 12);
+            g.fill();
+            if (sel) {
+                g.fillColor = UI_PALETTE.blue;
+                g.circle(x + w / 2 - 14, y + h / 2 - 14, 15);
+                g.fill();
+            }
         }
     }
 

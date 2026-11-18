@@ -129,7 +129,9 @@ export class Panel extends Component {
         content.setPosition(0, ch / 2 - Panel.HEAD_H - contentH / 2, 0);
         this.content = content;
 
-        InputGuard.add(root);
+        // 只遮挡卡片本身，遮罩区不登记——让点遮罩时 WorldView 仍能接到 tap，
+        // 从而实现「点空处关面板 / 点建筑直接开新详情」（原先登记 root = 全屏，导致任何点击都被拦截）
+        if (card) InputGuard.add(card);
     }
 
     private buildHeader(card: Node, cw: number, ch: number, title: string, subtitle: string): void {
@@ -225,7 +227,7 @@ export class Panel extends Component {
     }
 
     protected onDestroy(): void {
-        InputGuard.remove(this.node);
+        if (this.card) InputGuard.remove(this.card);
         // 动画进行中被 UiRoot 直接销毁时，别让 tween 继续改已销毁的节点
         // 销毁时子节点可能已经先被销毁（组件表已清空），先查 isValid 再碰，否则 getComponent 会抛错
         if (this.card && this.card.isValid) Tween.stopAllByTarget(this.card);

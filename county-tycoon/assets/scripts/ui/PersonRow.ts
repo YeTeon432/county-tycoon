@@ -41,7 +41,7 @@ export function buildPersonRow(
     const name = makeLabelLeft(row, 'Name', r.name, UI_FONT.body, UI_COLOR.link, 220);
     name.node.setPosition(-W / 2 + 66, 14, 0);
 
-    const job = r.jobTitle ? r.jobTitle : (r.age >= 18 && r.age < 60 ? '待业' : '—');
+    const job = r.jobTitle ? r.jobTitle : (r.idle ? '赋闲' : r.age >= 18 && r.age < 60 ? '待业' : '—');
     const sub = makeLabelLeft(row, 'Info', info ?? `${r.age} 岁 · ${job}`, UI_FONT.small, UI_COLOR.textDim, W - 230);
     sub.node.setPosition(-W / 2 + 66, -16, 0);
 

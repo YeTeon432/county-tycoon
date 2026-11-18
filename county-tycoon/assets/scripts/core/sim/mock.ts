@@ -38,7 +38,7 @@ export class MockSim implements SimApi {
         s.finance.funds += tax - 120;
         const report: MonthlyReport = {
             month: s.month,
-            income: { business: tax, industry: 0, income: 0, land: 0, investment: 0 },
+            income: { business: tax, industry: 0, income: 0, land: 0, investment: 0, profit: 0, rent: 0 },
             expense: { construction: 0, upkeep: 120, publicWages: 0, pension: 0, promotion: 0 },
             populationBefore: before, populationAfter: s.residents.length,
             events: [{ month: s.month, text: '（假数据）张伟还在找工作' }],
@@ -48,7 +48,7 @@ export class MockSim implements SimApi {
         return report;
     }
 
-    onBuilt(uid: number, defId: string): boolean {
+    onBuilt(uid: number, defId: string, _dayProgress = 0): boolean {
         if (s_find(this.state, uid)) return true;
         this.state.buildings.push({ uid, defId, residentIds: [], workerIds: [], lastRevenue: 0, lastCustomers: 0, lastTax: 0, reputation: 50 });
         return true;

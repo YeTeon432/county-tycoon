@@ -28,6 +28,11 @@ export interface SystemInfo {
     /** 设备像素比，做高清 UI 时用 */
     pixelRatio: number;
     safeArea: SafeArea;
+    /**
+     * 右上角宿主胶囊按钮（微信「··· ◎」/ 抖音同类）的位置，逻辑像素，坐标系同 safeArea。
+     * 没有胶囊的环境（浏览器）为 null。顶栏要整体放到它下面，否则会被盖住。
+     */
+    menuButton?: SafeArea | null;
     /** 宿主报上来的字符串（iOS / Android / devtools……），只用于日志和埋点 */
     platform: string;
 }
@@ -163,6 +168,17 @@ export function createMiniGamePlatform(api: any, name: PlatformName): IPlatform 
                 console.warn(`[platform:${name}] getSystemInfoSync 失败`, e);
             }
             cached = normalizeSystemInfo(raw);
+            try {
+                const m = typeof api.getMenuButtonBoundingClientRect === 'function' ? api.getMenuButtonBoundingClientRect() : null;
+                if (m && Number(m.bottom) > 0) {
+                    cached.menuButton = {
+                        left: Number(m.left) || 0, top: Number(m.top) || 0,
+                        right: Number(m.right) || 0, bottom: Number(m.bottom) || 0,
+                    };
+                }
+            } catch (e) {
+                console.warn(`[platform:${name}] getMenuButtonBoundingClientRect 失败`, e);
+            }
             return cached;
         },
 

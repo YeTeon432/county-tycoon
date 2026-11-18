@@ -36,7 +36,7 @@ export const GROUND_FRAME_COUNT = 36;
  *   52 桥面 gx（连左上↔右下）  53 桥面 gy（连右上↔左下）
  *   54~56 山  57~58 矿点  59~62 树林  63~64 农田  65 池塘
  */
-export const GROUND_FRAME_COUNT_TERRAIN = 66;
+export const GROUND_FRAME_COUNT_TERRAIN = 69;
 
 export class ArtLibrary {
     private readonly _buildings = new Map<string, SpriteFrame>();

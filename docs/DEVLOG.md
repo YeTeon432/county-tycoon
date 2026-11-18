@@ -178,3 +178,99 @@
 - **游戏内实测**（编辑器 + 无头 Chrome 真实点击，清空存档）：开场 3 张卡片正常翻页，资金 ¥0 → ¥100,000；选奶茶店点地块出预览和确认条；换朝向图跟着变；确定后扣 4,000、楼盖下、确认条消失。截图 `docs/ui-acceptance/d022-intro-preview.png`、`d022-place-confirm.png`。
 - **没在游戏里看到的**：电动车 / 摩托 / 汽车上街（开局要先升到「镇上」才能盖摩托车厂，再等居民攒钱买车，实测要玩很久），只有模拟测试和快进覆盖。
 - **问题**：未解锁规则只在界面层拦，模拟层 `onBuilt` 不看等级（支线 B 建议两边一致）；顶栏提示条在有调试日志时和预览左上的调试文字重叠（只在编辑器预览出现）。
+
+## 2026-11-15 真机预览（T103）+ 真机打磨（D024）
+- **T103 ✅**：命令行构建微信小游戏（`CocosCreator --build configPath=build-configs/wechatgame.json`，release，主包 3.0 MB / 分包 3.4 MB），用开发者工具 CLI `preview` 出二维码。
+  - 踩坑 1：Cocos 默认 AppID 是占位号，扫码必然失败。
+  - 踩坑 2：换成**小游戏测试号**后游戏能跑（vConsole 里读档、175 张图都正常，无报错），但微信总在上面盖一层「加载失败，请检查网络后重试」。只有 4 行代码的空白小游戏也一样 → 不是我们的包的问题。注册正式小游戏 AppID（`wx54ea4d61f9840518`）后正常。开发者工具登录的号要在后台「成员管理」加为开发者。
+  - debug 构建主包 6 MB 超 4 MB 上限，必须 release。
+  - 用户目录下有个非官方的 Cocos 扩展 `runtime-bridge`（11-12 装的，构建时会跑），检查过构建产物里没有它注入的代码，暂不处理，记一笔。
+- **用户真机反馈 4 点 → D024**：行人抽动（T411）、灵动岛遮挡（T412）、手势（T413）、居民没事干 / 有钱可以不上班（T414、T415）。
+- 改动文件：`world/LifeLayer.ts`（重写为日程 + 路线）、`world/WorldView.ts`（手势）、`core/DayClock.ts`（新）、`core/GameRoot.ts`（接钟）、`ui/TopBar.ts`（避让 + 钟点）、`ui/IntroCards.ts`、`ui/ZoomButtons.ts`、`ui/UiRoot.ts`（暴露 clock）、`ui/PersonRow.ts` / `ResidentPanel.ts` / `ResidentListPanel.ts`（「赋闲」）、`platform/types.ts`（menuButton）、`core/sim/types.ts`（合同：`idle`）、`core/sim/config.ts` / `Simulation.ts`（赋闲规则）、`config/economy.json` / `traffic.json`。
+- **验证**：tsc 通过（sweep.ts 的 padStart 老问题除外）；模拟测试 60/60（新增赋闲 3 条；车辆测试的配置里关掉赋闲，因为它们给居民 5 万存款测买车）；50 年快进正常（1025 人、心情 68）。网页版无头 Chrome 跑一个月：无报错；钟点 6→22 点；街上人数 上午 5 → 下午 3 点 0（都在上班）→ 晚上 3；店顶冒金币。手势、刘海避让只能真机看。
+- **问题 / 待看**：赶路倍率让长路的人走得快（最多 2.5 倍），真机看是否别扭；+/- 按钮档位仍是 2/3/4/5；`ResidentListPanel` 的「待业」筛选里包含赋闲的人（行里显示「赋闲」）。
+- **并行注意**：这次在 main 上直接改了支线 A（core/sim）、B（ui）、D（platform）的文件和合同 types.ts，各支线开工前要先 rebase main。
+- **D025**：用户觉得 20 秒一天不行，改为 60 秒（economy.json `secondsPerMonth`、config.ts / TimeController 默认值）；traffic.json `trip.targetSeconds` 4 → 8。
+- 加 3 倍速：`Speed` 类型加 3（合同外，TopBar 里定义），快进按钮 1×→2×→3×→1× 循环，暂停中点快进直接 2×；按钮右下角红色角标「×2 / ×3」。人走路也跟着倍速。
+
+## 2026-11-15 核心玩法讨论（D026）
+- 和用户讨论「怎么发展这个城市」。结论：核心 = 满足居民心愿 → 幸福度 → 人口流动；加产业研究、招商谈判（供地 / 补贴 / 让税）、特色街道指引、阶段目标、住房 5 级、施工工期、真实账目、开局县政府、公告栏 + 大公示。PRD 升 v0.5，DESIGN 加 16～26 节，TASKS 加 M3（T501～T531），都标为草案。
+- 查代码发现账目不真实：私营工资凭空发、店铺营业额交税后消失；早餐铺月营业额 1,440，两名店员工资 5,600。真实账目（T501）排第一。
+- 待用户定：县政府的名字（D018 审核用词）、施工工期按天和「一天 = 一个月」的关系、开工顺序。
+
+## 2026-11-15 M3 第一批：地基（T501 / T503 / T504 / T505，T502 部分）
+- **T501 真实账目**：私营工资改为雇主出（记在楼的账上）；店铺 / 工厂一本账：营业额（县里人 + 过路客）− 工资 − 成本（costRate，流出）− 税 − 维护 = 利润，县属的进财政；连续亏 3 个月裁 1 人（裁完暂停招人 3 个月）；没有店员不营业（去掉「老板撑门面 40%」）；人次 = 花的钱 ÷ 客单价；房租进财政；遗产给配偶 / 孩子；`Simulation.moneyInCounty()` + `lastFlows` 守恒测试。合同 types.ts：BuildingSim 加 owner / lastWages / lastCost / lastUpkeep / lastProfit / lastOutside / lossMonths / freezeMonths，BuildingEcon 加 costRate / buildDays，MonthlyReport.income 加 profit / rent，加 MoneyFlows。
+- **T502**：开局在路北正中放「县发展中心」（2×2），改名；面板页签放第二批。
+- **T503 施工**：onBuilt 先进 `state.construction`（工期 1 / 2 / 3 天按大小，`economy.json: buildDays`），完工那天才进 buildings、发通知；`SimApi.constructionProgress`；画面上工地半透明 + 头顶进度条，行人不往工地走。
+- **T504 幸福度**：界面「心情」改叫「幸福度」；分项 `moodParts`（档案里显示开心 / 不开心的原因）；幸福度 < 30 → 想走（吐槽 = 扣分最多两项、公告、楼顶红「!」、档案红条）→ 3 天内回到 35 留下，否则全家搬走；迁入按县城幸福度折线（< 40 没人来）× 口碑（有人走 −0.05，每月衰减 10%）。取代「心情 < 20 三个月 / 失业 6 个月就走」。
+- **T505**：`ui/NoticeLayer.ts`：左上公告栏（停 4 秒收成小喇叭，红点，点开看最近 12 条，新档轮播玩法提示）；来人 / 走人大公示卡（头像、名字年龄、理由，2.5 秒，超过 3 人合并）。`MonthlyReport.notices`。
+- 建筑详情加「上月账目」明细和「上月利润」；账单加「县属店厂利润」「住房租金」两行。
+- **验证**：模拟测试 71/71（新增真实账目 5 条、幸福度 4 条、施工 2 条）；tsc 通过（注意：要用 Creator 自带的 5.8 版 tsc，`find | head -1` 有时找到 4.x 那个会报一堆 cc.d.ts 语法错，PARALLEL.md 的检查命令该改）；50 年快进通过；网页版无头 Chrome：开局县发展中心、来人卡片、想走公告 + 楼顶红「!」都正常，无报错。截图 `docs/ui-acceptance/d026-arrive-card.png`、`d026-notice-warn.png`。
+- **问题**：前 10 年发展慢（见 DESIGN 25.1）；楼顶「!」放大 4 倍时偏大；脚手架美术没有。
+- **施工动画**（用户：应该是塔吊到建成）：新出图脚本 `docs/art/3d/construction.py`，14 张（`build-1/2-0/1/2` 三阶段工地、`crane-1/2-0..3` 塔吊 4 个吊臂角度），加进 make.sh，图集 175 → 189 张（仍是 2048×4096，用到 2502 行）。`BuildingLayer.setConstruction` 改为：藏楼、叠工地图 + 塔吊（和楼同锚点）、按进度换阶段、吊臂 0→3→0 来回摆（`tickConstruction`，dt × 倍速）；完工 `playTopOut`：竖向 0.75 → 1.08 → 1 弹起 + 尘土圈。无头 Chrome 实测奶茶店（1 天）、广场（2 天）从开工到完工各阶段正常，无报错。截图 `docs/ui-acceptance/d026-construction.png`。第一版塔吊太细看不清，加粗了一次。
+- **施工动画优化**（用户：进行一个优化）：照验收截图改了四处。
+  - 进度条以前挂在**塔吊尖**上（1×1 要 41 世界单位），高过旁边的楼顶，看着像那几栋楼的、还压住邻居的窗。改为贴**工地本体**顶：1×1 在 24～34（`build-1-0` 19.5 / `-1-1` 24 / `-1-2` 33.5），2×2 在 40～45。定稿前试过取「工地高」和「目标楼高」的较大值，电子厂那种 62 高的目标楼会让条飘到半空，又回到原来的毛病，所以只跟工地走。
+  - 完工尘土的圆心以前按**占地最下顶点**算（楼节点原点就在那），团子实际飘到楼前的地上。改按**占地菱形中心**，同时 `setSiblingIndex(0)` 压到楼底下，才像从楼脚散出来。
+  - 换阶段原来一帧硬切，现在新工地图淡入 0.18 秒；完工时工地和塔吊压在楼上面淡出 0.26 秒（一帧硬切会让绿网「闪」一下消失）。
+  - 性能：`setConstruction` 以前每帧对每个工地跑一次 `allBuildings()`（全图 64×64 扫描 + 分配数组），现在占地只在开工第一帧查一次存 `_site`；进度条 Graphics 以前每帧重画，现在进度量化到 0.5%、宽高位置没变就不重画。拆掉的工地会清缓存，不会漏。
+- **验证**：`tsc` 通过（只剩 sweep.ts 的 padStart 老问题）。用 Cocos CLI 无头构建 web-mobile → 无头 Chrome（CDP，430×932 @3x）跑真实流程：解锁建筑后用 `evalPending` + `confirmPending` 走游戏自己的放置逻辑盖楼，不绕过模拟层。1×1 早餐铺（1 天）和 2×2 火锅店（2 天）、电子厂（3 天）全流程走完，四个阶段和完工落定都正常，`__h.tree()` 确认进度条 y 与工地高度一致、塔吊在第二阶段转到楼后。截图 `docs/ui-acceptance/d026-construction-v2.png`。
+- **待集成**：`BuildingLayer.ts` 属支线 B 名下的画面文件，这条改动没动合同文件（types.ts / SimApi.ts / GameRoot.ts 都没碰）。
+- **1×1 塔吊缩小**（用户：开始调整吧）：`construction.py` 里 1×1 塔身 1.55 → 1.32、吊臂 0.85 → 0.72、塔帽 0.22 → 0.18；2×2 不动。图高 202 → 180 像素（50.5 → 45 世界单位，奶茶店 30.5、手机店 37.5）。先试过 1.15（166 像素），封顶阶段吊臂几乎全被安全网（134 像素）挡住、看不到摆动，所以取 1.32，这是吊臂还能露出网顶的下限。只重出 `crane-1-0..3` 并重打图集，逐帧比对：197 张里只有这 4 张内容变了。
+  - 塔吊压低后，封顶时吊臂正好在进度条那个高度，被进度条盖住。层级改为「进度条 → 塔吊 → 工地」（地基阶段「进度条 → 工地 → 塔吊」）：进度条在工地顶上方、和工地图不重叠，垫在下面不会被挡，塔吊细格构从条前面穿过，条照样能读。
+  - 验证：tsc 通过；重新无头构建，游戏内确认 `crane-1-0` 帧为 128×180、2×2 仍是 256×294，早餐铺 / 小作坊地基和封顶阶段截图正常，无报错。
+
+
+## 2026-11-15 M3 第二批：心愿 / 阶段目标 / 产业研究（T511～T513，T502 补完）
+- 新配置 `config/progress.json`；`SimLoader` 读它，`makeSimConfig` 第三个参数。合同：Resident.wish、SimState.unlocked / researched / research / wishesDone、Notice 新增 wish / wishDone / research / levelUp、MonthlyReport.expense.research、MoneyFlows 加 outflow.research / inflow.grants；SimApi 加可选的 isUnlocked / researchList / startResearch / goals / upgradeLevel（MockSim 不用实现）。
+- 模拟层：研究（前置用真实的人口、楼、够学历的人数）、阶段目标（7 种）、手动升级 + 奖励、心愿（7 种，全部由真实数据判定，实现了幸福度 +15、口碑 +，过期 −5）、旧存档兼容。`onBuilt` 拒绝没研究的建筑。
+- 界面：`ui/CenterPanel.ts`（点县发展中心打开；四个页签，后两个占位）；底栏没研究的带锁、点了提示去研究；左上「目标 n/5」小牌；升级全屏庆祝；楼顶蓝色心愿气泡，点了开档案；档案心愿卡。
+- 数值：迁入起步线 40 → 30（自动玩家开局幸福度 45 上下，40 起步时 10 年还是 10 个人）。
+- 测试 78/78（新增 7 条：解锁拦截、研究推进 / 一次一项、前置原因、研究费守恒、目标与升级奖励、心愿从冒出到实现、旧存档补解锁）。自动玩家改为会研究、会照心愿盖、目标完成就升级。网页版无头 Chrome 跑完整流程（心愿气泡 → 档案心愿卡 → 发展目标 → 产业研究 → 研究中 → 可以升级 → 庆祝），无报错；截图 `docs/ui-acceptance/d026-batch2.png`。
+- 发现并修：心愿公告把建议也塞进公告栏，字太长缩到看不清，改为只放心愿本身。
+- **问题**：开局 5 个目标里「人口 15」要靠迁入，前期可能要等；研究列表很长时，「条件不够」的项把能研究的挤下去（已按状态排序）；招商、特色街道页签只是占位。
+
+## 2026-11-15 修县发展中心换朝向 + M3 第三、四批（T521～T523、T531）
+- **修**：第二批让「点县发展中心」开自己的面板后，换朝向按钮没了。面板标题行加回「换朝向」（从「目标」小牌进来时也能换）。
+- 规则见 DESIGN 26.1。合同改动：buildings.json 加 hut / brick / detached / villa，house 改名「自建小楼」；types.ts：BuildingEcon 加 rent / homeLevel / homeMood / upgradeTo / selfBuilt，BuildingSim 加 taxBreakUntil，SimState 加 streets / renovations / offers / pendingDeal / dealsDone / nextOfferId，新类型 Offer，Notice 加 street / renovate / offer / deal，MoneyFlows 加 inflow.investment / outflow.subsidy；SimApi 加可选 streetBook / streetHint / envAt / buildingEnv / businessEnv / acceptOffer / offerChance / cancelPendingDeal；TownView 加可选 spotDistance；TownModel 加 replaceDef。
+- 界面：CenterPanel 的「特色街道」「招商引资」页签做实；GameRoot 加「环境」按钮、街道小旗、招商选址、翻盖同步；底栏隐藏只能翻盖得到的住房，加 selectById；建筑详情显示「招商引进的私营企业」。
+- 美术：`docs/art/3d/housing.py` 4 种 × 2 朝向，图集 189 → 197 张（2048×4096，用到 2642 行）。
+- **验证**：模拟测试 87/87（新增 9 条：凑街、放置提示、环境、翻盖 + 守恒、搬家、不能直接盖砖瓦房、供地全流程、补贴 + 守恒、失败理由）；50 年快进通过（8 年升县城，906 人）。网页版无头 Chrome 跑完整流程（换朝向、凑夜市 + 提示 + 小旗、图鉴、污染预览、环境视图、招商面板、供地选址收 ¥22,800、翻盖成砖瓦房），无报错；截图 `docs/ui-acceptance/d026-batch34.png`。浏览器里发现并修了：施工中的楼不参与凑街提示（地图索引没刷新）、图鉴 / 招商面板显示英文 id。
+- **问题**：自动玩家 50 年财政 4 亿，钱后期还是花不完，需要一轮整体调数值；招商来的楼在「施工中」时读档，会被记成县属（`_dealOwners` 没进存档）；特色街道小旗 / 心愿气泡在 ×2 缩放下偏小。
+
+
+## 2026-11-15 T219 对话气泡 + +¥N 飘字
+- **做了**：LifeLayer 补完 T219 剩余两块。
+  - 到店消费飘「+¥N」：arrive() 冒金币的同时，再飘一个真实客单价标签（加粗暖黄 +¥10/+¥80），往上飘 22 像素后淡出；价格由新 SimApi.buildingPrice(defId) 从 Simulation._cfg.building 取，GameRoot 接到 LifeLayer.priceOf 回调上。
+  - 对话气泡：每 0.4 秒扫一遍街上行人，两个步行者网格距离 ≤ 1.2 且都没在 8 秒冷却里时，30% 概率给其中一个冒一个「…」白底灰点小气泡（Graphics 画），1.5 秒淡出；气泡挂在行人节点上跟着走，头顶偏上 94 像素。
+- **验证**：tsc --noEmit 项目代码零错误（引擎 .d.ts 的 30 多条 TS2304/TS2314 是 Cocos 3.8.8 自带问题，和本改动无关）。
+- **问题 / 下一步**：对话气泡目前只有「…」一种，没有真实文本（要加得接 Wish 或随机台词表）；T218 地面补充（泥土 / 石板路 / 花坛、地图外围不露紫色底）是下一个待办；T212 正式 UI 顶栏重做还在排队。
+
+## 2026-11-15 T218 地面补充 + 外围不露底
+- **做了**：
+  - 三种装饰地块（泥土 / 石板路 / 花坛）：`docs/art/gen/terrain.py` 追加 `dirt_tile()` / `flagstone()` / `flower_bed()` 三个 32×16 像素帧（66/67/68），生成器跑到 69 帧；图集和 ground-frames.json 拷回 assets，`ArtLibrary.GROUND_FRAME_COUNT_TERRAIN` 66→69。
+  - buildings.json + economy.json 加 `dirt-tile`（¥100/维护1）、`flagstone`（¥300/维护2/环境+1）、`flower-bed`（¥500/维护3/环境+2）三条 flat 建筑，归到「道路·设施」页签。
+  - GridMap.frameFor() 新增 decoFrame 分支：flat 且无 road 且 defId 在 DECO_FRAMES 表里，按名字取帧。
+  - 外围不露底：GridMap.syncSprites() 创建时多建一圈 `Border` 子节点，在地图四周各扩 6 格画草地 Sprite（用 grass-0 帧），遮住引擎相机背景色；IsoMath.toLocal 是纯数学，越界坐标也能算出正确位置，所以边框格直接用负 col/row 和越界 col/row。
+- **验证**：tsc --noEmit 项目代码零错误。
+
+## 2026-11-16 T532 财政调平（第一轮）
+- **做了**：诊断脚本 `tests/sim/diag.ts`（`node tests/sim/run.js --diag`，longrun 加 `probe` 选项，每年打印收支分项）；发现房租是印钞机、财政没有随人口涨的支出。房租减半 + 新增「公共服务」支出（按人头 × 等级 × 规模，配置 `servicePerCapita` / `serviceLevelMult` / `serviceCrowding`），月度账单加一行。详见 D027。
+- **验证**：模拟测试 88/88（新增 1 条：公共服务算法 + 守恒）；50 年快进通过，财政 4 亿 → 3,550 万，前 10 年曲线不变；tsc 项目代码零错误。
+- **问题**：后期老龄化（T533）：地图盖满 → 不生不迁 → 劳力从 900 掉到 285。这次是自动玩家地图满了暴露的，真玩家 64×64 地图迟早也会遇到。
+- **下一步**：T212 正式 UI。
+
+## 2026-11-16 施工进度条一出现就半满（bug）
+- **现象**（用户真机反馈）：刚放下楼，进度条就已经一半。
+- **原因**：`Simulation.constructionProgress` 的公式把画面层传进来的 `dayProgress`（本月已经走到哪儿）当成「开工后干了多少」：`(total - left + dayProgress) / total`。楼刚放下 `left = total`，前半项是 0，后半项直接把这个月已过去的部分算成工期。下午放下 1 天的楼就是 50%。测试里全在 `dayProgress = 0` 时开工，所以一直没暴露。
+- **连带问题**：完工只在月初结算、且不认开工时刻——快天黑才开工的 1 天楼，0.1 个月就完工，越晚开工盖得越快。
+- **做法**：施工 / 翻盖记录加 `startAt`（开工那一刻的绝对时刻 = 月 + 当天进度，0..1）；`SimApi.onBuilt(uid, defId, dayProgress?)` 多传一个参数，GameRoot 传 `DayClock.progress()`。进度 = (现在 − 开工) / 实际跨度，跨度取到「第一个 ≥ 开工 + 工期的月初」，所以进度条不会先顶到 100% 干等。老存档没 `startAt` 时 `normalizeSimState` 按已干的整月数倒推。
+- **验证**：模拟测试 90/90（新增 2 条：月中开工从 0 起算；开工越晚完工不会更早）；tsc 项目代码零错误。
+- **待集成**：真机看一眼 1 天工期楼月中放下时的进度条起点和完工时刻。
+
+
+## 2026-11-16 T218 返工 + T212 合批与顶栏
+- **T218 返工（上一轮做错了）**：上次三种装饰地块画在了已废弃的像素版脚本 `docs/art/gen/terrain.py`（32×16），而正式地面是 D021 的 `docs/art/3d/ground.py`（128×64、4 倍）；拷进去的像素图后来被恢复成了正式图集，所以游戏里这三种地块其实一直没图。这次：撤回对 gen/terrain.py 的改动，在 3d/ground.py 里加 `dirt_tile_fn` / `flagstone_fn` / `flower_bed_fn`（66～68 帧，图集仍 2048×512），重新出图装进 assets。另外上次加的 6 圈草地边框改为相机底色（见 D028）。
+- **T212**：绘制次数 169 → 52（D028）；GameRoot 空闲时不再塞「点建筑看详情…」，顶栏第二行显示 TopBar 本来就有的「就业 x/y（%）· 均薪」。
+- **工具**：`tests/web/shot.mjs`——构建 web-mobile 后用无头 Chrome（430×932 @3x）截图、模拟点击 / 拖动、在页面里执行 JS（可读 `cc.director.root.device.numDrawCalls`）。路径有中文，静态服务用 fileURLToPath。
+- **验证**：tsc 零错误；模拟测试 88/88；网页版：开局、跳过开场、缩到 ×2 拖到地图角落（全是草地）、选卡片（高亮 / 对勾 / 上浮正常）、滑动底栏（底色跟着卡片）、3 倍速跑一天（行人、心愿气泡正常）。
+- **下一步**：顶栏几个胶囊合成一个 Graphics；真机试玩（T506 / T514 / T532）。

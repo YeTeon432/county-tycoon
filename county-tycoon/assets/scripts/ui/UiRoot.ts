@@ -1,7 +1,7 @@
 import { _decorator, Component, JsonAsset, Layers, Node, profiler, resources, UITransform } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
-import { MonthlyReport } from '../core/sim/types';
+import { MonthlyReport, TownLevel } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { Portrait } from './Portrait';
 import { BuildingBar } from './BuildingBar';
@@ -11,6 +11,8 @@ import { MonthReportPanel } from './MonthReportPanel';
 import { ResidentListPanel } from './ResidentListPanel';
 import { ResidentPanel } from './ResidentPanel';
 import { TimeController } from './TimeController';
+import { NoticeLayer } from './NoticeLayer';
+import { CenterPanel } from './CenterPanel';
 import { Speed, TopBar } from './TopBar';
 
 const { ccclass } = _decorator;
@@ -47,11 +49,21 @@ export class UiRoot extends Component {
      * 返回 false = 这栋楼没有两个朝向（行道树、广场只有一张图）。
      */
     requestToggleFacing: ((uid: number) => boolean) | null = null;
+    /** 招商供地：让玩家去地图上选址（GameRoot 接到底栏 + WorldView） */
+    requestPlace: ((defId: string) => void) | null = null;
+    /** 环境视图开关（GameRoot 接到 WorldView），返回开着没 */
+    toggleEnvView: (() => boolean) | null = null;
     /** 当前的放置/拆除提示（GameRoot 和建筑栏会调 setPlacementHint） */
     private _hint = '';
 
     private _topBar: TopBar | null = null;
     private _clock: TimeController | null = null;
+    private _notices: NoticeLayer | null = null;
+    private _centerPanel: CenterPanel | null = null;
+    /** 时间推进器（GameRoot 把它接到 DayClock，街上的人按钟点出门） */
+    get clock(): TimeController | null {
+        return this._clock;
+    }
     /** 弹窗层：建筑详情、居民总览、月账单都放这里 */
     private _panelLayer: Node | null = null;
     /** 当前打开的建筑详情 */
@@ -98,6 +110,9 @@ export class UiRoot extends Component {
         this.buildTopBar();
         this.buildClock();
         this.buildPanelLayer();
+        // 公告栏 + 大公示（D026）：压在面板上面、开场卡片下面
+        this._notices = NoticeLayer.create(this.node, this.sim);
+        this._notices.onGoalsTap = () => this.openCenter('goals');
         this.buildIntroLayer();
 
         // 建造栏是 GameRoot 建的，在 UiRoot 之前：直接找到它，接上模拟层和贴图
@@ -212,6 +227,10 @@ export class UiRoot extends Component {
         this._tick = 0;
         if (this._topBar) this._topBar.refresh();
         if (this._waitFirstBuild) this.notifyBuilt();
+        if (this._notices && this.sim && this.sim.goals) {
+            const g = this.sim.goals();
+            this._notices.setGoals(g.filter((x) => x.done).length, g.length);
+        }
         if (this._bar && !this._bar.hasArt) this.findSiblings();
     }
 
@@ -260,6 +279,12 @@ export class UiRoot extends Component {
      */
     private onMonthStepped(report: MonthlyReport): void {
         this._lastReport = report;
+        if (this._notices && report.notices) this._notices.push(report.notices);
+        // 研究完成：底栏多出新卡片；开着的县发展中心面板也刷新
+        if (report.notices && report.notices.some((n) => n.kind === 'research')) {
+            if (this._bar) this._bar.refreshUnlocks();
+        }
+        if (this._centerPanel && this._centerPanel.node?.isValid) this._centerPanel.fill();
         if (this._topBar) {
             this._topBar.refresh();
             this._topBar.setReportFresh(true);
@@ -301,6 +326,12 @@ export class UiRoot extends Component {
 
         // 同一时间只留一个面板：先关掉旧的（居民档案叠在建筑详情上面时另说，见 openResident）
         this.closeTopPanel();
+        // 县发展中心：打开它自己的面板（目标 / 研究 / 招商 / 特色街道，D026）
+        const placed = this.model.allBuildings().find((b) => b.uid === uid);
+        if (placed && placed.def.id === 'center' && this.sim.goals) {
+            this.openCenter('goals', uid);
+            return;
+        }
         const panel = BuildingPanel.show(
             layer, this.sim, this.model, uid,
             (residentId) => this.openResident(residentId),
@@ -356,7 +387,38 @@ export class UiRoot extends Component {
         }
     }
 
+    /** 打开县发展中心面板 */
+    openCenter(tab: 'goals' | 'research' | 'invest' | 'streets' = 'goals', uid?: number): void {
+        const layer = this._panelLayer;
+        if (!this.sim || !layer) return;
+        this.closeTopPanel();
+        // 换朝向：点楼进来的用那栋楼；从「目标」小牌进来的找地图上的县发展中心
+        const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
+        const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
+        const p = CenterPanel.show(layer, this.sim, tab, toggle);
+        p.onHint = (t) => { if (this._notices) this._notices.say('info', t); };
+        p.onChanged = () => { if (this._topBar) this._topBar.refresh(); };
+        p.onUpgraded = (lv) => this.onLevelUp(lv);
+        if (this._bar) { const defs = this._bar.defs; p.nameOf = (id) => defs.find((d) => d.id === id)?.name ?? id; p.fill(); }
+        p.onPlace = (defId) => {
+            this.closeTopPanel();
+            if (this.requestPlace) this.requestPlace(defId);
+            if (this._notices) this._notices.say('info', '在地图上点一块挨着路的地，按「确定」——对方出钱盖');
+        };
+        p.onClosed = () => { if (this._centerPanel === p) this._centerPanel = null; };
+        this._centerPanel = p;
+    }
+
+    private onLevelUp(lv: TownLevel): void {
+        const name: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
+        if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去县发展中心看看新目标吧。');
+        if (this._bar) this._bar.refreshUnlocks();
+        if (this._topBar) this._topBar.refresh();
+    }
+
     private closeTopPanel(): void {
+        if (this._centerPanel && this._centerPanel.node?.isValid) this._centerPanel.node.destroy();
+        this._centerPanel = null;
         if (this._reportPanel && this._reportPanel.node?.isValid) {
             this._reportPanel.node.destroy();
         }

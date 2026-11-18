@@ -54,7 +54,7 @@ export class ResidentPanel extends Panel {
             who.isBold = true;
             who.node.setPosition(tx, y - 40, 0);
             const v = ({ walk: '步行', ebike: '骑电动车', moto: '骑摩托车', car: '开汽车' } as Record<string, string>)[r.vehicle ?? 'walk'] ?? '步行';
-            const sub = makeLabelLeft(content, 'Sub', `${r.jobTitle || (r.age < 18 ? '上学 / 在家' : r.age >= 60 ? '退休' : '待业')} · ${v}`, UI_FONT.small, UI_COLOR.textDim, W - faceSize - 24);
+            const sub = makeLabelLeft(content, 'Sub', `${r.jobTitle || (r.age < 18 ? '上学 / 在家' : r.age >= 60 ? '退休' : r.idle ? '赋闲' : '待业')} · ${v}`, UI_FONT.small, UI_COLOR.textDim, W - faceSize - 24);
             sub.node.setPosition(tx, y - 80, 0);
             y -= faceSize + 20;
         }
@@ -65,13 +65,69 @@ export class ResidentPanel extends Panel {
         const tiles: [string, string, Color][] = [
             ['月薪', r.salary > 0 ? formatMoney(r.salary) : '—', r.salary > 0 ? UI_COLOR.gold : UI_COLOR.textDim],
             ['储蓄', formatMoney(r.savings), r.savings >= 0 ? UI_PALETTE.blue : UI_COLOR.down],
-            ['心情', `${Math.round(r.mood)} ${moodLabel(r.mood)}`, moodColor(r.mood)],
+            ['幸福度', `${Math.round(r.mood)} ${moodLabel(r.mood)}`, moodColor(r.mood)],
         ];
         for (let i = 0; i < tiles.length; i++) {
             const t = makeStatTile(content, tileW, tileH, tiles[i][0], tiles[i][1], tiles[i][2]);
             t.node.setPosition(-W / 2 + tileW / 2 + i * (tileW + gap), y - tileH / 2, 0);
         }
         y -= tileH + 20;
+
+        // ── 想走（D026）：红条 + 吐槽，告诉玩家还有几天、该补什么 ──
+        if (r.leaving) {
+            const left = Math.max(0, 3 - (sim.state.month - r.leaving.since));
+            const why = r.leaving.reasons.length ? r.leaving.reasons.join('、') : '日子过得不顺心';
+            const wh = 76;
+            const warn = makePanelNode(content, 'Leaving', W, wh);
+            warn.setPosition(0, y - wh / 2, 0);
+            const wg = warn.addComponent(Graphics);
+            wg.fillColor = new Color(253, 236, 234, 255);
+            wg.roundRect(-W / 2, -wh / 2, W, wh, UI_RADIUS);
+            wg.fill();
+            const t1 = makeLabelLeft(warn, 'T1', `想离开县城（还有 ${left} 天）`, UI_FONT.body, UI_COLOR.down, W - 40);
+            t1.isBold = true;
+            t1.node.setPosition(-W / 2 + 20, 14, 0);
+            const t2 = makeLabelLeft(warn, 'T2', `吐槽：${why}。幸福度回到 35 以上就会留下`, UI_FONT.small, UI_COLOR.text, W - 40);
+            t2.node.setPosition(-W / 2 + 20, -18, 0);
+            y -= wh + 16;
+        }
+
+        // ── 心愿（D026）：蓝条 + 建议，告诉玩家该盖什么、盖在哪 ──
+        if (r.wish) {
+            const left = Math.max(0, r.wish.until - sim.state.month);
+            const wh = 96;
+            const card = makePanelNode(content, 'Wish', W, wh);
+            card.setPosition(0, y - wh / 2, 0);
+            const cg = card.addComponent(Graphics);
+            cg.fillColor = new Color(232, 241, 252, 255);
+            cg.roundRect(-W / 2, -wh / 2, W, wh, UI_RADIUS);
+            cg.fill();
+            const t1 = makeLabelLeft(card, 'T1', `心愿：${r.wish.text}（还有 ${left} 天）`, UI_FONT.body, UI_PALETTE.blue, W - 40);
+            t1.isBold = true;
+            t1.node.setPosition(-W / 2 + 20, 20, 0);
+            const t2 = makeLabelLeft(card, 'T2', `建议：${r.wish.hint}。实现了幸福度 +15`, UI_FONT.small, UI_COLOR.text, W - 40);
+            t2.node.setPosition(-W / 2 + 20, -20, 0);
+            y -= wh + 16;
+        }
+
+        // ── 幸福度分项（D026）：为什么开心 / 不开心 ──
+        const parts = (r.moodParts ?? []).slice().sort((a, b) => a.value - b.value);
+        if (parts.length) {
+            const chip = (p: { label: string; value: number }) => `${p.label} ${p.value > 0 ? '+' : ''}${Math.round(p.value)}`;
+            const bad = parts.filter((p) => p.value < 0).map(chip).join('　');
+            const good = parts.filter((p) => p.value > 0).reverse().map(chip).join('　');
+            if (bad) {
+                const l = makeLabelLeft(content, 'Bad', `不开心：${bad}`, UI_FONT.small, UI_COLOR.down, W);
+                l.node.setPosition(-W / 2, y - 14, 0);
+                y -= 34;
+            }
+            if (good) {
+                const l = makeLabelLeft(content, 'Good', `开心：${good}`, UI_FONT.small, UI_COLOR.up, W);
+                l.node.setPosition(-W / 2, y - 14, 0);
+                y -= 34;
+            }
+            y -= 8;
+        }
 
         // ── 信息卡 ──
         const eduText = ['未上学', '初中', '高中', '大专以上'][r.education] ?? '—';
@@ -151,7 +207,7 @@ export class ResidentPanel extends Panel {
     }
 
     private jobText(r: Resident): string {
-        if (!r.jobTitle) return r.age >= 18 && r.age < 60 ? '待业中' : '不在工作年龄';
+        if (!r.jobTitle) return r.idle ? '赋闲（存款够，不急着找工作）' : r.age >= 18 && r.age < 60 ? '待业中' : '不在工作年龄';
         const where = this.buildingName(r.jobId);
         return where ? `${where} · ${r.jobTitle}` : r.jobTitle;
     }

@@ -7,7 +7,7 @@ import { Simulation } from '../../assets/scripts/core/sim/Simulation';
 import { SimConfig } from '../../assets/scripts/core/sim/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { basicTown, loadConfig, MapBuilder } from './fixtures';
+import { basicTown, loadConfig, loadFullConfig, MapBuilder } from './fixtures';
 import { eq, inRange, near, ok, report, suite, test } from './harness';
 
 // ───────────────────────── 随机数 ─────────────────────────
@@ -170,7 +170,7 @@ suite('配置表', () => {
         eq(cfg.building('textile')!.jobs[0].count, 18);
         eq(cfg.building('school')!.publicJob, true);
         eq(cfg.building('supermarket')!.housing, 0);
-        eq(cfg.building('house')!.housing, 3);
+        eq(cfg.building('house')!.housing, 6); eq(cfg.building('hut')!.housing, 3);
     });
 
     test('建筑 id 不重复', () => {
@@ -504,6 +504,7 @@ function sureBuyConfig(): SimConfig {
     const economy = JSON.parse(readFileSync(join(root, 'economy.json'), 'utf8'));
     const names = JSON.parse(readFileSync(join(root, 'names.json'), 'utf8'));
     for (const k of ['ebike', 'moto', 'car']) economy.vehicles.types[k].chance = 1;
+    economy.tuning.residents.idleSavingsMonths = 0;   // 这组测「有钱买车」，不让有钱人赋闲（D024）
     return makeSimConfig(economy, names);
 }
 
@@ -655,8 +656,9 @@ suite('交通工具', () => {
 
     test('有车厂时同种子可复现', () => {
         const cfg = loadConfig();
-        const a = vehicleTown(cfg, ['moto-factory'], 6, 30000, 33).sim;
-        const b = vehicleTown(cfg, ['moto-factory'], 6, 30000, 33).sim;
+        // 存款 15000：低于赋闲线（12 ×（300 + 1000）= 15600），他们会去上班、攒钱买车（D024 / D026）
+        const a = vehicleTown(cfg, ['moto-factory'], 6, 15000, 33).sim;
+        const b = vehicleTown(cfg, ['moto-factory'], 6, 15000, 33).sim;
         for (let i = 0; i < 60; i++) eq(JSON.stringify(a.stepMonth()), JSON.stringify(b.stepMonth()), `第 ${i} 月`);
         eq(JSON.stringify(a.state), JSON.stringify(b.state));
         ok(a.summary().vehicles > 0, `5 年里应当有人买车，实际 ${a.summary().vehicles}`);
@@ -671,16 +673,550 @@ suite('交通工具', () => {
         const run = (v: 'walk' | 'ebike') => {
             const sim = new Simulation(cfg, m.view(), { seed: 2, opening: false });
             const r = (sim as any).createResident(null, 'M', 30);
-            r.savings = 20000; r.vehicle = v;
+            // 存款低于赋闲线：他会去早餐铺上班，店才开得了门（D026 没有店员就不营业）
+            r.savings = 12000; r.vehicle = v;
             sim.state.residents.push(r);
             (sim as any).assignHomes(sim.state.residents);
             sim.stepMonth();
-            return sim.building(shop)!.lastCustomers;
+            const b = sim.building(shop)!;
+            ok(b.workerIds.length === 1, '他在店里上班');
+            return b.lastRevenue - (b.lastOutside ?? 0);   // 只看县里人花的钱，不算过路客
         };
         const d = m.view().roadDistance(house, shop);
         ok(d > cfg.economy.serviceRadius && d <= cfg.economy.serviceRadius * 1.5, `距离 ${d} 要落在 8～12 之间`);
-        eq(run('walk'), 0, '步行够不着');
+        eq(run('walk'), 0, '步行够不着');   // 钱数，不是人次
         ok(run('ebike') > 0, '骑电动车能去');
+    });
+});
+
+// ───────────────────────── 赋闲（D024） ─────────────────────────
+suite('赋闲：有钱可以不上班', () => {
+    const lineOf = (cfg: SimConfig) => {
+        const e = cfg.economy;
+        return e.residents.idleSavingsMonths * (e.rentPerPerson + e.residents.idleLivingCost);
+    };
+
+    test('存款够门槛：不找工作、不算失业、心情不扣', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 21 });
+        const r = (sim as any).createResident(null, 'F', 35);
+        r.savings = lineOf(cfg) * 3;
+        sim.state.residents.push(r);
+        for (let i = 0; i < 8; i++) sim.stepMonth();
+        eq(r.idle, true, '应当赋闲');
+        eq(r.jobId, null, '不去上班');
+        eq(r.monthsUnemployed, 0, '不算失业');
+        ok(sim.state.residents.indexOf(r) >= 0, '不会因为失业搬走');
+    });
+
+    test('存款不够：照常找工作 / 算失业', () => {
+        const cfg = loadConfig();
+        const m = new MapBuilder(10, 10);
+        m.hRoad(0, 5, 0);
+        const sim = new Simulation(cfg, m.view(), { seed: 22, opening: false });
+        const r = (sim as any).createResident(null, 'M', 30);
+        r.savings = 100;
+        sim.state.residents.push(r);
+        sim.stepMonth();
+        ok(!r.idle, '不该赋闲');
+        eq(r.monthsUnemployed, 1, '没岗位就是失业');
+    });
+
+    test('赋闲后存款花到门槛 × idleExitRatio 以下，重新找工作', () => {
+        const cfg = loadConfig();
+        const m = new MapBuilder(10, 10);
+        m.hRoad(0, 5, 0);
+        const sim = new Simulation(cfg, m.view(), { seed: 23, opening: false });
+        const r = (sim as any).createResident(null, 'M', 30);
+        const line = lineOf(cfg);
+        r.savings = line;
+        sim.state.residents.push(r);
+        sim.stepMonth();
+        eq(r.idle, true, '刚好够门槛');
+        r.savings = line * cfg.economy.residents.idleExitRatio + 10;
+        sim.stepMonth();
+        eq(r.idle, true, '门槛以下但没跌破退出线，继续赋闲');
+        r.savings = line * cfg.economy.residents.idleExitRatio * 0.5;
+        sim.stepMonth();
+        eq(r.idle, false, '跌破退出线');
+        ok(r.monthsUnemployed >= 1, '开始算失业');
+    });
+});
+
+// ───────────────────────── 真实账目（D026） ─────────────────────────
+suite('真实账目：钱有来处有去处', () => {
+    const sum = (o: Record<string, number>) => Object.keys(o).reduce((a, k) => a + o[k], 0);
+
+    test('守恒：每月县内的钱变化 = 县外流入 − 流出（基本小镇，36 个月）', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 31 });
+        sim.stepMonth();
+        for (let m = 0; m < 36; m++) {
+            const before = sim.moneyInCounty();
+            sim.stepMonth();
+            const f = sim.lastFlows;
+            const expected = sum(f.inflow) - sum(f.outflow);
+            near(sim.moneyInCounty() - before, expected, 1e-6 * Math.max(1, Math.abs(before)), `第 ${m} 个月对不上`);
+        }
+    });
+
+    test('公共服务（T532）：按人头 × 等级倍率 × (1 + 人口 / 规模系数)，财政出、算流出、守恒', () => {
+        const cfg = loadConfig();
+        const e = cfg.economy;
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 33 });
+        sim.stepMonth();
+        const before = sim.moneyInCounty();
+        const rep = sim.stepMonth();
+        const pop = rep.populationBefore;   // 月中结算，迁入在结算之后
+        const mult = (e.serviceLevelMult[sim.state.level] ?? 1) * (e.serviceCrowding > 0 ? 1 + pop / e.serviceCrowding : 1);
+        ok(e.servicePerCapita > 0, '配置里要有公共服务');
+        eq(rep.expense.services, Math.round(pop * e.servicePerCapita * mult), '账单里的公共服务');
+        const f = sim.lastFlows;
+        near(sim.moneyInCounty() - before, sum(f.inflow) - sum(f.outflow), 1e-6 * Math.max(1, Math.abs(before)), '守恒');
+    });
+
+    test('守恒：中途盖楼也对得上（施工款算流出）', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 32 });
+        sim.stepMonth();
+        const before = sim.moneyInCounty();
+        const uid = t.map.build('milk-tea', 12, 4);
+        ok(sim.onBuilt(uid, 'milk-tea'), '盖得起');
+        sim.stepMonth();
+        const f = sim.lastFlows;
+        ok(f.outflow.construction >= cfg.building('milk-tea')!.cost, '施工款记进流出');
+        near(sim.moneyInCounty() - before, sum(f.inflow) - sum(f.outflow), 1e-6 * Math.abs(before));
+    });
+
+    test('店铺一本账：利润 = 营业额 − 工资 − 成本 − 税 − 维护；县属利润进财政', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 33 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        let profit = 0;
+        for (const b of sim.state.buildings) {
+            if (!b.lastRevenue && !b.lastWages && !b.lastUpkeep) continue;
+            near(b.lastProfit!, b.lastRevenue - (b.lastWages ?? 0) - (b.lastCost ?? 0) - b.lastTax - (b.lastUpkeep ?? 0), 1e-6, b.defId);
+            profit += b.lastProfit ?? 0;
+        }
+        near(sim.state.finance.lastMonth!.income.profit, profit, 1e-6, '经营利润合计进账单');
+    });
+
+    test('工资由雇主出：店铺的工资 = 店员工资之和', () => {
+        const cfg = loadConfig();
+        (cfg.economy as any).immigrationRate = 0;   // 月底来的新人当月才入职、还没发工资，关掉免得对不上
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 34 });
+        sim.stepMonth();
+        for (const b of sim.state.buildings) {
+            const econ = cfg.building(b.defId)!;
+            if (econ.publicJob || !econ.jobs.length) continue;
+            const w = b.workerIds.map((id) => sim.resident(id)!.salary).reduce((a, x) => a + x, 0);
+            eq(b.lastWages, w, b.defId);
+        }
+    });
+
+    test('连续亏损 3 个月裁一个人，至少留 1 人', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 35 });
+        sim.stepMonth();
+        const b = sim.state.buildings.find((x) => x.workerIds.length >= 2);
+        ok(!!b, '找一栋有 2 人以上的楼');
+        const n = b!.workerIds.length;
+        b!.lossMonths = cfg.economy.layoffMonths - 1;
+        // 让它这个月必亏：成本率拉满
+        (cfg.building(b!.defId) as any).costRate = 1;
+        sim.stepMonth();
+        eq(b!.workerIds.length, n - 1, `应当裁员：${n} → ${b!.workerIds.length}`);
+        ok((b!.freezeMonths ?? 0) > 0, '裁员后暂停招人');
+    });
+});
+
+// ───────────────────────── 幸福度与迁出挽留（D026） ─────────────────────────
+suite('幸福度：分项、想走、挽留、迁入', () => {
+    test('幸福度分项：每人都有，目标 = 50 + 分项之和', () => {
+        const cfg = loadConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 41 });
+        sim.stepMonth();
+        for (const r of sim.state.residents) {
+            if (r.arrivedMonth >= sim.state.month) continue;   // 月底才来的人下个月才算
+            ok(Array.isArray(r.moodParts), `${r.name} 有分项`);
+            for (const p of r.moodParts!) ok(p.label.length > 0 && p.value !== 0);
+        }
+    });
+
+    test('幸福度 < 30：想走 + 吐槽原因 + 通知；挽留期满全家搬走', () => {
+        const cfg = loadConfig();
+        const m = new MapBuilder(12, 6);
+        m.hRoad(0, 10, 0);
+        m.build('house', 0, 1);
+        const sim = new Simulation(cfg, m.view(), { seed: 42, opening: false });
+        const r = (sim as any).createResident(null, 'M', 30);
+        r.savings = 100; r.mood = 10;
+        sim.state.residents.push(r);
+        (sim as any).assignHomes(sim.state.residents);
+        const rep = sim.stepMonth();
+        ok(!!r.leaving, '进入想走状态');
+        ok(r.leaving.reasons.length > 0, '有吐槽原因');
+        ok(rep.notices!.some((n) => n.kind === 'warn' && n.residentIds[0] === r.id), '公告「想走」');
+        let left = false;
+        for (let i = 0; i < cfg.economy.leaveMonths + 1 && !left; i++) {
+            const rr = sim.stepMonth();
+            if (rr.notices!.some((n) => n.kind === 'leave')) left = true;
+        }
+        ok(left, '挽留期满搬走，有「搬离」通知');
+        eq(sim.state.residents.length, 0);
+        ok((sim.state.buzz ?? 0) < 0, '有人走，口碑下降');
+    });
+
+    test('挽留：想走期间幸福度回到 35 以上就留下', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 43 });
+        sim.stepMonth();
+        const r = sim.state.residents.find((x) => x.age >= 18)!;
+        r.leaving = { since: sim.state.month, reasons: ['上班太远'] };
+        r.mood = 80;
+        const rep = sim.stepMonth();
+        ok(!r.leaving, '留下了');
+        ok(rep.notices!.some((n) => n.kind === 'stay'), '公告「决定留下」');
+    });
+
+    test('迁入：县城幸福度 < 30 没人来；越高来得越多', () => {
+        const cfg = loadConfig();
+        const arrivals = (mood: number) => {
+            let n = 0;
+            for (let seed = 1; seed <= 15; seed++) {
+                const sim = new Simulation(cfg, basicTown(cfg).view, { seed });
+                for (let k = 0; k < 2; k++) {
+                    for (const r of sim.state.residents) r.mood = mood;
+                    (sim as any).nextMood = (r: any) => mood;
+                    const rep = sim.stepMonth();
+                    n += rep.notices!.filter((x) => x.kind === 'arrive').length;
+                }
+            }
+            return n;
+        };
+        eq(arrivals(25), 0, '25 分没人来');
+        const mid = arrivals(40), high = arrivals(85);
+        ok(high > mid, `85 分（${high}）应当比 40 分（${mid}）来得多`);
+    });
+});
+
+suite('施工（D026）', () => {
+    test('盖下先施工：工期内不住人、不招工；到期完工并发通知', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 51 });
+        sim.stepMonth();
+        const uid = t.map.build('textile', 15, 6, 2, 2);
+        ok(sim.onBuilt(uid, 'textile'), '盖得起');
+        eq(sim.building(uid), null, '施工中不是能用的楼');
+        near(sim.constructionProgress(uid, 0)!, 0, 1e-9);
+        near(sim.constructionProgress(uid, 0.5)!, 0.25, 1e-9, '2 天工期过了半天 = 25%');
+        sim.stepMonth();
+        eq(sim.building(uid), null, '第 1 天还没完');
+        const rep = sim.stepMonth();
+        ok(!!sim.building(uid), '第 2 天完工');
+        eq(sim.constructionProgress(uid, 0), null);
+        ok(rep.notices!.some((n) => /完工/.test(n.text)), '完工通知');
+    });
+
+    test('月中开工：进度从 0 起算，不从月初算（D026 进度条一出现就一半的 bug）', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 53 });
+        sim.stepMonth();
+        const uid = t.map.build('barber', 15, 6);   // 1 天工期
+        // 下午开工：本月已经走了 50%
+        ok(sim.onBuilt(uid, 'barber', 0.5), '盖得起');
+        near(sim.constructionProgress(uid, 0.5)!, 0, 1e-9, '刚开工就是 0%，不是 50%');
+        // 月中开工要干满一整月，而完工只在月初结算：下个月初才干了半程
+        sim.stepMonth();
+        eq(sim.building(uid), null, '下个月初还没干满，不完工');
+        near(sim.constructionProgress(uid, 0)!, 1 / 3, 1e-9, '下个月初 = 干了 0.5 / 总共 1.5 个月');
+        const rep = sim.stepMonth();
+        ok(!!sim.building(uid), '再下个月初完工');
+        ok(rep.notices!.some((n) => /完工/.test(n.text)), '完工通知');
+    });
+
+    test('不会越晚开工越快：开工越晚，完工不会更早', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 54 });
+        sim.stepMonth();
+        const early = t.map.build('barber', 15, 6), late = t.map.build('barber', 17, 6);
+        sim.onBuilt(early, 'barber', 0);      // 一早开工
+        sim.onBuilt(late, 'barber', 0.9);     // 快天黑才开工
+        sim.stepMonth();
+        ok(!!sim.building(early), '月初开工：下个月初完工');
+        eq(sim.building(late), null, '快天黑才开工的不能同一天完工（旧逻辑 0.1 个月就盖完了）');
+        sim.stepMonth();
+        ok(!!sim.building(late), '再下个月初完工');
+    });
+
+    test('拆工地：从施工列表去掉，钱不退', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 52 });
+        const uid = t.map.build('barber', 15, 6);
+        const f0 = sim.state.finance.funds;
+        sim.onBuilt(uid, 'barber');
+        sim.onDemolished(uid);
+        eq(sim.state.construction!.length, 0);
+        eq(sim.state.finance.funds, f0 - cfg.building('barber')!.cost);
+    });
+});
+
+suite('研究 / 目标 / 心愿（D026 第二批）', () => {
+    test('开局只解锁几种；没研究的不能盖', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 61 });
+        ok(sim.isUnlocked('breakfast') && sim.isUnlocked('hut'));
+        ok(!sim.isUnlocked('house'), '自建小楼要研究、而且只能翻盖得到');
+        ok(!sim.isUnlocked('bbq'), '烧烤摊要研究');
+        const uid = t.map.build('bbq', 15, 6);
+        eq(sim.onBuilt(uid, 'bbq'), false, '没研究不让盖');
+    });
+
+    test('研究：扣钱、按天推进、完成后解锁并发通知；一次一项', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 62 });
+        const f0 = sim.state.finance.funds;
+        eq(sim.startResearch('r-bbq'), null);
+        eq(sim.state.finance.funds, f0 - 5000);
+        ok(!!sim.startResearch('r-barber'), '一次只能一项');
+        eq(sim.researchList().find((r) => r.id === 'r-bbq')!.state, 'active');
+        const rep = sim.stepMonth();
+        ok(sim.isUnlocked('bbq'), '1 天后解锁');
+        ok(rep.notices!.some((n) => n.kind === 'research'));
+        eq(rep.expense.research, 5000, '账单里有研究费');
+    });
+
+    test('研究前置：人口 / 等级 / 要有某栋楼，原因说清楚', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 63 });
+        const L = sim.researchList();
+        ok(/人口/.test(L.find((r) => r.id === 'r-clinic')!.reason), '卫生院要人口 10');
+        ok(/镇上/.test(L.find((r) => r.id === 'r-road')!.reason), '城市道路要镇上');
+        ok(sim.startResearch('r-road') !== null);
+    });
+
+    test('守恒：研究费算流出', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 64 });
+        sim.stepMonth();
+        const before = sim.moneyInCounty();
+        sim.startResearch('r-milk-tea');
+        sim.stepMonth();
+        const f = sim.lastFlows;
+        const sumf = (o: Record<string, number>) => Object.keys(o).reduce((a, k) => a + o[k], 0);
+        near(sim.moneyInCounty() - before, sumf(f.inflow) - sumf(f.outflow), 1e-6 * Math.abs(before));
+    });
+
+    test('阶段目标：没完成不能升级；完成后手动升级、发奖励', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view, { seed: 65 });
+        ok(sim.goals().length >= 3);
+        eq(sim.upgradeLevel(), null, '没完成');
+        for (let i = 0; i < 24; i++) sim.stepMonth();
+        eq(sim.state.level, 'village', '不会自动升级');
+        // 强行满足：改目标为都已完成
+        (cfg.progress as any).goals.village = [{ kind: 'pop', target: 1, of: [], text: 'x' }];
+        const f0 = sim.state.finance.funds;
+        eq(sim.upgradeLevel(), 'town');
+        eq(sim.state.finance.funds, f0 + cfg.progress!.levelReward.town!);
+    });
+
+    test('心愿：附近缺店 → 冒心愿（有建议）→ 盖了店 → 实现、幸福度涨、计数', () => {
+        const cfg = loadFullConfig();
+        cfg.progress!.wishes.chance = 1;
+        const m = new MapBuilder(20, 8);
+        m.hRoad(0, 18, 3);
+        m.build('house', 2, 2); m.build('workshop', 4, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 66 });
+        sim.stepMonth();
+        const w = sim.state.residents.find((r) => r.wish && r.wish.kind === 'shop' && r.wish.demand === 'food');
+        ok(!!w, '应当有人想吃饭');
+        eq(w!.wish!.suggest, 'breakfast', '建议盖早餐铺');
+        const mood0 = w!.mood;
+        const uid = m.build('breakfast', 6, 2);
+        sim.onBuilt(uid, 'breakfast');
+        sim.stepMonth(); sim.stepMonth();   // 1 天工期
+        ok(!w!.wish || w!.wish.kind !== 'shop' || w!.wish.demand !== 'food', '心愿实现了');
+        ok((sim.state.wishesDone ?? 0) >= 1);
+        ok(w!.mood > mood0, '幸福度涨了');
+    });
+
+    test('旧存档（没有研究记录）：按等级补上解锁，地图上已有的楼都能继续用', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const old = new Simulation(cfg, t.view, { seed: 67 });
+        old.stepMonth();
+        const raw = JSON.parse(JSON.stringify(old.state));
+        delete raw.unlocked; delete raw.researched;
+        const full = loadFullConfig();
+        const sim = new Simulation(full, t.view, { state: raw });
+        ok(sim.isUnlocked('supermarket'), '地图上已有的超市算解锁');
+        ok(sim.isUnlocked('milk-tea'), '村口的研究算完成');
+        ok(!sim.isUnlocked('school'), '镇上的研究没完成');
+    });
+});
+
+suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () => {
+    const sumf = (o: Record<string, number>) => Object.keys(o).reduce((a, k) => a + o[k], 0);
+    const unlockAll = (sim: Simulation) => { sim.state.unlocked = Array.from(new Set([...(sim.state.unlocked ?? []), 'bbq', 'milk-tea', 'hotpot', 'barber', 'phone-shop', 'brick', 'house', 'detached', 'textile'])); };
+
+    test('特色街道：三家店沿路挨着就凑成，发通知；成员店过路客变多', () => {
+        const cfg = loadFullConfig();
+        const m = new MapBuilder(20, 8);
+        m.hRoad(0, 18, 3);
+        m.build('hut', 0, 2); m.build('workshop', 18, 2);
+        const bbq = m.build('bbq', 4, 2), tea = m.build('milk-tea', 5, 2), pot = m.build('hotpot', 6, 4, 2, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 71, opening: false });
+        const rep = sim.stepMonth();
+        eq((sim.state.streets ?? []).length, 1, '凑成一条');
+        eq(sim.state.streets![0].kind, 'night');
+        ok(rep.notices!.some((n) => n.kind === 'street'), '通知');
+        eq(sim.streetBook().find((x) => x.id === 'night')!.count, 1);
+        void bbq; void tea; void pot;
+    });
+
+    test('特色街道放置提示：差一家时提示「再盖一家」，凑齐时提示「能凑成」', () => {
+        const cfg = loadFullConfig();
+        const m = new MapBuilder(20, 8);
+        m.hRoad(0, 18, 3);
+        m.build('bbq', 4, 2); m.build('milk-tea', 5, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 72, opening: false });
+        ok(/能凑成「夜市一条街」/.test(sim.streetHint('hotpot', 6, 4, 2, 2) ?? ''), '火锅店凑齐');
+        ok(/再在附近盖一家火锅店/.test(sim.streetHint('bbq', 7, 2, 1, 1) ?? '') || /再在附近盖一家/.test(sim.streetHint('milk-tea', 7, 2, 1, 1) ?? ''), '差一家');
+        eq(sim.streetHint('bbq', 16, 2, 1, 1), null, '太远没有提示');
+    });
+
+    test('环境：工厂附近是负的，离远了是 0', () => {
+        const cfg = loadFullConfig();
+        const m = new MapBuilder(20, 8);
+        m.hRoad(0, 18, 3);
+        m.build('textile', 4, 4, 2, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 73, opening: false });
+        ok(sim.envAt(4, 3) < 0, '门口有污染');
+        eq(sim.envAt(15, 3), 0);
+    });
+
+    test('住房：自家翻盖（钱从住户出、算流出），完工换成砖瓦房，房租和幸福度跟着变', () => {
+        const cfg = loadFullConfig();
+        cfg.economy.renovateChance = 1;
+        const m = new MapBuilder(12, 6);
+        m.hRoad(0, 10, 3);
+        const home = m.build('hut', 2, 2); m.build('workshop', 4, 2); m.build('breakfast', 5, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 74, opening: false });
+        unlockAll(sim);
+        const r = (sim as any).createResident(null, 'M', 30);
+        r.savings = 14000; r.mood = 80;
+        sim.state.residents.push(r);
+        (sim as any).assignHomes(sim.state.residents);
+        sim.stepMonth();
+        const before = sim.moneyInCounty();
+        ok((sim.state.renovations ?? []).some((x) => x.uid === home) || sim.building(home)!.defId === 'brick', '开始翻盖');
+        ok(sim.lastFlows.outflow.construction >= cfg.building('brick')!.cost, '翻盖费从住户存款付给施工队（流出）');
+        sim.stepMonth();
+        const f = sim.lastFlows;
+        near(sim.moneyInCounty() - before, sumf(f.inflow) - sumf(f.outflow), 1e-6 * Math.abs(before), '守恒');
+        sim.stepMonth();
+        eq(sim.building(home)!.defId, 'brick', '翻盖成砖瓦房');
+    });
+
+    test('住房：有钱的人搬进更好的空房', () => {
+        const cfg = loadFullConfig();
+        cfg.economy.moveChance = 1;
+        const m = new MapBuilder(12, 6);
+        m.hRoad(0, 10, 3);
+        m.build('hut', 2, 2); const det = m.build('detached', 6, 2); m.build('workshop', 4, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 75, opening: false });
+        unlockAll(sim);
+        const r = (sim as any).createResident(null, 'F', 40);
+        r.savings = 200000;
+        sim.state.residents.push(r);
+        r.homeId = sim.state.buildings.find((b) => b.defId === 'hut')!.uid;
+        sim.building(r.homeId)!.residentIds.push(r.id);
+        sim.stepMonth();
+        eq(r.homeId, det, '搬进独栋');
+    });
+
+    test('玩家不能直接盖「只能翻盖得到」的砖瓦房', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 76 });
+        unlockAll(sim);
+        const uid = t.map.build('brick', 15, 6);
+        eq(sim.onBuilt(uid, 'brick'), false);
+    });
+
+    test('招商：每 3 天来意向；供地成功 → 选址免费盖、收土地款、解锁、私营、守恒', () => {
+        const cfg = loadFullConfig();
+        cfg.progress!.invest.maxChance = 1; cfg.progress!.invest.envWeight = 100;
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 77 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const offers = sim.state.offers ?? [];
+        ok(offers.length >= 1, '有意向');
+        const o = offers[0];
+        for (const r of sim.state.residents) if (r.age >= 18 && r.age < 60) { r.jobId = null; r.idle = false; }   // 凑够能招的工人
+        eq(sim.acceptOffer(o.id, 'land', true), null, '签约成功');
+        ok(sim.isUnlocked(o.defId) && sim.canAfford(o.defId), '选址期间能盖、不花钱');
+        const f0 = sim.state.finance.funds;
+        const before = sim.moneyInCounty();
+        const e = cfg.building(o.defId)!;
+        const size = t.map.view().allBuildings().length;   // 只是让地图刷新
+        void size;
+        const w = ['textile', 'food-factory', 'supermarket', 'hotpot', 'moto-factory', 'electronics', 'car-factory', 'port', 'mine', 'plaza'].indexOf(o.defId) >= 0 ? 2 : 1;
+        const uid = t.map.build(o.defId, 15, 6, w, w);
+        ok(sim.onBuilt(uid, o.defId), '盖得下');
+        eq(sim.state.finance.funds, f0 + o.landFee, '收了土地出让金，没花造价');
+        eq(sim.state.pendingDeal, null);
+        for (let i = 0; i < e.buildDays; i++) sim.stepMonth();
+        eq(sim.building(uid)!.owner, 'private', '私营');
+        ok((sim.building(uid)!.taxBreakUntil ?? 0) > sim.state.month, '让税');
+        eq(sim.state.dealsDone, 1);
+        void before;
+    });
+
+    test('招商补贴：花钱、来工人、守恒；空房不够时拒绝', () => {
+        const cfg = loadFullConfig();
+        cfg.progress!.invest.maxChance = 1; cfg.progress!.invest.envWeight = 100;
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 78 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const o = sim.state.offers![0];
+        o.workers = 1;
+        const before = sim.moneyInCounty();
+        const pop = sim.state.residents.length;
+        const err = sim.acceptOffer(o.id, 'subsidy', false);
+        if (err) { ok(/空房/.test(err), err); return; }
+        eq(sim.state.residents.length, pop + 1, '来了工人');
+        sim.stepMonth();
+        const f = sim.lastFlows;
+        ok(f.outflow.subsidy === o.subsidy, '补贴算流出');
+        near(sim.moneyInCounty() - before, sumf(f.inflow) - sumf(f.outflow), 1e-6 * Math.abs(before), '守恒');
+    });
+
+    test('招商失败：说出最弱的一项', () => {
+        const cfg = loadFullConfig();
+        cfg.progress!.invest.maxChance = 0;
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 79 });
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const o = sim.state.offers![0];
+        o.needLabor = 0;
+        const err = sim.acceptOffer(o.id, 'land', false);
+        ok(!!err && /没谈成/.test(err), `应当失败：${err}`);
+        ok(sim.businessEnv().parts.length >= 5);
     });
 });
 

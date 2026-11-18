@@ -53,6 +53,14 @@ export function loadConfig(root = join(process.cwd(), 'assets/resources/config')
     return makeSimConfig(economy, names);
 }
 
+/** 带研究 / 目标 / 心愿的完整配置（D026）。老测试用 loadConfig（全部解锁、自动升级） */
+export function loadFullConfig(root = join(process.cwd(), 'assets/resources/config')): SimConfig {
+    const economy = JSON.parse(readFileSync(join(root, 'economy.json'), 'utf8'));
+    const names = JSON.parse(readFileSync(join(root, 'names.json'), 'utf8'));
+    const progress = JSON.parse(readFileSync(join(root, 'progress.json'), 'utf8'));
+    return makeSimConfig(economy, names, progress);
+}
+
 /** 一个最小的像样县城：一条主路 + 两栋房 + 几家店 */
 export function basicTown(cfg: SimConfig) {
     const map = new MapBuilder(24, 24);

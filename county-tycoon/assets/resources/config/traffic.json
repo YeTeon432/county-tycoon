@@ -1,16 +1,49 @@
 {
-  "_说明": "街上的人和车的速度（D022，DESIGN 11.3）。speed 单位：格 / 秒；roads 是各类道路上的倍率。改这里不用改代码。",
+  "_说明": "街上的人和车（D022 / D024，DESIGN 11.3、15）。speed 单位：格 / 秒；roads 是各类道路上的倍率；day = 一个月演成的一天从几点到几点；trip.targetSeconds = 一趟路希望几秒（1 倍速）走完，路长时最多加速 maxHurry 倍；minDriveCells = 路短于这么多格，有车也走路；maxOnStreet = 街上同时最多画几个人。改这里不用改代码。",
   "vehicles": {
-    "walk":  { "speed": 0.6 },
-    "ebike": { "speed": 1.3 },
-    "moto":  { "speed": 1.7 },
-    "car":   { "speed": 2.2 }
+    "walk": {
+      "speed": 0.6
+    },
+    "ebike": {
+      "speed": 1.3
+    },
+    "moto": {
+      "speed": 1.7
+    },
+    "car": {
+      "speed": 2.2
+    }
   },
   "roads": {
-    "dirt":   { "walk": 1.0, "ebike": 0.8, "moto": 0.75, "car": 0.45 },
-    "city":   { "walk": 1.0, "ebike": 1.0, "moto": 1.0,  "car": 1.0 },
-    "bridge": { "walk": 1.0, "ebike": 1.0, "moto": 1.0,  "car": 1.0 }
+    "dirt": {
+      "walk": 1.0,
+      "ebike": 0.8,
+      "moto": 0.75,
+      "car": 0.45
+    },
+    "city": {
+      "walk": 1.0,
+      "ebike": 1.0,
+      "moto": 1.0,
+      "car": 1.0
+    },
+    "bridge": {
+      "walk": 1.0,
+      "ebike": 1.0,
+      "moto": 1.0,
+      "car": 1.0
+    }
   },
   "personalSpread": 0.1,
-  "driveShare": 0.7
+  "driveShare": 0.7,
+  "day": {
+    "startHour": 6,
+    "endHour": 22
+  },
+  "trip": {
+    "targetSeconds": 8,
+    "maxHurry": 2.5,
+    "minDriveCells": 4
+  },
+  "maxOnStreet": 60
 }

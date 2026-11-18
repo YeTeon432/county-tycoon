@@ -22,17 +22,17 @@ function loadJson(path: string): Promise<any> {
     });
 }
 
-export function loadSimJson(): Promise<[any, any]> {
-    return Promise.all([loadJson('config/economy'), loadJson('config/names')]);
+export function loadSimJson(): Promise<[any, any, any]> {
+    return Promise.all([loadJson('config/economy'), loadJson('config/names'), loadJson('config/progress')]);
 }
 
 /** state 给了就是读档：接着存档里的居民、财政、随机数往下跑（D022 接上读档） */
-export function createSimulation(model: TownModel, economyJson: any, namesJson: any, seed: number, state?: SimState): Simulation {
+export function createSimulation(model: TownModel, economyJson: any, namesJson: any, seed: number, state?: SimState, progressJson: any = null): Simulation {
     const view = new SimpleTownView(model.width, model.height, () =>
         model.allBuildings().map((b) => ({
             uid: b.uid, defId: b.def.id,
             col: b.col, row: b.row, width: b.def.width, height: b.def.height,
             road: b.def.flat,
         })));
-    return new Simulation(makeSimConfig(economyJson, namesJson), view, state ? { state } : { seed });
+    return new Simulation(makeSimConfig(economyJson, namesJson, progressJson), view, state ? { state } : { seed });
 }

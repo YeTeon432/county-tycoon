@@ -18,7 +18,7 @@ const SORTS: { key: SortKey; label: string }[] = [
     { key: 'salary', label: '按收入' },
     { key: 'age', label: '按年龄' },
     { key: 'savings', label: '按储蓄' },
-    { key: 'mood', label: '按心情' },
+    { key: 'mood', label: '按幸福度' },
 ];
 
 const FILTERS: { key: FilterKey; label: string }[] = [
@@ -81,7 +81,7 @@ export class ResidentListPanel extends Panel {
         const tiles: [string, string, Color][] = [
             ['人口', `${sum.population}`, UI_PALETTE.blue],
             ['就业率', `${rate}%`, rate >= 60 ? UI_PALETTE.green : UI_COLOR.down],
-            ['平均心情', sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—', sum.population > 0 ? moodColor(sum.avgMood) : UI_COLOR.textDim],
+            ['平均幸福度', sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—', sum.population > 0 ? moodColor(sum.avgMood) : UI_COLOR.textDim],
             ['平均工资', formatMoney(sum.avgSalary), UI_COLOR.gold],
             ['平均储蓄', formatMoney(sum.avgSavings), UI_COLOR.gold],
             ['有车率', `${carRate}%`, UI_PALETTE.blue],
@@ -205,9 +205,9 @@ export class ResidentListPanel extends Panel {
 
     /** 一行：头像 · 名字 / 年龄工作心情 · 右侧月薪 */
     private buildRow(row: Node, W: number, r: Resident): void {
-        const job = r.jobTitle || (r.age >= 18 && r.age < 60 ? '待业' : '—');
+        const job = r.jobTitle || (r.idle ? '赋闲' : r.age >= 18 && r.age < 60 ? '待业' : '—');
         buildPersonRow(row, r, this._list, this._onResidentTap,
             { caption: '月薪', value: r.salary > 0 ? formatMoney(r.salary) : '—', color: r.salary > 0 ? UI_COLOR.gold : UI_COLOR.textDim },
-            `${r.age} 岁 · ${job} · 心情 ${Math.round(r.mood)}`);
+            `${r.age} 岁 · ${job} · 幸福度 ${Math.round(r.mood)}`);
     }
 }

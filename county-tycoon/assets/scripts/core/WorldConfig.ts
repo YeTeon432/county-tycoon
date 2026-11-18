@@ -46,7 +46,7 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
     zoomLevels: [2, 3, 4, 5],
     defaultZoomIndex: 2,
     palette: {
-        background: '#2e222f',
+        background: '#74d466',
         ground: '#547e64',
         gridLine: '#3a5b46',
         border: '#b2ba90',

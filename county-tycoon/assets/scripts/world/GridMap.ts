@@ -99,6 +99,10 @@ export class GridMap extends Component {
             return art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
         }
 
+        // 装饰地块：flat 且有 decoFrame 名字（T218）
+        const deco = this.decoFrame(col, row);
+        if (deco) return art.groundByName(deco) ?? art.ground(0);
+
         // 地形
         const terrain = this._terrain;
         if (terrain && art.hasGroundNames) {
@@ -108,6 +112,19 @@ export class GridMap extends Component {
 
         // 草地变体按坐标哈希取，保证同一格每次都一样；第 0 帧最常见，带花的最少
         return art.ground(this.grassVariant(col, row));
+    }
+
+    /** flat 装饰地块的帧名（T218）：dirt-tile / flagstone / flower-bed */
+    private static readonly DECO_FRAMES: Record<string, string> = {
+        'dirt-tile': 'dirt-tile',
+        'flagstone': 'flagstone',
+        'flower-bed': 'flower-bed',
+    };
+
+    private decoFrame(col: number, row: number): string | null {
+        const b = this._model ? this._model.getAt(col, row) : null;
+        if (!b || !b.def.flat || b.def.road) return null;
+        return GridMap.DECO_FRAMES[b.def.id] ?? null;
     }
 
     /** 地形格 → 帧。桥面也在这里，因为桥没有对应的建筑图 */

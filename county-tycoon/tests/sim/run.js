@@ -39,6 +39,8 @@ if (process.argv.includes('--sweep')) {
     require(path.join(outDir, 'tests/sim/sweep.js')).main();
 } else if (process.argv.includes('--vehicles')) {
     require(path.join(outDir, 'tests/sim/longrun.js')).vehiclesMain();
+} else if (process.argv.includes('--diag')) {
+    require(path.join(outDir, 'tests/sim/diag.js')).diagMain();
 } else if (process.argv.includes('--long')) {
     require(path.join(outDir, 'tests/sim/longrun.js')).main();
 } else {

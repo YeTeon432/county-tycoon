@@ -23,6 +23,10 @@ export class ZoomButtons extends Component {
     private static readonly GAP = 10;
 
     /** @param bottomReserve 底部被建筑栏占掉的高度 */
+    static totalHeight(): number {
+        return ZoomButtons.SIZE * 2 + ZoomButtons.MID_H + ZoomButtons.GAP * 2;
+    }
+
     build(bottomReserve: number): void {
         const visible = view.getVisibleSize();
         const S = ZoomButtons.SIZE, G = ZoomButtons.GAP, M = ZoomButtons.MID_H;
@@ -50,7 +54,7 @@ export class ZoomButtons extends Component {
 
     /** 倍率变化后刷新：中间显示当前档，到头的按钮图标变浅 */
     refresh(zoom: number, index: number, count: number): void {
-        if (this._label) this._label.string = `×${zoom}`;
+        if (this._label) this._label.string = `×${Math.round(zoom * 10) / 10}`;
         if (this._plus) this._plus.icon.color = index < count - 1 ? UI_PALETTE.ink : UI_COLOR.border;
         if (this._minus) this._minus.icon.color = index > 0 ? UI_PALETTE.ink : UI_COLOR.border;
     }

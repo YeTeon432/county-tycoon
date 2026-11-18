@@ -68,6 +68,9 @@
   "forest-3": 62,
   "farm-0": 63,
   "farm-1": 64,
-  "pond": 65
+  "pond": 65,
+  "dirt-tile": 66,
+  "flagstone": 67,
+  "flower-bed": 68
  }
 }

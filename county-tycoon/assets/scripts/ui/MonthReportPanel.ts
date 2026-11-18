@@ -26,14 +26,18 @@ const INCOME_ROWS: { key: keyof MonthlyReport['income']; label: string }[] = [
     { key: 'income', label: '个人所得税' },
     { key: 'land', label: '土地出让' },
     { key: 'investment', label: '招商引资' },
+    { key: 'profit', label: '县属店厂利润' },
+    { key: 'rent', label: '住房租金' },
 ];
 
 const EXPENSE_ROWS: { key: keyof MonthlyReport['expense']; label: string }[] = [
     { key: 'construction', label: '建设支出' },
     { key: 'upkeep', label: '维护费' },
+    { key: 'services', label: '公共服务' },
     { key: 'publicWages', label: '公职工资' },
     { key: 'pension', label: '养老金' },
-    { key: 'promotion', label: '宣传推广' },
+    { key: 'promotion', label: '招商补贴' },
+    { key: 'research', label: '研究费' },
 ];
 
 @ccclass('MonthReportPanel')

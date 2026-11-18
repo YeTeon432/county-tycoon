@@ -234,6 +234,19 @@ export class TownModel {
         return placed;
     }
 
+    /** 原地换成同尺寸的另一种建筑（住户自家翻盖，D026）。尺寸不同返回 false */
+    replaceDef(uid: number, def: BuildingDef): boolean {
+        let found = false;
+        for (let i = 0; i < this._cells.length; i++) {
+            const b = this._cells[i];
+            if (!b || b.uid !== uid) continue;
+            if (b.def.width !== def.width || b.def.height !== def.height) return false;
+            b.def = def;
+            found = true;
+        }
+        return found;
+    }
+
     /** uid 是否已经被占（读档时查重用） */
     hasUid(uid: number): boolean {
         for (let i = 0; i < this._cells.length; i++) {

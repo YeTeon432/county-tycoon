@@ -1,0 +1,1 @@
+{ "platform": "web-mobile", "debug": true, "packages": { "web-mobile": { "orientation": "portrait" } } }

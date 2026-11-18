@@ -1,7 +1,7 @@
 import { Simulation } from '../../assets/scripts/core/sim/Simulation';
 import { PlacedInfo, SimpleTownView } from '../../assets/scripts/core/sim/townView';
 import { Demand } from '../../assets/scripts/core/sim/types';
-import { loadConfig } from './fixtures';
+import { loadConfig, loadFullConfig } from './fixtures';
 
 /**
  * T312 快进测试：在 node 下跑 50 年，看人口 / 财政 / 就业 / 心情曲线崩不崩。
@@ -55,6 +55,19 @@ class FlatMap {
         }
         return out;
     }
+    /** 离 (col, row) 最近的挨着道路的空地（像玩家一样「盖在他家附近」） */
+    freeNear(col0: number, row0: number, w: number, h: number): { col: number; row: number } | null {
+        let best: { col: number; row: number } | null = null, bd = Infinity;
+        for (let row = Math.max(0, row0 - 8); row < Math.min(this.n - h, row0 + 9); row++) {
+            for (let col = Math.max(0, col0 - 8); col < Math.min(this.n - w, col0 + 9); col++) {
+                const d = Math.abs(col - col0) + Math.abs(row - row0);
+                if (d >= bd || !this.free(col, row, w, h)) continue;
+                const around = [this.cells[row - 1]?.[col], this.cells[row + h]?.[col], this.cells[row]?.[col - 1], this.cells[row]?.[col + w]];
+                if (around.some((c) => c && c.road)) { best = { col, row }; bd = d; }
+            }
+        }
+        return best;
+    }
     /** 挨着道路的空地 */
     freeNextToRoad(w: number, h: number): { col: number; row: number } | null {
         for (let row = 0; row < this.n - h; row++) {
@@ -90,6 +103,8 @@ export interface YearRow {
     car: number;
     /** 18～65 岁有工作的人（买车资格的分母） */
     eligible: number;
+    /** 收支明细（T532 调数值时用，只有 opts.probe 时才有） */
+    parts?: Record<string, number>;
 }
 
 export interface LongRunOpts {
@@ -99,10 +114,15 @@ export interface LongRunOpts {
     carWhenCounty?: boolean;
     /** 从第几个月起盖汽车厂，不看城镇等级（自动县长不盖学校，升不到县城，快进时用这个看汽车） */
     carFromMonth?: number;
+    /** 用老配置（没有研究 / 阶段目标）*/
+    legacy?: boolean;
+    /** 每年多记一份收支明细（T532 调数值用） */
+    probe?: boolean;
 }
 
 export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
-    const cfg = loadConfig();
+    // D026：带研究 / 目标的完整配置；opts.legacy 时用老配置（全部解锁、自动升级）
+    const cfg = opts.legacy ? loadConfig() : loadFullConfig();
     const map = new FlatMap(SIZE);
 
     // 开局：一张连通的方格路网（每 5 格一条街）+ 两栋自建房 + 一家早餐铺
@@ -136,6 +156,31 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
         // ── 自动县长：每月开工 ──
         const s = sim.state;
         const sum = sim.summary();
+        const can = (id: string) => !sim.isUnlocked || sim.isUnlocked(id);
+
+        // 0. D026：目标全完成就申请升级；没在研究就挑最便宜的能研究的（留够 2 万周转）
+        if (sim.upgradeLevel) sim.upgradeLevel();
+        if (sim.researchList && sim.startResearch && !s.research) {
+            const ready = sim.researchList().filter((r) => r.state === 'ready' && r.cost + 20000 <= s.finance.funds)
+                .sort((a, b) => a.cost - b.cost);
+            if (ready.length) sim.startResearch(ready[0].id);
+        }
+
+        // 0.5 D026：照着居民心愿盖（一个月最多照顾一个心愿），盖在他家附近
+        for (const r of s.residents) {
+            const w = r.wish;
+            if (!w || !w.suggest || r.homeId === null || !can(w.suggest) || !sim.canAfford(w.suggest)) continue;
+            const home = map.list().find((b) => b.uid === r.homeId);
+            if (!home) continue;
+            const big = ['plaza', 'school', 'supermarket', 'hotpot', 'textile', 'food-factory', 'moto-factory'].indexOf(w.suggest) >= 0 ? 2 : 1;
+            const spot = map.freeNear(home.col, home.row, big, big);
+            if (!spot) continue;
+            const uid = map.put(w.suggest, spot.col, spot.row, big, big);
+            if (uid === null) continue;
+            town.refresh();
+            if (!sim.onBuilt(uid, w.suggest)) map.clear(spot.col, spot.row);
+            break;
+        }
 
         // 1. 住房不够就盖房（人口接近住房上限时）
         let housing = 0;
@@ -147,8 +192,8 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
             occupied += b.residentIds.length;
         }
         if (housing - occupied < 3) {
-            const big = sum.population > 30;
-            const defId = big ? 'apartment' : 'house';
+            const big = sum.population > 30 && can('apartment');
+            const defId = big ? 'apartment' : can('hut') && !opts.legacy ? 'hut' : 'house';
             const econ = cfg.building(defId)!;
             if (sim.canAfford(defId)) {
                 const spot = map.freeNextToRoad(econ === null ? 1 : (big ? 2 : 1), big ? 2 : 1);
@@ -178,7 +223,8 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
                 fun: ['milk-tea', 'net-cafe', 'plaza'],
                 other: ['barber', 'phone-shop', 'tutoring'],
             };
-            const list = candidates[d];
+            const list = candidates[d].filter(can);
+            if (!list.length) continue;
             const pickId = list[(shopCount.get(d) ?? 0) % list.length];
             const econ = cfg.building(pickId)!;
             if (!sim.canAfford(pickId)) continue;
@@ -206,7 +252,7 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
         }
         const jobStarved = unmet === 0 && freeSpotCount() > 0 && housing - occupied > 0;
         if (positions < sum.population * 0.8 || jobStarved) {
-            const defId = sum.population > 60 ? 'textile' : 'workshop';
+            const defId = sum.population > 60 && can('textile') ? 'textile' : 'workshop';
             const econ = cfg.building(defId)!;
             if (sim.canAfford(defId)) {
                 const w = defId === 'workshop' ? 1 : 2;
@@ -223,7 +269,7 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
 
         // 4. 车厂（D022 快进用）
         const tryBuild = (defId: string) => {
-            if (s.buildings.some((b) => b.defId === defId) || !sim.canAfford(defId)) return;
+            if (s.buildings.some((b) => b.defId === defId) || !sim.canAfford(defId) || !can(defId)) return;
             const spot = map.freeNextToRoad(2, 2);
             if (!spot) return;
             const uid = map.put(defId, spot.col, spot.row, 2, 2);
@@ -265,6 +311,7 @@ export function runLongTest(years = 50, opts: LongRunOpts = {}): YearRow[] {
                 car: sim.state.residents.filter((r) => r.vehicle === 'car').length,
                 eligible: sim.state.residents.filter((r) => r.age >= cfg.economy.vehicles.minAge
                     && r.age <= cfg.economy.vehicles.maxAge && r.jobId !== null).length,
+                parts: opts.probe ? { ...rep.income, ...rep.expense } : undefined,
             });
         }
     }

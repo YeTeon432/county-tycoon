@@ -6,7 +6,7 @@ import { Panel } from './Panel';
 import { buildPersonRow } from './PersonRow';
 import { ListRow, ScrollList } from './ScrollList';
 import {
-    formatMoney, formatNumber, makeButton, makeLabel, makeLabelRight, makeSectionTitle, makeStatTile,
+    formatMoney, formatNumber, makeButton, makeLabel, makeLabelLeft, makeLabelRight, makeSectionTitle, makeStatTile,
     moodColor, UI_COLOR, UI_FONT, UI_PALETTE,
 } from './UiTheme';
 
@@ -84,18 +84,50 @@ export class BuildingPanel extends Panel {
             const avgMood = people.length > 0 ? people.reduce((s, r) => s + r.mood, 0) / people.length : 0;
             const working = people.filter((r) => r.jobId !== null).length;
             tiles.push(['住户', `${people.length} 人`, UI_PALETTE.blue]);
-            tiles.push(['平均心情', people.length > 0 ? `${Math.round(avgMood)}` : '—', people.length > 0 ? moodColor(avgMood) : UI_COLOR.textDim]);
+            tiles.push(['平均幸福度', people.length > 0 ? `${Math.round(avgMood)}` : '—', people.length > 0 ? moodColor(avgMood) : UI_COLOR.textDim]);
             tiles.push(['有工作', `${working} 人`, UI_PALETTE.green]);
         } else {
+            const profit = b ? (b.lastProfit ?? 0) : 0;
             tiles.push(['上月营业额', formatMoney(b ? b.lastRevenue : 0), UI_COLOR.gold]);
-            tiles.push(['服务人次', formatNumber(b ? b.lastCustomers : 0), UI_PALETTE.blue]);
-            tiles.push(['上交税款', formatMoney(b ? b.lastTax : 0), UI_PALETTE.green]);
+            tiles.push(['服务人次', formatNumber(b ? Math.round(b.lastCustomers) : 0), UI_PALETTE.blue]);
+            tiles.push(['上月利润', formatMoney(Math.round(profit)), profit >= 0 ? UI_PALETTE.green : UI_PALETTE.coral]);
         }
         for (let i = 0; i < tiles.length; i++) {
             const t = makeStatTile(content, tileW, tileH, tiles[i][0], tiles[i][1], tiles[i][2]);
             t.node.setPosition(-W / 2 + tileW / 2 + i * (tileW + gap), y - tileH / 2, 0);
         }
         y -= tileH + 36;
+
+        // ── 上月账目（D026 真实账目）：营业额 − 工资 − 成本 − 税 − 维护 = 利润 ──
+        if (!isHome && b && (b.lastRevenue || b.lastWages || b.lastUpkeep)) {
+            const rows: [string, number][] = [
+                ['营业额', b.lastRevenue],
+                ['员工工资', -(b.lastWages ?? 0)],
+                ['进货 / 原料成本', -(b.lastCost ?? 0)],
+                ['上交税款', -b.lastTax],
+                ['维护费', -(b.lastUpkeep ?? 0)],
+            ];
+            if (b.lastOutside) rows.splice(1, 0, ['　其中过路客', b.lastOutside]);
+            for (const [label, v] of rows) {
+                const l = makeLabelLeft(content, 'AccL', label, UI_FONT.small, UI_COLOR.textDim, W * 0.6);
+                l.node.setPosition(-W / 2, y, 0);
+                const r = makeLabelRight(content, 'AccV', formatMoney(Math.round(v)), UI_FONT.small, v < 0 ? UI_COLOR.down : UI_COLOR.text, W * 0.4);
+                r.node.setPosition(W / 2, y, 0);
+                y -= 30;
+            }
+            if (b.owner === 'private') {
+                const tb = (b.taxBreakUntil ?? 0) > sim.state.month ? `，让税还剩 ${(b.taxBreakUntil ?? 0) - sim.state.month} 天` : '';
+                const pl = makeLabelLeft(content, 'Owner', `招商引进的私营企业：利润归企业，县里收税${tb}`, UI_FONT.small, UI_PALETTE.blue, W);
+                pl.node.setPosition(-W / 2, y, 0);
+                y -= 30;
+            }
+            if ((b.lossMonths ?? 0) > 0) {
+                const warn = makeLabelLeft(content, 'Loss', `已连续亏损 ${b.lossMonths} 个月，满 3 个月会裁员`, UI_FONT.small, UI_COLOR.down, W);
+                warn.node.setPosition(-W / 2, y, 0);
+                y -= 30;
+            }
+            y -= 12;
+        }
 
         // ── 名单 ──
         makeSectionTitle(content, W, y, isHome ? '住户名单' : '员工名单');
@@ -176,6 +208,6 @@ export class BuildingPanel extends Panel {
     /** 名单一行：头像 · 名字 · 年龄工作 · 心情 */
     private buildPersonRow(row: Node, r: Resident): void {
         buildPersonRow(row, r, this._list, this._onResidentTap,
-            { caption: '心情', value: `${Math.round(r.mood)}`, color: moodColor(r.mood) });
+            { caption: '幸福度', value: `${Math.round(r.mood)}`, color: moodColor(r.mood) });
     }
 }

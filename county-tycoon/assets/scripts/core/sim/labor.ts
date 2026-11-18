@@ -122,6 +122,7 @@ export function openingsFor(
     for (const b of buildings) {
         const econ = econOf(b.uid);
         if (!econ || !econ.jobs.length) continue;
+        if ((b.freezeMonths ?? 0) > 0) continue;   // 刚裁过员，暂停招人（D026）
         const st = staffing(b, econ, residentsById);
         if (!st.open.length) continue;
         const positions = positionsOf(econ);

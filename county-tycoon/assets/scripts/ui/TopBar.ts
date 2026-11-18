@@ -1,16 +1,18 @@
 import { _decorator, Color, Component, Graphics, Label, Layers, Node, tween, Tween, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
+import { getPlatform } from '../platform/Platform';
+import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
-    drawShadow, formatNumber, IconName, makeIcon, makeLabelLeft, makePanelNode, makeRoundButton,
+    drawShadow, formatNumber, IconName, makeIcon, makeLabel, makeLabelLeft, makePanelNode, makeRoundButton,
     UI_COLOR, UI_FONT, UI_PALETTE,
 } from './UiTheme';
 
 const { ccclass } = _decorator;
 
-/** 时间档位：0 暂停 / 1 正常 / 2 两倍 */
-export type Speed = 0 | 1 | 2;
+/** 时间档位：0 暂停 / 1 正常 / 2 两倍 / 3 三倍（D025） */
+export type Speed = 0 | 1 | 2 | 3;
 
 /**
  * 顶栏（T307，T406 改成明亮风，DESIGN 8.2）。
@@ -25,8 +27,31 @@ export type Speed = 0 | 1 | 2;
  */
 @ccclass('TopBar')
 export class TopBar extends Component {
-    /** 顶栏占掉的高度（地图上方被遮住的部分）：上边距 16 + 胶囊 56 + 行距 14 + 按钮 64 + 8 */
-    static readonly HEIGHT = 158;
+    /** 顶栏自身高度：上边距 16 + 胶囊 56 + 行距 14 + 按钮 64 + 8 */
+    static readonly BODY_HEIGHT = 158;
+    /** 顶栏占掉的高度（地图上方被遮住的部分）= 避让 + 自身高度 */
+    static get HEIGHT(): number {
+        return TopBar.topInset() + TopBar.BODY_HEIGHT;
+    }
+
+    private static _inset: number | null = null;
+    /**
+     * 屏幕最上面要让出来的高度（设计分辨率像素）：
+     * 有宿主胶囊（微信 / 抖音）就让到胶囊下面，否则让到安全区（灵动岛 / 刘海 / 状态栏）下面。
+     */
+    static topInset(): number {
+        if (TopBar._inset !== null) return TopBar._inset;
+        let inset = 0;
+        const info = getPlatform().systemInfo();
+        const visible = view.getVisibleSize();
+        if (info.screenWidth > 0) {
+            const k = visible.width / info.screenWidth;
+            const logical = info.menuButton ? info.menuButton.bottom : info.safeArea.top;
+            inset = Math.max(0, Math.round(logical * k));
+        }
+        TopBar._inset = inset;
+        return inset;
+    }
     static readonly MARGIN_TOP = 16;
     static readonly CHIP_H = 56;
     static readonly BTN = 64;
@@ -51,11 +76,13 @@ export class TopBar extends Component {
     private _hint: Label | null = null;
     private _hintBox: Node | null = null;
     private _hintText = '';
+    private _dayText = '';
 
     private _play: ReturnType<typeof makeRoundButton> | null = null;
     private _fast: ReturnType<typeof makeRoundButton> | null = null;
     private _report: ReturnType<typeof makeRoundButton> | null = null;
     private _reportDot: Node | null = null;
+    private _fastBadge: Label | null = null;
     /** 有没有"还没看过"的新账单 */
     private _reportFresh = false;
 
@@ -69,12 +96,12 @@ export class TopBar extends Component {
         this._sim = sim;
         const visible = view.getVisibleSize();
         const W = visible.width;
-        const H = TopBar.HEIGHT;
+        const H = TopBar.BODY_HEIGHT;
 
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
         trans.setContentSize(W, H);
-        this.node.setPosition(0, visible.height / 2 - H / 2, 0);
+        this.node.setPosition(0, visible.height / 2 - TopBar.topInset() - H / 2, 0);
 
         this.buildChips(W, H);
         this.buildSecondRow(W, H);
@@ -97,7 +124,13 @@ export class TopBar extends Component {
             x += w + gap;
             return chip;
         };
-        this._date = make(0, 'Date', 'calendar').label;
+        // 日期胶囊两行：「1 年 11 月」+「上午 8 点」（D024，一个月演成一天）
+        const date = make(0, 'Date', 'calendar');
+        this._date = date.label;
+        this._date.fontSize = 20;
+        this._date.lineHeight = 22;
+        this._date.overflow = Label.Overflow.SHRINK;
+        this._date.node.getComponent(UITransform)!.setContentSize(widths[0] - 64, TopBar.CHIP_H - 8);
         const funds = make(1, 'Funds', 'coin');
         this._funds = funds.label;
         this._fundsChip = funds.node;
@@ -156,11 +189,26 @@ export class TopBar extends Component {
         this.guard(report.node);
 
         x -= S + GAP;
-        const fast = makeRoundButton(this.node, 'Speed_2', 'fast', S, () => {
-            this.pickSpeed(this._speed === 2 ? 1 : 2);
+        // 快进：点一下换一档 1× → 2× → 3× → 1×；暂停中点它 = 直接 2×
+        const fast = makeRoundButton(this.node, 'Speed_fast', 'fast', S, () => {
+            const next: Speed = this._speed === 0 || this._speed === 1 ? 2 : this._speed === 2 ? 3 : 1;
+            this.pickSpeed(next);
         });
         fast.node.setPosition(x, y, 0);
         this._fast = fast;
+        // 右下角小角标「×2 / ×3」
+        const badge = makePanelNode(fast.node, 'Badge', 34, 22);
+        badge.setPosition(S / 2 - 10, -S / 2 + 8, 0);
+        const bgx = badge.addComponent(Graphics);
+        bgx.fillColor = UI_PALETTE.white;
+        bgx.roundRect(-17, -11, 34, 22, 11);
+        bgx.fill();
+        bgx.fillColor = UI_PALETTE.coral;
+        bgx.roundRect(-15, -9, 30, 18, 9);
+        bgx.fill();
+        this._fastBadge = makeLabel(badge, 'Txt', '', 15, UI_PALETTE.white, 30);
+        this._fastBadge.isBold = true;
+        badge.active = false;
         this.guard(fast.node);
 
         x -= S + GAP;
@@ -223,7 +271,8 @@ export class TopBar extends Component {
         const state = sim.state;
         const sum = sim.summary();
 
-        if (this._date) this._date.string = monthLabel(state.month);
+        this._dayText = DayClock.label();
+        if (this._date) this._date.string = `${monthLabel(state.month)}\n${this._dayText}`;
         if (this._funds && !this._roll && this._holdFunds === null) this.setFundsText(state.finance.funds);
         if (this._population) this._population.string = `${sum.population}`;
         if (this._mood) {
@@ -276,6 +325,11 @@ export class TopBar extends Component {
     }
 
     protected update(dt: number): void {
+        // 钟点变了才改字（每游戏小时一次）
+        if (this._date && this._sim && DayClock.label() !== this._dayText) {
+            this._dayText = DayClock.label();
+            this._date.string = `${monthLabel(this._sim.state.month)}\n${this._dayText}`;
+        }
         const roll = this._roll;
         if (!roll || !this._sim) return;
         roll.t += dt;
@@ -307,7 +361,11 @@ export class TopBar extends Component {
             this._play.setIcon(this._speed === 0 ? 'play' : 'pause');
             this._play.setActive(this._speed === 0);
         }
-        if (this._fast) this._fast.setActive(this._speed === 2);
+        if (this._fast) this._fast.setActive(this._speed >= 2);
+        if (this._fastBadge) {
+            this._fastBadge.node.parent!.active = this._speed >= 2;
+            this._fastBadge.string = `×${this._speed}`;
+        }
     }
 
     private guard(node: Node): void {

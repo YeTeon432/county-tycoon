@@ -11,6 +11,140 @@ export interface SimConfig {
     names: NameConfig;
     /** defId → 经营数据 */
     building: (defId: string) => BuildingEcon | null;
+    /** 研究 / 目标 / 心愿（progress.json，D026）。没配 = 一切都解锁、没有目标（老测试、MockSim） */
+    progress: ProgressConfig | null;
+}
+
+export interface ResearchDef {
+    id: string;
+    name: string;
+    unlocks: string[];
+    cost: number;
+    days: number;
+    level: TownLevel;
+    needPop: number;
+    /** 县里要有其中一种（'a|b'） */
+    needBuilding: string[];
+    needEdu: { edu: Education; count: number } | null;
+}
+
+export interface GoalDef {
+    kind: 'pop' | 'research' | 'wishes' | 'mood' | 'roads' | 'building' | 'employment' | 'streets' | 'deals';
+    target: number;
+    of: string[];
+    text: string;
+}
+
+export interface WishTuning {
+    chance: number;
+    minActive: number;
+    perPeople: number;
+    days: number;
+    doneMood: number;
+    expireMood: number;
+    doneBuzz: number;
+}
+
+export interface StreetDef {
+    id: string;
+    name: string;
+    members: string[];
+    outsideMult: number;
+    mood: number;
+    who: 'all' | 'kids' | 'young';
+    buzz: number;
+    effect: string;
+}
+
+export interface InvestConfig {
+    every: number;
+    max: number;
+    valid: number;
+    landFeeRate: number;
+    subsidyRate: number;
+    envWeight: number;
+    taxBreakBonus: number;
+    taxBreakMonths: number;
+    maxChance: number;
+    pool: Partial<Record<TownLevel, string[]>>;
+    companies: string[];
+}
+
+export interface ProgressConfig {
+    streets: { range: number; radius: number; list: StreetDef[] };
+    invest: InvestConfig;
+    initialUnlocked: string[];
+    research: ResearchDef[];
+    goals: Partial<Record<TownLevel, GoalDef[]>>;
+    levelReward: Partial<Record<TownLevel, number>>;
+    wishes: WishTuning;
+}
+
+export function parseProgress(json: any): ProgressConfig | null {
+    if (!json || typeof json !== 'object') return null;
+    const levelOf = (v: unknown): TownLevel => (LEVELS.indexOf(v as TownLevel) >= 0 ? v as TownLevel : 'village');
+    const split = (v: unknown) => (typeof v === 'string' && v ? v.split('|') : []);
+    const research: ResearchDef[] = (Array.isArray(json.research) ? json.research : []).filter((r: any) => r && typeof r.id === 'string').map((r: any) => ({
+        id: r.id,
+        name: typeof r.name === 'string' ? r.name : r.id,
+        unlocks: strList(r.unlocks),
+        cost: Math.max(0, Math.round(num(r.cost, 0))),
+        days: Math.max(1, Math.floor(num(r.days, 1))),
+        level: levelOf(r.level),
+        needPop: Math.max(0, num(r.needPop, 0)),
+        needBuilding: split(r.needBuilding),
+        needEdu: r.needEdu && typeof r.needEdu === 'object'
+            ? { edu: (EDU.indexOf(r.needEdu.edu) >= 0 ? r.needEdu.edu : 0) as Education, count: Math.max(0, num(r.needEdu.count, 0)) }
+            : null,
+    }));
+    const goals: Partial<Record<TownLevel, GoalDef[]>> = {};
+    const kinds = ['pop', 'research', 'wishes', 'mood', 'roads', 'building', 'employment', 'streets', 'deals'];
+    for (const lv of LEVELS) {
+        const list = json.goals?.[lv];
+        if (!Array.isArray(list)) continue;
+        goals[lv] = list.filter((g: any) => g && kinds.indexOf(g.kind) >= 0).map((g: any) => ({
+            kind: g.kind, target: num(g.target, 1), of: split(g.of), text: typeof g.text === 'string' ? g.text : g.kind,
+        }));
+    }
+    const reward: Partial<Record<TownLevel, number>> = {};
+    for (const lv of LEVELS) if (typeof json.levelReward?.[lv] === 'number') reward[lv] = json.levelReward[lv];
+    const w = json.wishes ?? {};
+    const st = json.streets ?? {};
+    const iv = json.invest ?? {};
+    const pool: Partial<Record<TownLevel, string[]>> = {};
+    for (const lv of LEVELS) if (Array.isArray(iv.pool?.[lv])) pool[lv] = strList(iv.pool[lv]);
+    return {
+        streets: {
+            range: Math.max(1, num(st.range, 4)),
+            radius: Math.max(1, num(st.radius, 8)),
+            list: (Array.isArray(st.list) ? st.list : []).filter((x: any) => x && typeof x.id === 'string').map((x: any) => ({
+                id: x.id, name: typeof x.name === 'string' ? x.name : x.id, members: strList(x.members),
+                outsideMult: Math.max(0, num(x.outsideMult, 1)), mood: num(x.mood, 0),
+                who: x.who === 'kids' || x.who === 'young' ? x.who : 'all', buzz: num(x.buzz, 0),
+                effect: typeof x.effect === 'string' ? x.effect : '',
+            })),
+        },
+        invest: {
+            every: Math.max(1, Math.floor(num(iv.every, 3))), max: Math.max(1, Math.floor(num(iv.max, 3))),
+            valid: Math.max(1, Math.floor(num(iv.valid, 7))), landFeeRate: num(iv.landFeeRate, 0.6),
+            subsidyRate: num(iv.subsidyRate, 0.5), envWeight: num(iv.envWeight, 0.9), taxBreakBonus: num(iv.taxBreakBonus, 0.2),
+            taxBreakMonths: Math.max(0, Math.floor(num(iv.taxBreakMonths, 12))), maxChance: clamp01(iv.maxChance, 0.9),
+            pool, companies: strList(iv.companies).length ? strList(iv.companies) : ['外地'],
+        },
+        initialUnlocked: strList(json.initialUnlocked),
+        research,
+        goals,
+        levelReward: reward,
+        wishes: {
+            chance: clamp01(w.chance, 0.25),
+            minActive: Math.max(0, num(w.minActive, 3)),
+            perPeople: Math.max(1, num(w.perPeople, 5)),
+            days: Math.max(1, Math.floor(num(w.days, 10))),
+            doneMood: num(w.doneMood, 15),
+            expireMood: num(w.expireMood, 5),
+            doneBuzz: num(w.doneBuzz, 0.05),
+        },
+    };
 }
 
 export interface EconomyConfig {
@@ -33,12 +167,37 @@ export interface EconomyConfig {
     /** 通勤超过这个距离开始扣心情 */
     commuteComfort: number;
     pension: number;
+    /** 公共服务（环卫、治安、管网）每人每月多少钱，按城镇等级乘倍率（T532）。财政出，流出县外 */
+    servicePerCapita: number;
+    serviceLevelMult: Record<string, number>;
+    /** 规模效应：人均公共服务 × (1 + 人口 / 这个数)；0 = 不加（T532） */
+    serviceCrowding: number;
     deathAge: number;
-    /** 心情低于这个数且持续几个月 → 搬走 */
+    /** 幸福度低于这个数 → 想走（D026：30） */
     leaveMood: number;
+    /** 想走之后的挽留期（月 = 天），到期还没回到 stayMood 就全家搬走 */
     leaveMonths: number;
+    /** 挽留成功的线：想走的人幸福度回到这个数以上就留下 */
+    stayMood: number;
+    /** 迁入：县城幸福度 → 吸引倍率的折线 [[幸福度, 倍率], ...]（DESIGN 16.2） */
+    immigrationCurve: [number, number][];
+    /** 口碑：每有一个人走 −、每月衰减比例、上限 */
+    buzzPerLeave: number;
+    buzzDecay: number;
+    buzzMax: number;
     /** 失业达到几个月 → 搬走 */
     unemployedLeaveMonths: number;
+    /** 过路客（县外客人）：每家店每月额外的营业额 = 满额营业额 × 这个比例，按城镇等级（D026） */
+    outsideShare: Record<TownLevel, number>;
+    /** 连续亏损几个月就裁一个人（至少留 1 人） */
+    layoffMonths: number;
+    /** 住户自家翻盖（DESIGN 23）：每月概率、存款要够翻盖费 × 几倍、平均幸福度门槛 */
+    renovateChance: number;
+    renovateSavingsRatio: number;
+    renovateMood: number;
+    /** 搬去更好的房子：每月概率、存款要够几个月房租 */
+    moveChance: number;
+    moveRentMonths: number;
     /** 每月迁入的基础吸引力 */
     immigrationRate: number;
     /** 开局给的启动资金 */
@@ -113,6 +272,14 @@ export interface ResidentTuning {
     retireAge: number;
     /** 住房拥挤：楼里人数 > 住房 × 这个比例就扣心情 */
     crowdRatio: number;
+    /** 赋闲（D024）：存款 ≥ 这么多个月的开销（房租 + idleLivingCost）就可以不上班 */
+    idleSavingsMonths: number;
+    /** 赋闲的人每月生活费（算门槛用） */
+    idleLivingCost: number;
+    /** 赋闲后存款跌到门槛的这个比例以下，才重新找工作（免得每月来回切） */
+    idleExitRatio: number;
+    /** 赋闲的人心情加成（有闲） */
+    idleMood: number;
     /** 空房多便宜算"最便宜的空房"（迁入时排序用） */
     moodDrift: number;
 }
@@ -146,7 +313,8 @@ const LEVELS: TownLevel[] = ['village', 'town', 'county', 'city', 'top100'];
 function fallbackEcon(defId: string): BuildingEcon {
     return {
         id: defId, cost: 0, upkeep: 0, housing: 0, jobs: [], demand: null,
-        capacity: 0, price: 0, env: 0, unlock: 'village', publicJob: false,
+        capacity: 0, price: 0, env: 0, unlock: 'village', publicJob: false, costRate: 0, buildDays: 0,
+        rent: 0, homeLevel: 0, homeMood: 0, upgradeTo: '', selfBuilt: false,
     };
 }
 
@@ -193,11 +361,19 @@ function parseEcon(raw: any, defId: string): BuildingEcon {
         env: Math.round(num(raw?.env, 0)),
         unlock,
         publicJob: raw?.publicJob === true,
+        buildDays: Math.max(0, Math.floor(num(raw?.buildDays, 1))),
+        rent: Math.max(0, num(raw?.rent, 0)),
+        homeLevel: Math.max(0, Math.floor(num(raw?.homeLevel, raw?.housing > 0 ? 1 : 0))),
+        homeMood: num(raw?.homeMood, 0),
+        upgradeTo: typeof raw?.upgradeTo === 'string' ? raw.upgradeTo : '',
+        selfBuilt: raw?.selfBuilt === true,
+        // 没写就按类型给：吃的进货贵，服务类便宜，工厂原料 0.3（D026）
+        costRate: clamp01(raw?.costRate, demand === 'food' ? 0.45 : demand === 'daily' ? 0.6 : demand ? 0.25 : 0.3),
     };
 }
 
 const DEFAULT_ECONOMY: EconomyConfig = {
-    secondsPerMonth: 20,
+    secondsPerMonth: 60,
     taxRate: { business: 0.1, industry: 0.15, income: 0.05 },
     incomeTaxThreshold: 2000,
     spendRate: 0.5,
@@ -208,10 +384,25 @@ const DEFAULT_ECONOMY: EconomyConfig = {
     rentPerPerson: 600,
     commuteComfort: 4,
     pension: 400,
+    servicePerCapita: 0,
+    serviceLevelMult: { village: 1, town: 1, county: 1, city: 1, top100: 1 },
+    serviceCrowding: 0,
     deathAge: 80,
-    leaveMood: 20,
+    leaveMood: 30,
     leaveMonths: 3,
+    stayMood: 35,
+    immigrationCurve: [[30, 0], [50, 1], [70, 2], [85, 2.5], [100, 2.5]],
+    buzzPerLeave: 0.05,
+    buzzDecay: 0.1,
+    buzzMax: 0.5,
     unemployedLeaveMonths: 6,
+    outsideShare: { village: 0.3, town: 0.2, county: 0.15, city: 0.1, top100: 0.1 },
+    layoffMonths: 3,
+    renovateChance: 0.12,
+    renovateSavingsRatio: 1.5,
+    renovateMood: 50,
+    moveChance: 0.1,
+    moveRentMonths: 12,
     immigrationRate: 0.6,
     startFunds: 100000,
     bailout: 8000,
@@ -236,6 +427,10 @@ const DEFAULT_ECONOMY: EconomyConfig = {
         workMinAge: 18,
         retireAge: 60,
         crowdRatio: 1,
+        idleSavingsMonths: 12,
+        idleLivingCost: 1000,
+        idleExitRatio: 0.5,
+        idleMood: 4,
         moodDrift: 0,
     },
     vehicles: {
@@ -321,6 +516,10 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         workMinAge: num(r.workMinAge, d.residents.workMinAge),
         retireAge: num(r.retireAge, d.residents.retireAge),
         crowdRatio: Math.max(0.1, num(r.crowdRatio, d.residents.crowdRatio)),
+        idleSavingsMonths: Math.max(0, num(r.idleSavingsMonths, d.residents.idleSavingsMonths)),
+        idleLivingCost: Math.max(0, num(r.idleLivingCost, d.residents.idleLivingCost)),
+        idleExitRatio: clamp01(r.idleExitRatio, d.residents.idleExitRatio),
+        idleMood: num(r.idleMood, d.residents.idleMood),
         moodDrift: num(r.moodDrift, d.residents.moodDrift),
     };
 
@@ -347,10 +546,32 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         rentPerPerson: Math.max(0, num(t.rentPerPerson, d.rentPerPerson)),
         commuteComfort: Math.max(0, num(t.commuteComfort, d.commuteComfort)),
         pension: Math.max(0, num(t.pension, d.pension)),
+        servicePerCapita: Math.max(0, num(t.servicePerCapita, d.servicePerCapita)),
+        serviceCrowding: Math.max(0, num(t.serviceCrowding, d.serviceCrowding)),
+        serviceLevelMult: { ...d.serviceLevelMult, ...((t.serviceLevelMult && typeof t.serviceLevelMult === 'object') ? t.serviceLevelMult as Record<string, number> : {}) },
         deathAge: Math.max(60, num(t.deathAge, d.deathAge)),
         leaveMood: Math.max(0, num(t.leaveMood, d.leaveMood)),
         leaveMonths: Math.max(1, Math.floor(num(t.leaveMonths, d.leaveMonths))),
+        stayMood: Math.max(0, num(t.stayMood, d.stayMood)),
+        immigrationCurve: Array.isArray(t.immigrationCurve) && t.immigrationCurve.every((p: unknown) => Array.isArray(p) && p.length === 2)
+            ? (t.immigrationCurve as [number, number][]).map(([a, b]) => [num(a, 0), num(b, 0)] as [number, number])
+            : d.immigrationCurve,
+        buzzPerLeave: num(t.buzzPerLeave, d.buzzPerLeave),
+        buzzDecay: clamp01(t.buzzDecay, d.buzzDecay),
+        buzzMax: num(t.buzzMax, d.buzzMax),
         unemployedLeaveMonths: Math.max(1, Math.floor(num(t.unemployedLeaveMonths, d.unemployedLeaveMonths))),
+        outsideShare: (() => {
+            const o = (t.outsideShare ?? {}) as Record<string, unknown>;
+            const out = { ...d.outsideShare };
+            for (const k of LEVELS) out[k] = clamp01(o[k], d.outsideShare[k]);
+            return out;
+        })(),
+        layoffMonths: Math.max(1, Math.floor(num(t.layoffMonths, d.layoffMonths))),
+        renovateChance: clamp01(t.renovateChance, d.renovateChance),
+        renovateSavingsRatio: Math.max(0, num(t.renovateSavingsRatio, d.renovateSavingsRatio)),
+        renovateMood: num(t.renovateMood, d.renovateMood),
+        moveChance: clamp01(t.moveChance, d.moveChance),
+        moveRentMonths: Math.max(0, num(t.moveRentMonths, d.moveRentMonths)),
         immigrationRate: Math.max(0, num(t.immigrationRate, d.immigrationRate)),
         startFunds: Math.max(0, num(src.startFunds, d.startFunds)),
         bailout: Math.max(0, num(t.bailout, d.bailout)),
@@ -393,7 +614,7 @@ export function parseNames(json: any): NameConfig {
 }
 
 /** 把两份 JSON 包成 SimConfig，顺带建好 defId → BuildingEcon 的索引 */
-export function makeSimConfig(economyJson: EconomyJson | null | undefined, namesJson: any): SimConfig {
+export function makeSimConfig(economyJson: EconomyJson | null | undefined, namesJson: any, progressJson: any = null): SimConfig {
     const economy = parseEconomy(economyJson);
     const names = parseNames(namesJson);
     const table = new Map<string, BuildingEcon>();
@@ -407,5 +628,6 @@ export function makeSimConfig(economyJson: EconomyJson | null | undefined, names
         economy,
         names,
         building: (defId: string) => table.get(defId) ?? null,
+        progress: parseProgress(progressJson),
     };
 }

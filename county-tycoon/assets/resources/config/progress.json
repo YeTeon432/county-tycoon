@@ -1,0 +1,556 @@
+{
+  "_说明": "D026 第二批：产业研究、阶段目标、居民心愿（DESIGN 17～19）。改这里不用改代码。研究：cost 建设资金，days 天（= 月），level 至少什么城镇等级，need* 是前置条件（县里真实的人和楼）。目标：kind 见 DESIGN 18。",
+  "initialUnlocked": [
+    "dirt-road",
+    "hut",
+    "breakfast",
+    "parcel",
+    "workshop",
+    "tree"
+  ],
+  "research": [
+    {
+      "id": "r-milk-tea",
+      "name": "奶茶店",
+      "unlocks": [
+        "milk-tea"
+      ],
+      "cost": 5000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-bbq",
+      "name": "烧烤摊",
+      "unlocks": [
+        "bbq"
+      ],
+      "cost": 5000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-barber",
+      "name": "理发店",
+      "unlocks": [
+        "barber"
+      ],
+      "cost": 5000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-plaza",
+      "name": "广场",
+      "unlocks": [
+        "plaza"
+      ],
+      "cost": 8000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-clinic",
+      "name": "卫生院",
+      "unlocks": [
+        "clinic"
+      ],
+      "cost": 10000,
+      "days": 2,
+      "level": "village",
+      "needPop": 10
+    },
+    {
+      "id": "r-brick",
+      "name": "砖瓦房（住户可以自己翻盖）",
+      "unlocks": [
+        "brick"
+      ],
+      "cost": 8000,
+      "days": 2,
+      "level": "village"
+    },
+    {
+      "id": "r-road",
+      "name": "城市道路",
+      "unlocks": [
+        "road"
+      ],
+      "cost": 15000,
+      "days": 2,
+      "level": "town"
+    },
+    {
+      "id": "r-shops",
+      "name": "超市 / 网吧",
+      "unlocks": [
+        "supermarket",
+        "net-cafe"
+      ],
+      "cost": 12000,
+      "days": 2,
+      "level": "town",
+      "needPop": 20
+    },
+    {
+      "id": "r-phone",
+      "name": "手机店",
+      "unlocks": [
+        "phone-shop"
+      ],
+      "cost": 10000,
+      "days": 2,
+      "level": "town",
+      "needPop": 20
+    },
+    {
+      "id": "r-tutoring",
+      "name": "补习班",
+      "unlocks": [
+        "tutoring"
+      ],
+      "cost": 12000,
+      "days": 2,
+      "level": "town",
+      "needEdu": {
+        "edu": 2,
+        "count": 2
+      }
+    },
+    {
+      "id": "r-hotpot",
+      "name": "火锅店",
+      "unlocks": [
+        "hotpot"
+      ],
+      "cost": 20000,
+      "days": 2,
+      "level": "town",
+      "needBuilding": "bbq"
+    },
+    {
+      "id": "r-light",
+      "name": "轻工业（纺织厂 / 食品厂）",
+      "unlocks": [
+        "textile",
+        "food-factory"
+      ],
+      "cost": 30000,
+      "days": 3,
+      "level": "town",
+      "needBuilding": "workshop"
+    },
+    {
+      "id": "r-moto",
+      "name": "摩托车厂",
+      "unlocks": [
+        "moto-factory"
+      ],
+      "cost": 40000,
+      "days": 3,
+      "level": "town",
+      "needBuilding": "textile|food-factory"
+    },
+    {
+      "id": "r-school",
+      "name": "学校",
+      "unlocks": [
+        "school"
+      ],
+      "cost": 40000,
+      "days": 3,
+      "level": "town",
+      "needPop": 30
+    },
+    {
+      "id": "r-police",
+      "name": "派出所",
+      "unlocks": [
+        "police"
+      ],
+      "cost": 15000,
+      "days": 2,
+      "level": "town"
+    },
+    {
+      "id": "r-apartment",
+      "name": "公寓楼",
+      "unlocks": [
+        "apartment"
+      ],
+      "cost": 25000,
+      "days": 3,
+      "level": "town"
+    },
+    {
+      "id": "r-house",
+      "name": "自建小楼（砖瓦房可以再翻盖）",
+      "unlocks": [
+        "house"
+      ],
+      "cost": 20000,
+      "days": 3,
+      "level": "town",
+      "needBuilding": "brick"
+    },
+    {
+      "id": "r-bank",
+      "name": "银行",
+      "unlocks": [
+        "bank"
+      ],
+      "cost": 30000,
+      "days": 3,
+      "level": "county"
+    },
+    {
+      "id": "r-schoolhouse",
+      "name": "学区房",
+      "unlocks": [
+        "school-house"
+      ],
+      "cost": 40000,
+      "days": 3,
+      "level": "county",
+      "needBuilding": "school"
+    },
+    {
+      "id": "r-detached",
+      "name": "独栋",
+      "unlocks": [
+        "detached"
+      ],
+      "cost": 40000,
+      "days": 3,
+      "level": "county",
+      "needBuilding": "house"
+    },
+    {
+      "id": "r-villa",
+      "name": "别墅",
+      "unlocks": [
+        "villa"
+      ],
+      "cost": 80000,
+      "days": 4,
+      "level": "county",
+      "needBuilding": "detached",
+      "needPop": 120
+    },
+    {
+      "id": "r-electronics",
+      "name": "电子厂",
+      "unlocks": [
+        "electronics"
+      ],
+      "cost": 60000,
+      "days": 4,
+      "level": "county",
+      "needBuilding": "school",
+      "needEdu": {
+        "edu": 2,
+        "count": 5
+      }
+    },
+    {
+      "id": "r-car",
+      "name": "汽车厂",
+      "unlocks": [
+        "car-factory"
+      ],
+      "cost": 100000,
+      "days": 5,
+      "level": "county",
+      "needBuilding": "moto-factory",
+      "needEdu": {
+        "edu": 2,
+        "count": 8
+      }
+    },
+    {
+      "id": "r-bridge",
+      "name": "桥",
+      "unlocks": [
+        "bridge"
+      ],
+      "cost": 30000,
+      "days": 3,
+      "level": "county",
+      "needBuilding": "road"
+    },
+    {
+      "id": "r-port",
+      "name": "港口",
+      "unlocks": [
+        "port"
+      ],
+      "cost": 60000,
+      "days": 4,
+      "level": "county",
+      "needBuilding": "road"
+    },
+    {
+      "id": "r-mine",
+      "name": "矿场",
+      "unlocks": [
+        "mine"
+      ],
+      "cost": 50000,
+      "days": 4,
+      "level": "county"
+    }
+  ],
+  "goals": {
+    "village": [
+      {
+        "kind": "pop",
+        "target": 15,
+        "text": "人口达到 15"
+      },
+      {
+        "kind": "research",
+        "target": 1,
+        "text": "完成 1 项产业研究"
+      },
+      {
+        "kind": "wishes",
+        "target": 3,
+        "text": "实现 3 个居民心愿"
+      },
+      {
+        "kind": "mood",
+        "target": 55,
+        "text": "县城幸福度 ≥ 55"
+      },
+      {
+        "kind": "roads",
+        "target": 20,
+        "text": "修 20 格路"
+      }
+    ],
+    "town": [
+      {
+        "kind": "pop",
+        "target": 50,
+        "text": "人口达到 50"
+      },
+      {
+        "kind": "building",
+        "target": 1,
+        "of": "textile|food-factory|moto-factory",
+        "text": "建 1 座工厂"
+      },
+      {
+        "kind": "employment",
+        "target": 0.8,
+        "text": "就业率 ≥ 80%"
+      },
+      {
+        "kind": "streets",
+        "target": 1,
+        "text": "凑出 1 条特色街道"
+      },
+      {
+        "kind": "wishes",
+        "target": 15,
+        "text": "累计实现 15 个心愿"
+      }
+    ],
+    "county": [
+      {
+        "kind": "pop",
+        "target": 150,
+        "text": "人口达到 150"
+      },
+      {
+        "kind": "building",
+        "target": 1,
+        "of": "school",
+        "text": "有学校"
+      },
+      {
+        "kind": "building",
+        "target": 1,
+        "of": "clinic",
+        "text": "有卫生院"
+      },
+      {
+        "kind": "building",
+        "target": 1,
+        "of": "bank",
+        "text": "有银行"
+      },
+      {
+        "kind": "deals",
+        "target": 1,
+        "text": "招商成功 1 次"
+      },
+      {
+        "kind": "mood",
+        "target": 60,
+        "text": "县城幸福度 ≥ 60"
+      }
+    ],
+    "city": [
+      {
+        "kind": "pop",
+        "target": 500,
+        "text": "人口达到 500"
+      },
+      {
+        "kind": "mood",
+        "target": 65,
+        "text": "县城幸福度 ≥ 65"
+      }
+    ]
+  },
+  "levelReward": {
+    "town": 30000,
+    "county": 80000,
+    "city": 200000,
+    "top100": 500000
+  },
+  "wishes": {
+    "_说明": "每月每个没心愿的成年人有 chance 的概率冒一个（条件满足才冒）；全县同时最多 max(minActive, 人口 / perPeople) 个；days 天内实现幸福度 +doneMood，过期 −expireMood",
+    "chance": 0.25,
+    "minActive": 3,
+    "perPeople": 5,
+    "days": 10,
+    "doneMood": 15,
+    "expireMood": 5,
+    "doneBuzz": 0.05
+  },
+  "streets": {
+    "_说明": "特色街道（DESIGN 21）：members 每种各一栋，沿路两两相距 ≤ range 格就算凑成。outsideMult = 成员店过路客倍率；mood = 周边 radius 格住户幸福度加成（who: all / kids 家里有孩子 / young 18～35 岁）；buzz = 每月口碑加成",
+    "range": 4,
+    "radius": 8,
+    "list": [
+      {
+        "id": "night",
+        "name": "夜市一条街",
+        "members": [
+          "bbq",
+          "milk-tea",
+          "hotpot"
+        ],
+        "outsideMult": 2.5,
+        "mood": 4,
+        "who": "all",
+        "buzz": 0,
+        "effect": "外地人晚上专门来逛，成员店过路客 ×2.5；周边居民幸福度 +4"
+      },
+      {
+        "id": "daily",
+        "name": "便民生活圈",
+        "members": [
+          "breakfast",
+          "supermarket",
+          "parcel"
+        ],
+        "outsideMult": 1,
+        "mood": 6,
+        "who": "all",
+        "buzz": 0,
+        "effect": "周边居民幸福度 +6（吃饭、买菜、取快递都在家门口）"
+      },
+      {
+        "id": "school",
+        "name": "学区",
+        "members": [
+          "school-house",
+          "tutoring",
+          "breakfast"
+        ],
+        "outsideMult": 2,
+        "mood": 6,
+        "who": "kids",
+        "buzz": 0,
+        "effect": "周边有孩子的家庭幸福度 +6，补习班过路客 ×2"
+      },
+      {
+        "id": "influencer",
+        "name": "网红打卡街",
+        "members": [
+          "milk-tea",
+          "barber",
+          "phone-shop"
+        ],
+        "outsideMult": 2,
+        "mood": 0,
+        "who": "all",
+        "buzz": 0.02,
+        "effect": "成员店过路客 ×2，口碑每天 +0.02（外县年轻人更想来）"
+      },
+      {
+        "id": "youth",
+        "name": "青年街",
+        "members": [
+          "net-cafe",
+          "bbq",
+          "milk-tea"
+        ],
+        "outsideMult": 2,
+        "mood": 4,
+        "who": "young",
+        "buzz": 0,
+        "effect": "成员店过路客 ×2，周边 18～35 岁居民幸福度 +4"
+      }
+    ]
+  },
+  "invest": {
+    "_说明": "招商（DESIGN 20）：每 every 天来 1～max 份意向，valid 天内有效。landFee / subsidy = 该建筑造价 × 比例。成功率 = 营商环境 / 100 × envWeight + 让税 taxBreakBonus，封顶 maxChance",
+    "every": 3,
+    "max": 3,
+    "valid": 7,
+    "landFeeRate": 0.6,
+    "subsidyRate": 0.5,
+    "envWeight": 0.9,
+    "taxBreakBonus": 0.2,
+    "taxBreakMonths": 12,
+    "maxChance": 0.9,
+    "pool": {
+      "village": [
+        "workshop",
+        "milk-tea",
+        "bbq",
+        "barber"
+      ],
+      "town": [
+        "textile",
+        "food-factory",
+        "supermarket",
+        "net-cafe",
+        "hotpot",
+        "moto-factory"
+      ],
+      "county": [
+        "electronics",
+        "car-factory",
+        "bank",
+        "phone-shop",
+        "tutoring",
+        "port"
+      ],
+      "city": [
+        "electronics",
+        "car-factory",
+        "port",
+        "mine"
+      ]
+    },
+    "companies": [
+      "鸿运",
+      "兴旺",
+      "盛达",
+      "金穗",
+      "远航",
+      "瑞丰",
+      "新希",
+      "聚源",
+      "长青",
+      "华晟",
+      "德隆",
+      "嘉禾"
+    ]
+  }
+}

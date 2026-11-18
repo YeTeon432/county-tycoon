@@ -38,7 +38,75 @@ export interface Resident {
     arrivedMonth: number;        // 绝对月份（见 SimState.month）
     /** 交通工具（D022）。旧存档没有这个字段，读档时当 'walk' */
     vehicle: Vehicle;
+    /**
+     * 赋闲（D024）：劳动年龄、没工作，但存款够多，自己选择不上班。
+     * 不算失业：不找工作、不扣心情、不会因为失业搬走。旧存档没有这个字段，当 false。
+     */
+    idle?: boolean;
+    /** 幸福度分项（D026，DESIGN 16.1）：每月结算时写，档案里显示「为什么开心 / 不开心」。旧存档没有 */
+    moodParts?: MoodPart[];
+    /** 想离开县城（幸福度 < leaveMood）：从哪个月开始、吐槽的原因。null / 没有 = 不想走 */
+    leaving?: { since: number; reasons: string[] } | null;
+    /** 心愿（D026，DESIGN 17）。null / 没有 = 现在没有 */
+    wish?: Wish | null;
     log: LifeEvent[];            // 最近 N 条，新的在后
+}
+
+/** 居民心愿（DESIGN 17）：只从模拟层真实数据里产生 */
+export type WishKind = 'shop' | 'school' | 'clinic' | 'job' | 'commute' | 'env' | 'vehicle' | 'house';
+export interface Wish {
+    kind: WishKind;
+    /** shop 心愿：缺哪类店 */
+    demand?: Demand;
+    /** 原话：「家附近没地方吃早饭」 */
+    text: string;
+    /** 建议：「在他家 8 格内盖一家早餐铺」 */
+    hint: string;
+    /** 建议盖的建筑（已解锁的）；没解锁时为 '' ，hint 里会写「先研究 X」 */
+    suggest: string;
+    /** 范围（格，沿路），地图高亮用；0 = 不限 */
+    radius: number;
+    since: number;
+    /** 到哪个月过期 */
+    until: number;
+}
+
+/** 招商意向（DESIGN 20） */
+export interface Offer {
+    id: number;
+    company: string;
+    defId: string;
+    /** 供地：对方交的土地出让金 */
+    landFee: number;
+    /** 补贴：我们出的钱 */
+    subsidy: number;
+    /** 补贴签约时对方带来几位工人（各带家属） */
+    workers: number;
+    workerEdu: Education;
+    /** 对方要求县里至少有几个能招的工人（供地时检查） */
+    needLabor: number;
+    /** 到哪个月失效 */
+    until: number;
+}
+
+/** 幸福度的一项：正数加分、负数扣分（相对基准 50） */
+export interface MoodPart {
+    key: string;                 // work / commute / shops / missed / crowd / env / services / vehicle / tax / idle
+    label: string;               // 「有工作」「上班太远」
+    value: number;
+}
+
+/**
+ * 给画面层的通知（D026，DESIGN 16.4 / 16.5）：公告栏、大公示用。
+ * arrive = 有人来；leave = 有人走；warn = 有人想走；stay = 被挽留下来；info = 其他
+ */
+export interface Notice {
+    kind: 'arrive' | 'leave' | 'warn' | 'stay' | 'layoff' | 'info' | 'wish' | 'wishDone' | 'research' | 'levelUp'
+        | 'street' | 'renovate' | 'offer' | 'deal';
+    text: string;
+    residentIds: number[];
+    /** 来的理由 / 走的原因 */
+    reason?: string;
 }
 
 export interface LifeEvent {
@@ -56,6 +124,19 @@ export interface BuildingSim {
     lastCustomers: number;       // 上月服务人次
     lastTax: number;             // 上月上交
     reputation: number;          // 口碑 0..100（店铺升级用，M4）
+    /**
+     * 真实账目（D026，DESIGN 25）。以下字段旧存档没有，读档时补默认值。
+     * 谁的楼：county = 玩家（县里）盖的，利润 / 亏损进财政；private = 招商来的企业，利润归对方（流出县外）
+     */
+    owner?: 'county' | 'private';
+    lastWages?: number;          // 上月发的工资
+    lastCost?: number;           // 上月进货 / 原料成本（流出县外）
+    lastUpkeep?: number;         // 上月维护费（经营性建筑自己付）
+    lastProfit?: number;         // 上月利润 = 营业额 − 工资 − 成本 − 税 − 维护（可为负）
+    lastOutside?: number;        // 上月营业额里县外客人（过路客）贡献的部分
+    lossMonths?: number;         // 连续亏损几个月（≥3 裁员）
+    taxBreakUntil?: number;      // 招商让税：这个月之前企业税减半（D026）
+    freezeMonths?: number;       // 裁员后暂停招人还剩几个月
 }
 
 /** 每种建筑的经营数据，来自配置表（DESIGN 4） */
@@ -71,6 +152,17 @@ export interface BuildingEcon {
     env: number;                 // 对周边环境
     unlock: TownLevel;
     publicJob: boolean;          // 岗位工资由财政发（学校、卫生院、发展中心）
+    /** 工期（天 = 月），0 = 立刻建成（道路、树）。D026 */
+    buildDays: number;
+    /** 住房（D026，DESIGN 23）：每个成年住户每月房租（0 = 用 rentPerPerson）、等级 1～5、幸福度加成 */
+    rent: number;
+    homeLevel: number;
+    homeMood: number;
+    /** 住户攒够钱可以自己翻盖成什么（'' = 不能）；selfBuilt = 只能翻盖得到，玩家不能直接盖 */
+    upgradeTo: string;
+    selfBuilt: boolean;
+    /** 成本率：营业额里多少是进货 / 原料成本，流出县外（D026） */
+    costRate: number;
 }
 
 export interface JobSlot {
@@ -88,11 +180,24 @@ export interface Finance {
 
 export interface MonthlyReport {
     month: number;
-    income: { business: number; industry: number; income: number; land: number; investment: number };
-    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number };
+    /** business / industry / income = 三种税；profit = 县属店铺工厂的经营利润（可为负）；rent = 县属住房房租 */
+    income: { business: number; industry: number; income: number; land: number; investment: number; profit: number; rent: number };
+    /** research = 研究费（D026），services = 公共服务（T532），旧存档没有 */
+    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number; research?: number; services?: number };
     populationBefore: number;
     populationAfter: number;
     events: LifeEvent[];         // 本月全县大事记（结婚、迁入、离开……）
+    /** 本月的通知（D026）。旧存档 / MockSim 没有 */
+    notices?: Notice[];
+}
+
+/**
+ * 一个月里县里的钱和县外的进出（D026 真实账目，守恒测试用）。
+ * 县内的钱 = 财政 + 全体居民存款；它的变化必须正好等于 inflow 合计 − outflow 合计。
+ */
+export interface MoneyFlows {
+    inflow: { exports: number; outsideCustomers: number; immigrants: number; bailout: number; grants: number; investment: number };
+    outflow: { goodsCost: number; upkeep: number; construction: number; fuel: number; leavers: number; privateProfit: number; research: number; subsidy: number };
 }
 
 export interface SimState {
@@ -105,6 +210,31 @@ export interface SimState {
     buildings: BuildingSim[];
     finance: Finance;
     nextResidentId: number;
+    /** 已经能盖的建筑 id（初始解锁 + 研究出来的）。旧存档没有：读档时按城镇等级补（D026） */
+    unlocked?: string[];
+    /** 研究完的项目 id */
+    researched?: string[];
+    /** 正在研究的项目 */
+    research?: { id: string; left: number; total: number } | null;
+    /** 累计实现的心愿数（阶段目标用） */
+    wishesDone?: number;
+    /** 凑成的特色街道（每月重算，DESIGN 21） */
+    streets?: { kind: string; uids: number[] }[];
+    /** 住户自家翻盖中（D026，DESIGN 23）：完工后 defId 换成 to。startAt = 开工时本月的进度（0..1） */
+    renovations?: { uid: number; to: string; left: number; total: number; startAt?: number }[];
+    /** 招商意向（DESIGN 20） */
+    offers?: Offer[];
+    /** 供地签约成功、等玩家选址的那一份 */
+    pendingDeal?: { offerId: number; defId: string; company: string; landFee: number; taxBreak: boolean } | null;
+    dealsDone?: number;
+    nextOfferId?: number;
+    /**
+     * 施工中的楼（D026，DESIGN 24）：完工前不进 buildings，不住人、不招工。旧存档没有。
+     * startAt = 开工那一刻本月的进度（0..1）：进度条和工期都从这一刻算，不从月初算。
+     */
+    construction?: { uid: number; defId: string; left: number; total: number; startAt?: number }[];
+    /** 口碑（D026，DESIGN 16.2）：满足心愿 +，有人走 −，每月衰减；加在迁入吸引力上。旧存档没有 = 0 */
+    buzz?: number;
 }
 
 /** 年月显示用 */

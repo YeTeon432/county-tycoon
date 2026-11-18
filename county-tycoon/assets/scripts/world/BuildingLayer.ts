@@ -1,4 +1,4 @@
-import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Sprite, SpriteFrame, Vec2 } from 'cc';
+import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Sprite, SpriteFrame, Tween, tween, Vec2, Vec3 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
@@ -26,6 +26,7 @@ export class BuildingLayer extends Component {
 
     private _objRoot: Node | null = null;
     private _ghost: Graphics | null = null;
+    private _envG: Graphics | null = null;
     /** 放置预览的半透明贴图（D022） */
     private _ghostSprite: Sprite | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
@@ -68,6 +69,8 @@ export class BuildingLayer extends Component {
         this._iso = iso;
         this._model = model;
         this._art = art;
+        // 环境图层（D026，DESIGN 22）：贴在地面上、压在楼下面
+        this._envG = BuildingLayer.makeChild(this.node, 'EnvOverlay').addComponent(Graphics);
         this._objRoot = BuildingLayer.makeChild(this.node, 'Objects');
         this._ghost = BuildingLayer.makeChild(this.node, 'Ghost').addComponent(Graphics);
         const gs = BuildingLayer.makeChild(this.node, 'GhostSprite');
@@ -103,6 +106,8 @@ export class BuildingLayer extends Component {
                 this._depth.delete(node);
                 this._nodes.delete(uid);
                 this._shown.delete(uid);
+                this._site.delete(uid);
+                this._barAt.delete(uid);
             }
         });
 
@@ -149,6 +154,288 @@ export class BuildingLayer extends Component {
             }
         }
         this.sortAll();
+    }
+
+    /** 塔吊动画时间（游戏秒，跟倍速走） */
+    private _craneT = 0;
+
+    /**
+     * uid -> 工地占地。开工第一帧记一次，之后不再每帧遍历 allBuildings()
+     * （工地多的时候那是 60 次/秒 × 工地数 的全图扫描）
+     */
+    private readonly _site = new Map<number, { n: number; w: number; h: number; stage: number }>();
+    /** uid -> 进度条上次画的样子（进度量化到 0.5%），没变就不重画 Graphics */
+    private readonly _barAt = new Map<number, { p: number; w: number; y: number }>();
+
+    /** 每帧推塔吊动画（WorldView 调，dt 已乘倍速；暂停时传 0） */
+    tickConstruction(dt: number): void {
+        this._craneT += dt;
+    }
+
+    /**
+     * 施工中的样子（D026，DESIGN 24）：楼本身先藏起来，换成工地图（围挡打地基 → 框架 + 脚手架 → 安全网封顶，
+     * 按进度切三档）+ 塔吊（吊臂来回摆 4 帧）+ 头顶进度条。progress = null 表示完工：撤掉工地，楼「落成」弹一下。
+     * 图在 docs/art/3d/construction.py。没有图（旧图集）时退回半透明 + 进度条。
+     */
+    setConstruction(uid: number, progress: number | null): void {
+        const node = this._nodes.get(uid);
+        const art = this._art;
+        if (!node || !art) return;
+        const sprite = node.getComponent(Sprite);
+        const site = node.getChildByName('Site'), crane = node.getChildByName('Crane');
+        let bar = node.getChildByName('BuildBar');
+        if (progress === null) {
+            const info = this._site.get(uid);
+            this._site.delete(uid);
+            this._barAt.delete(uid);
+            if (!site && !crane && !bar) return;
+            if (bar) bar.destroy();
+            // 楼露出来：从「矮一截」弹到原样；工地淡出收尾，别一帧硬切（网拆掉、楼落定）
+            if (sprite) sprite.enabled = true;
+            const op = node.getComponent(UIOpacity);
+            if (op) op.opacity = 255;
+            for (const f of [site, crane]) {
+                if (!f) continue;
+                f.setSiblingIndex(node.children.length - 1);   // 压在楼上面淡出，不然楼先露出来又被网盖住
+                let fop = f.getComponent(UIOpacity);
+                if (!fop) fop = f.addComponent(UIOpacity);
+                Tween.stopAllByTarget(fop);
+                tween(fop).to(0.26, { opacity: 0 }, { easing: 'quadIn' }).call(() => f.destroy()).start();
+            }
+            this.playTopOut(node, info);
+            return;
+        }
+        // 占地只在开工第一帧查一次：以前每帧 allBuildings()，工地一多就是 60 次/秒的全图扫描
+        let info = this._site.get(uid);
+        if (!info) {
+            const b = this._model?.allBuildings().find((x) => x.uid === uid);
+            const bw = b ? b.def.width : 1, bh = b ? b.def.height : 1;
+            info = { n: Math.max(bw, bh) >= 2 ? 2 : 1, w: bw, h: bh, stage: -1 };
+            this._site.set(uid, info);
+        }
+        const n = info.n;
+        const stage = progress < 0.34 ? 0 : progress < 0.67 ? 1 : 2;
+        const siteFrame = art.get(`build-${n}-${stage}`);
+        const ui = node.getComponent(UITransform)!;
+        let topY = ui.contentSize.height;
+        /** 有工地图时的上下顺序（从下到上），进度条建好后再排 */
+        let order: (Node | null)[] | null = null;
+        if (siteFrame) {
+            if (sprite) sprite.enabled = false;
+            const s1 = this.overlay(node, 'Site', siteFrame, 0);
+            // 吊臂 0→3→0 来回摆，每帧 0.35 游戏秒；各工地错开一点
+            const k = Math.floor(this._craneT / 0.35 + uid) % 6;
+            const cf = art.get(`crane-${n}-${k < 4 ? k : 6 - k}`);
+            const s2 = cf ? this.overlay(node, 'Crane', cf, 1) : null;
+            // 进度条贴着「看得见的工地」，不是贴目标楼的最终高度：学校那种高楼要盖到 100 多，
+            // 工地才 53，按楼高放会飘在半空
+            topY = s1.getComponent(UITransform)!.contentSize.height;
+            // 地基阶段塔吊在前，楼长高后塔吊在楼后面（立在后角）。进度条始终垫在塔吊下面：
+            // 1×1 塔吊压低后，封顶时吊臂正好在进度条那个高度，条在上面会把吊臂整个盖住；
+            // 条和工地图不重叠（条在工地顶上方），所以垫在工地下面也不会被挡
+            order = stage === 0 ? [s1, s2] : [s2, s1];
+            if (info.stage !== stage) {
+                if (info.stage >= 0) BuildingLayer.fadeIn(s1);   // 换阶段时淡入一下，别硬切
+                info.stage = stage;
+            }
+        } else {
+            let op = node.getComponent(UIOpacity);
+            if (!op) op = node.addComponent(UIOpacity);
+            op.opacity = 140;
+        }
+        // 进度条不跟着塔吊尖走：那样会飘到两三倍楼高，压在邻居楼的窗上，分不清是哪块工地的
+        const hw = this._iso ? this._iso.hw : 16;
+        const w = Math.min(34, Math.max(18, (info.w + info.h) * hw * 0.62)), h = 4;
+        const y = topY + 4;
+        const p = Math.round(progress * 200) / 200;     // 量化到 0.5%，值没变就不重画
+        const last = this._barAt.get(uid);
+        if (!bar) {
+            bar = BuildingLayer.makeChild(node, 'BuildBar');
+            bar.addComponent(Graphics);
+        }
+        if (order) {
+            const seq = [bar, ...order];
+            for (let i = 0; i < seq.length; i++) { const c = seq[i]; if (c && c.getSiblingIndex() !== i) c.setSiblingIndex(i); }
+        } else {
+            bar.setSiblingIndex(node.children.length - 1);
+        }
+        if (!last || last.w !== w || last.y !== y) bar.setPosition(0, y, 0);
+        if (!last || last.w !== w || last.y !== y || last.p !== p) {
+            const g = bar.getComponent(Graphics)!;
+            g.clear();
+            g.fillColor = new Color(40, 44, 52, 230);
+            g.roundRect(-w / 2 - 1, -h / 2 - 1, w + 2, h + 2, 2);
+            g.fill();
+            g.fillColor = new Color(246, 201, 56, 255);
+            g.roundRect(-w / 2, -h / 2, Math.max(1, w * p), h, 1.5);
+            g.fill();
+            this._barAt.set(uid, { p, w, y });
+        }
+    }
+
+    /** 工地换阶段的淡入（0.18 秒），比硬切好认；不停连着换也不会打架 */
+    private static fadeIn(node: Node): void {
+        let op = node.getComponent(UIOpacity);
+        if (!op) op = node.addComponent(UIOpacity);
+        Tween.stopAllByTarget(op);
+        op.opacity = 110;
+        tween(op).to(0.18, { opacity: 255 }, { easing: 'quadOut' }).start();
+    }
+
+    /** 在楼节点里放一张和楼同锚点（底边中点）的图；已有就只换帧 */
+    private overlay(node: Node, name: string, frame: SpriteFrame, index: number): Node {
+        let c = node.getChildByName(name);
+        if (!c) {
+            c = BuildingLayer.makeChild(node, name);
+            c.getComponent(UITransform)!.setAnchorPoint(new Vec2(0.5, 0));
+            const sp = c.addComponent(Sprite);
+            sp.sizeMode = Sprite.SizeMode.CUSTOM;
+            sp.trim = false;
+            c.setSiblingIndex(index);
+        }
+        const sp = c.getComponent(Sprite)!;
+        if (sp.spriteFrame !== frame) {
+            sp.spriteFrame = frame;
+            const sz = this._art!.worldSize(frame);
+            c.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
+            // 楼节点是 anchor (0.5, 0)，子节点放在 (0, 0) 就是同一个底边中点
+            c.setPosition(0, 0, 0);
+        }
+        return c;
+    }
+
+    /**
+     * 完工：楼从矮一点弹到原样 + 脚下一圈尘土散开。
+     * 尘土以「占地菱形中心」为圆心（节点原点是最下顶点，直接画会飘到楼前的地上），压在楼后面。
+     */
+    private playTopOut(node: Node, info?: { n: number; w: number; h: number; stage: number }): void {
+        Tween.stopAllByTarget(node);
+        node.setScale(1, 0.75, 1);
+        tween(node)
+            .to(0.18, { scale: new Vec3(1, 1.08, 1) }, { easing: 'quadOut' })
+            .to(0.14, { scale: new Vec3(1, 1, 1) }, { easing: 'quadIn' })
+            .start();
+        const iso = this._iso;
+        const w = info ? info.w : 1, h = info ? info.h : 1;
+        const cx = iso ? (h - w) * iso.hw / 2 : 0;
+        const cy = iso ? (w + h) * iso.hh / 2 : 6;
+        const dust = BuildingLayer.makeChild(node, 'Dust');
+        dust.setSiblingIndex(0);          // 压在楼下面，像从楼脚下散出来
+        dust.setPosition(cx, cy, 0);
+        const g = dust.addComponent(Graphics);
+        const op = dust.addComponent(UIOpacity);
+        const r0 = iso ? (w + h) * iso.hw * 0.55 : 20;
+        const puff = { r: r0 * 0.5 };
+        const draw = () => {
+            g.clear();
+            g.fillColor = new Color(236, 226, 205, 190);
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2;
+                g.circle(Math.cos(a) * puff.r, Math.sin(a) * puff.r * 0.5, r0 * 0.16);
+            }
+            g.fill();
+        };
+        draw();
+        tween(puff).to(0.6, { r: r0 * 1.15 }, { onUpdate: draw }).start();
+        tween(op).to(0.6, { opacity: 0 }).call(() => dust.destroy()).start();
+    }
+
+    /**
+     * 楼顶气泡（D026）：'leave' 红色「!」（有人想走）/ 'wish' 蓝色心愿气泡 / null 去掉。
+     * 两种都有时只显示红的。
+     */
+    setAlert(uid: number, kind: 'leave' | 'wish' | null): void {
+        const node = this._nodes.get(uid);
+        if (!node) return;
+        let b = node.getChildByName('Alert');
+        if (b && b.name === 'Alert' && (b as any)._kind !== kind) { b.destroy(); b = null; }
+        if (!kind) { if (b) b.destroy(); return; }
+        if (b) return;
+        if (kind === 'wish') { this.wishBubble(node); return; }
+        b = BuildingLayer.makeChild(node, 'Alert');
+        (b as any)._kind = kind;
+        const ui = node.getComponent(UITransform)!;
+        b.setPosition(0, ui.contentSize.height * (1 - ui.anchorY) + 12, 0);
+        const g = b.addComponent(Graphics);
+        g.fillColor = new Color(255, 255, 255, 255);
+        g.circle(0, 0, 7.5);
+        g.fill();
+        g.fillColor = new Color(232, 87, 74, 255);
+        g.circle(0, 0, 6);
+        g.moveTo(-2.5, -5); g.lineTo(2.5, -5); g.lineTo(0, -10); g.close();
+        g.fill();
+        g.fillColor = new Color(255, 255, 255, 255);
+        g.rect(-1, -1, 2, 5);
+        g.fill();
+        g.circle(0, -3, 1.1);
+        g.fill();
+    }
+
+    /** 蓝色心愿气泡：圆角对话框 + 三个点，轻轻上下浮 */
+    private wishBubble(node: Node): void {
+        const b = BuildingLayer.makeChild(node, 'Alert');
+        (b as any)._kind = 'wish';
+        const ui = node.getComponent(UITransform)!;
+        const y0 = ui.contentSize.height * (1 - ui.anchorY) + 12;
+        b.setPosition(0, y0, 0);
+        const g = b.addComponent(Graphics);
+        g.fillColor = new Color(255, 255, 255, 255);
+        g.roundRect(-9.5, -6.5, 19, 13, 6);
+        g.moveTo(-3, -6); g.lineTo(0, -11); g.lineTo(3, -6); g.close();
+        g.fill();
+        g.fillColor = new Color(58, 134, 214, 255);
+        g.roundRect(-8, -5, 16, 10, 5);
+        g.moveTo(-2, -4.5); g.lineTo(0, -9); g.lineTo(2, -4.5); g.close();
+        g.fill();
+        g.fillColor = new Color(255, 255, 255, 255);
+        for (const x of [-4, 0, 4]) g.circle(x, 0, 1.3);
+        g.fill();
+        tween(b).repeatForever(tween(b).to(0.8, { position: new Vec3(0, y0 + 2, 0) }).to(0.8, { position: new Vec3(0, y0, 0) })).start();
+    }
+
+    /**
+     * 环境图层：cells = [col, row, 值]，正绿负红，越大越浓。空数组 = 清掉。
+     * 环境视图（看全县）和放工厂时的污染范围预览共用。
+     */
+    drawEnv(cells: [number, number, number][]): void {
+        const g = this._envG, iso = this._iso;
+        if (!g || !iso) return;
+        g.clear();
+        const p = { x: 0, y: 0 };
+        const pt = (c: number, r: number) => { iso.toLocal(c, r, p); return { x: p.x, y: p.y }; };
+        for (const [c, r, v] of cells) {
+            if (!v) continue;
+            const a = Math.min(170, 50 + Math.abs(v) * 40);
+            g.fillColor = v > 0 ? new Color(76, 200, 90, a) : new Color(232, 70, 60, a);
+            const q = [pt(c, r), pt(c + 1, r), pt(c + 1, r + 1), pt(c, r + 1)];
+            g.moveTo(q[0].x, q[0].y);
+            for (let i = 1; i < 4; i++) g.lineTo(q[i].x, q[i].y);
+            g.close();
+            g.fill();
+        }
+    }
+
+    /** 特色街道成员楼顶的小旗（D026）：color = null 去掉 */
+    setStreetFlag(uid: number, color: Color | null): void {
+        const node = this._nodes.get(uid);
+        if (!node) return;
+        let f = node.getChildByName('Flag');
+        if (!color) { if (f) f.destroy(); return; }
+        if (!f) {
+            f = BuildingLayer.makeChild(node, 'Flag');
+            f.addComponent(Graphics);
+        }
+        const ui = node.getComponent(UITransform)!;
+        f.setPosition(-ui.contentSize.width * 0.28, ui.contentSize.height * (1 - ui.anchorY) - 4, 0);
+        const g = f.getComponent(Graphics)!;
+        g.clear();
+        g.strokeColor = new Color(90, 90, 90, 255);
+        g.lineWidth = 0.8;
+        g.moveTo(0, 0); g.lineTo(0, 12);
+        g.stroke();
+        g.fillColor = color;
+        g.moveTo(0, 12); g.lineTo(8, 9.5); g.lineTo(0, 7); g.close();
+        g.fill();
     }
 
     /** 某栋建筑的节点（金币特效找位置用） */

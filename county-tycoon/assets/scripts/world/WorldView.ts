@@ -1,4 +1,4 @@
-import { Color, Tween, tween, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director } from 'cc';
+import { Color, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
@@ -75,15 +75,24 @@ export class WorldView extends Component {
     private _pinchMapY = 0;
     /**
      * 双指手势是捏还是扭（D031）：开头先不动，等两指距离变化或转过的弧长先超过阈值，定了就锁住。
-     * 'twist' 时不缩放；转过 TWIST_ANGLE 就转一档视角，一次手势只转一次。
+     * 'twist' 时不缩放，地图跟着手指一点点转；松手后转到最近的 90° 停稳。
      */
     private _gesture: 'none' | 'pinch' | 'twist' = 'none';
     private _twistStartAngle = 0;
-    private _twistDone = false;
+    /** 扭的时候：上一帧两指连线的角度、开始扭以来累计转了多少（弧度，UI 坐标逆时针为正）、开始时的视角 */
+    private _twistLast = 0;
+    private _twistAccum = 0;
+    private _twistBase = 0;
     /** 判定捏 / 扭的阈值（UI 像素） */
     private static readonly GESTURE_SLOP = 14;
-    /** 扭多少度转一档 */
-    private static readonly TWIST_ANGLE = Math.PI / 6;
+    /** 当前视角总角度（弧度，顺时针为正；停稳时是 90° 的整数倍） */
+    private _viewAngle = 0;
+    /** 转视角时钉在屏幕中心的那一点（模型坐标）；不在转时是 null */
+    private _spinPivot: [number, number] | null = null;
+    /** 停稳 / 按钮转的动画 */
+    private _snap: { from: number; to: number; t: number; dur: number } | null = null;
+    /** 地面的旋转节点：压扁 0.5 → 转 → 拉回 2 倍，等于在地平面上绕竖轴转 */
+    private _groundSpin: Node | null = null;
     /** 视角转了（D031），给 HUD 用 */
     onViewRotated: ((rot: number) => void) | null = null;
 
@@ -198,7 +207,18 @@ export class WorldView extends Component {
         this._iso = iso;
 
         const mapNode = GridMap.create(config, iso, model, this._art);
-        world.addChild(mapNode);
+        // 地面挂在三层节点下面（D031 跟手转）：等距地面 = 正俯视的格子转 45° 再压扁一半，
+        // 所以「压扁 0.5 → 绕原点转 → 拉高 2 倍」就是在地平面上绕地图中心（本地原点）转
+        const tilt = new Node('GroundTilt');
+        tilt.setScale(1, 0.5, 1);
+        world.addChild(tilt);
+        const spin = new Node('GroundSpin');
+        tilt.addChild(spin);
+        const flat = new Node('GroundFlat');
+        flat.setScale(1, 2, 1);
+        spin.addChild(flat);
+        flat.addChild(mapNode);
+        this._groundSpin = spin;
         this._map = mapNode.getComponent(GridMap);
 
         // 建筑层压在地面之上
@@ -340,16 +360,25 @@ export class WorldView extends Component {
                 const twist = Math.abs(turn) * dist / 2;
                 if (Math.max(pinch, twist) < WorldView.GESTURE_SLOP) return;
                 this._gesture = twist > pinch && this.canRotateView ? 'twist' : 'pinch';
+                if (this._gesture === 'twist') {
+                    // 从按下那一刻算起：判定前扭过的那一点也算上，地图直接跟到手指的位置
+                    this._snap = null;
+                    this._twistBase = this._viewAngle;
+                    this._twistAccum = turn;
+                    this._twistLast = Math.atan2(b.y - a.y, b.x - a.x);
+                    this._velX = 0; this._velY = 0;
+                    this.setViewAngle(this._twistBase - this._twistAccum);
+                }
                 // 判定之前手指已经挪了一点：从现在起算缩放，画面不跳
                 this.rebaseGesture();
                 return;
             }
             if (this._gesture === 'twist') {
-                if (!this._twistDone && Math.abs(turn) >= WorldView.TWIST_ANGLE) {
-                    this._twistDone = true;
-                    // UI 坐标 y 朝上，手指逆时针转 turn > 0 → 地图跟着逆时针转一档
-                    this.rotateView(turn > 0 ? -1 : 1);
-                }
+                // 逐帧累加，转超过半圈也不跳；UI 坐标 y 朝上，手指逆时针（+）→ 地图逆时针（视角角度 −）
+                const cur = Math.atan2(b.y - a.y, b.x - a.x);
+                this._twistAccum += WorldView.angleDiff(cur, this._twistLast);
+                this._twistLast = cur;
+                this.setViewAngle(this._twistBase - this._twistAccum);
                 return;
             }
             const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
@@ -379,7 +408,10 @@ export class WorldView extends Component {
     private onTouchEnd(event: EventTouch): void {
         const wasPinch = this._touches.size >= 2;
         for (const t of event.getTouches()) this._touches.delete(t.getID());
-        if (this._touches.size < 2) { this._gesture = 'none'; this._twistDone = false; }
+        if (this._touches.size < 2) {
+            if (this._gesture === 'twist') this.snapView();
+            this._gesture = 'none';
+        }
         if (this._touches.size > 0) {
             // 还有手指按着：换基准接着拖 / 捏
             if (wasPinch) { this._velX = 0; this._velY = 0; }
@@ -437,33 +469,76 @@ export class WorldView extends Component {
         return !!this._iso && this._iso.canRotate;
     }
 
-    /**
-     * 转视角（D031）：dir = 1 顺时针 90°，-1 逆时针。
-     * 屏幕中心那一点转完还在屏幕中心；所有图层换图重摆；带一个 0.2 秒的小摆动提示转的方向。
-     */
+    /** 按钮用：平滑转 90°（dir = 1 顺时针，-1 逆时针）。正在转的话接着它的终点再转一档 */
     rotateView(dir: 1 | -1): void {
+        if (!this.canRotateView) return;
+        const q = Math.PI / 2;
+        const base = this._snap ? this._snap.to : Math.round(this._viewAngle / q) * q;
+        this._snap = { from: this._viewAngle, to: base + dir * q, t: 0, dur: 0.35 };
+        this._velX = 0; this._velY = 0;
+    }
+
+    /** 松手：转到最近的 90° 停稳 */
+    private snapView(): void {
+        const q = Math.PI / 2;
+        const to = Math.round(this._viewAngle / q) * q;
+        const dur = 0.1 + 0.25 * Math.abs(to - this._viewAngle) / (q / 2);
+        this._snap = { from: this._viewAngle, to, t: 0, dur };
+    }
+
+    private stepSnap(dt: number): void {
+        const sn = this._snap;
+        if (!sn) return;
+        sn.t = Math.min(1, sn.t + dt / Math.max(0.01, sn.dur));
+        const e = 1 - (1 - sn.t) * (1 - sn.t);           // 先快后慢
+        if (sn.t >= 1) { this._snap = null; this.setViewAngle(sn.to); }
+        else this.setViewAngle(sn.from + (sn.to - sn.from) * e);
+    }
+
+    /**
+     * 把视角设到 phi（弧度，顺时针为正）（D031）。
+     * 拆成「最近的 90° 档位 rot」+「多出来的 spin」：rot 决定楼用哪张图、地面瓦片换哪一格；
+     * spin 让地面节点和所有楼、人车的位置连续地转。屏幕中心那一点始终不动。
+     * 停在 90° 整数倍时收尾：重建山 / 树、重画环境图层、放置预览，钉住的中心点放开。
+     */
+    private setViewAngle(phi: number): void {
         const iso = this._iso, world = this._world;
         if (!iso || !world || !iso.canRotate) return;
-        // 屏幕中心（本节点原点）下面是地图上哪一点
-        const w = world.position;
-        const [gx, gy] = iso.fromLocal(-w.x / this._zoom, -w.y / this._zoom);
-        iso.rot = iso.rot + dir;
+        if (!this._spinPivot) {
+            const w0 = world.position;
+            this._spinPivot = iso.fromLocal(-w0.x / this._zoom, -w0.y / this._zoom);
+        }
+        const q = Math.PI / 2;
+        const k = Math.round(phi / q);
+        let spin = phi - k * q;
+        if (Math.abs(spin) < 1e-6) spin = 0;
+        const rot = ((k % 4) + 4) % 4;
+        const rotChanged = rot !== iso.rot;
+        iso.rot = rot;
+        iso.spin = spin;
+        this._viewAngle = spin === 0 ? k * q : phi;
+        if (rotChanged && this._map) this._map.redraw();
+        if (this._groundSpin) this._groundSpin.angle = -spin * 180 / Math.PI;   // 节点角度逆时针为正
+
+        const [gx, gy] = this._spinPivot;
         const p = iso.toLocal(gx, gy);
+        const w = world.position;
         world.setPosition(-p.x * this._zoom, -p.y * this._zoom, w.z);
-        this.clampPosition();
-        this._velX = 0; this._velY = 0;
 
-        if (this._map) this._map.redraw();
-        if (this._buildings) this._buildings.relayout();
+        if (this._buildings) this._buildings.relayout(spin !== 0);
         if (this._life) this._life.relayout();
-        this._hoverCol = -1; this._hoverRow = -1;
-        this.refreshGhost();
+        if (spin === 0) {
+            this._spinPivot = null;
+            this.clampPosition();
+            this._hoverCol = -1; this._hoverRow = -1;
+            this.refreshGhost();
+            if (rotChanged || this.onViewRotated) { if (this.onViewRotated) this.onViewRotated(iso.rot); }
+        }
+    }
 
-        // 过渡：整块画面从反方向摆一点回正（以屏幕中心为轴）
-        Tween.stopAllByTarget(this.node);
-        this.node.angle = dir * 10;
-        tween(this.node).to(0.2, { angle: 0 }, { easing: 'quadOut' }).start();
-        if (this.onViewRotated) this.onViewRotated(iso.rot);
+    /** 正在转视角（跟手或动画中）：这时不响应点地图 */
+    get rotating(): boolean {
+        return this._gesture === 'twist' || !!this._snap || (!!this._iso && this._iso.spin !== 0);
     }
 
     /** UI 坐标 → 本节点本地坐标（屏幕中心为原点） */
@@ -526,6 +601,7 @@ export class WorldView extends Component {
     /** 松手后的惯性滑动 */
     protected update(dt: number): void {
         this.syncConstruction(dt);
+        this.stepSnap(dt);
         this.stepPan(dt);
         this.updateTrack(dt);
         if (this._touches.size > 0) return;

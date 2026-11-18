@@ -37,6 +37,8 @@ export class BuildingLayer extends Component {
     private readonly _depth = new Map<Node, number>();
     /** 山、树林的精灵节点 */
     private readonly _terrainNodes: Node[] = [];
+    /** 山 / 树林节点在哪一格（跟手转视角时重摆用） */
+    private readonly _terrainCell = new Map<Node, [number, number]>();
     /** 尺寸不对的图只警告一次 */
     private readonly _warned = new Set<string>();
 
@@ -125,6 +127,7 @@ export class BuildingLayer extends Component {
         const t = model.terrain;
         for (const n of this._terrainNodes) { this._depth.delete(n); n.removeFromParent(); n.destroy(); }
         this._terrainNodes.length = 0;
+        this._terrainCell.clear();
         if (!t) return;
         const pick = (kind: string, c: number, r: number) => {
             const h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
@@ -151,6 +154,7 @@ export class BuildingLayer extends Component {
                 s.spriteFrame = frame;
                 this._depth.set(node, iso.depth(c, r, 1, 1));
                 this._terrainNodes.push(node);
+                this._terrainCell.set(node, [c, r]);
             }
         }
         this.sortAll();
@@ -454,17 +458,23 @@ export class BuildingLayer extends Component {
     private _envCells: [number, number, number][] = [];
 
     /**
-     * 视角转了（D031）：所有楼换成对应方向的图、挪到新位置、重算前后顺序；
-     * 山 / 树林重建；环境图层重画。楼顶气泡、小旗、工地都是楼节点的子节点，跟着走，只按新图高度重摆。
+     * 视角转了（D031）：所有楼换成对应方向的图、挪到新位置、重算前后顺序。
+     * 楼顶气泡、小旗、工地都是楼节点的子节点，跟着走，只按新图高度重摆。
+     *
+     * live = true：跟手转的每一帧都调（iso.spin ≠ 0）。楼身保持竖直、跟着占地中心走，
+     * 转过 45° 时换下一个方向的图；山 / 树林只挪位置不重建；环境图层、放置预览先藏起来。
+     * live = false：停稳后调一次，山 / 树林重建、环境图层重画。
      */
-    relayout(): void {
+    relayout(live = false): void {
         const model = this._model, iso = this._iso;
         if (!model || !iso) return;
+        const p = { x: 0, y: 0 }, off = { x: 0, y: 0 };
         for (const b of model.allBuildings()) {
             const node = this._nodes.get(b.uid);
             if (!node) continue;
-            const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
-            node.setPosition(p.x, p.y, 0);
+            iso.toLocal(b.col + b.def.width / 2, b.row + b.def.height / 2, p);
+            iso.footOffset(b.def.width, b.def.height, off);
+            node.setPosition(p.x + off.x, p.y + off.y, 0);
             this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
             const sprite = node.getComponent(Sprite);
             const frame = this.usableFrame(b.def, b.facing);
@@ -484,8 +494,20 @@ export class BuildingLayer extends Component {
             const flag = node.getChildByName('Flag');
             if (flag) flag.setPosition(-sz.width * 0.28, sz.height - 4, 0);
         }
-        this.syncTerrainObjects();
-        this.drawEnv(this._envCells);
+        if (this._envG) this._envG.node.active = !live;
+        if (this._ghost) this._ghost.node.active = !live;
+        if (live) {
+            iso.footOffset(1, 1, off);
+            this._terrainCell.forEach(([c, r], node) => {
+                iso.toLocal(c + 0.5, r + 0.5, p);
+                node.setPosition(p.x + off.x, p.y + off.y, 0);
+                this._depth.set(node, iso.depth(c, r, 1, 1));
+            });
+            if (this._ghostSprite) this._ghostSprite.node.active = false;
+        } else {
+            this.syncTerrainObjects();
+            this.drawEnv(this._envCells);
+        }
         this.sortAll();
     }
 

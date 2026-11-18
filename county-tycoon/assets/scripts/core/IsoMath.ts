@@ -65,9 +65,30 @@ export class IsoMath {
         return this.cols === this.rows;
     }
 
+    /**
+     * 跟手转时 rot 之外多出来的那一点角度（弧度，|spin| ≤ 45°，正 = 屏幕上顺时针）。
+     * 只影响连续坐标（楼、人车的位置和前后顺序）；格子换算（viewCell / modelCell / toCell）和选图仍按 rot。
+     * 停下来时一定是 0。
+     */
+    private _spin = 0;
+
+    get spin(): number {
+        return this._spin;
+    }
+
+    set spin(v: number) {
+        this._spin = this.canRotate ? v : 0;
+    }
+
     /** 模型连续坐标 → 视图连续坐标 */
     private view(gx: number, gy: number): [number, number] {
         const n = this.cols;
+        if (this._spin !== 0) {
+            // 绕地图中心转 rot·90° + spin（视图坐标里正角 = 屏幕上顺时针）
+            const a = this._rot * Math.PI / 2 + this._spin, c = Math.cos(a), s = Math.sin(a);
+            const u = gx - n / 2, w = gy - n / 2;
+            return [u * c - w * s + n / 2, u * s + w * c + n / 2];
+        }
         switch (this._rot) {
             case 1: return [n - gy, gx];
             case 2: return [n - gx, n - gy];
@@ -134,6 +155,11 @@ export class IsoMath {
         const b = (this._topY - y) / this.hh;   // vx + vy
         const vx = (a + b) / 2, vy = (b - a) / 2;
         const n = this.cols;
+        if (this._spin !== 0) {
+            const t = -(this._rot * Math.PI / 2 + this._spin), c = Math.cos(t), s = Math.sin(t);
+            const u = vx - n / 2, w = vy - n / 2;
+            return [u * c - w * s + n / 2, u * s + w * c + n / 2];
+        }
         switch (this._rot) {
             case 1: return [vy, n - vx];
             case 2: return [n - vx, n - vy];
@@ -182,6 +208,18 @@ export class IsoMath {
             this.project(vx + vw, vy + vh),
             this.project(vx, vy + vh),
         ];
+    }
+
+    /**
+     * 楼图锚点（占地最下顶点）相对占地中心的屏幕偏移。跟手转的时候楼身保持竖直，
+     * 整张图跟着占地中心走：位置 = toLocal(中心) + 这个偏移。静止时和 footBottom 完全一致。
+     */
+    footOffset(w: number, h: number, out: IsoPoint = { x: 0, y: 0 }): IsoPoint {
+        const odd = this._rot % 2 === 1;
+        const vw = odd ? h : w, vh = odd ? w : h;
+        out.x = (vw - vh) / 2 * this.hw;
+        out.y = -(vw + vh) / 2 * this.hh;
+        return out;
     }
 
     /**

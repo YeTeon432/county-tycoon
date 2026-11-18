@@ -178,9 +178,10 @@
       "unlocks": [
         "apartment"
       ],
-      "cost": 25000,
-      "days": 3,
-      "level": "town"
+      "cost": 15000,
+      "days": 2,
+      "level": "village",
+      "needPop": 10
     },
     {
       "id": "r-house",

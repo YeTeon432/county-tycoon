@@ -496,26 +496,87 @@ export class BuildingLayer extends Component {
 
     /**
      * 按画面点楼（坐标同行人：Objects 节点里的本地坐标）。
-     * 等距下楼身立在占地格的上方，只按地面格子判定的话，点楼身其实点到的是楼后面的格子。
-     * 轮廓近似成「图的矩形去掉底下两个角」：底边是占地菱形的下两条边。重叠时取前面的（排序键大的）。
+     * T424：按图的真实画面判定（atlas-hitmask.json），不再按整张图的矩形——矩形里约 40% 是透明的，
+     * 前面的楼会用透明的部分把后面楼的点击抢走（县发展中心被四周高楼围着就怎么都点不到）。
+     * 1. 先找「点的地方真有画面」的楼，重叠时取画在前面的（排序键大的）；楼顶气泡也算这栋。
+     * 2. 一栋都没点中（点在楼缝里）且 slop > 0：找 slop 范围内画面离手指最近的那栋。
+     * 施工中算工地图和塔吊；色块楼（没贴图）返回不了，交给按格子判定。
      */
-    pickBuildingAt(x: number, y: number): number | null {
-        const iso = this._iso;
-        if (!iso) return null;
-        const slope = iso.hh / iso.hw;
+    pickBuildingAt(x: number, y: number, slop = 0): number | null {
         let best: number | null = null, bestDepth = -Infinity;
+        this._nodes.forEach((node, uid) => {
+            if (!node.isValid || !this.nodeHit(node, x, y)) return;
+            const d = this._depth.get(node) ?? 0;
+            if (d > bestDepth) { bestDepth = d; best = uid; }
+        });
+        if (best !== null || slop <= 0) return best;
+        // 就近：以 1 个世界单位为步长扫一圈，取画面离手指最近的那栋，同样近取前面的
+        let bestDist = Infinity;
+        const r = Math.ceil(slop);
         this._nodes.forEach((node, uid) => {
             if (!node.isValid) return;
             const ui = node.getComponent(UITransform)!;
             const w = ui.contentSize.width, h = ui.contentSize.height;
-            if (w <= 0 || h <= 0) return;           // 色块楼没有尺寸，交给按格子判定
             const dx = x - node.position.x, dy = y - node.position.y;
-            const top = h + (node.getChildByName('Alert') ? 28 : 0);   // 楼顶气泡也算这栋
-            if (dx < -w / 2 || dx > w / 2 || dy > top || dy < Math.abs(dx) * slope - 2) return;
+            if (w <= 0 || dx < -w / 2 - slop || dx > w / 2 + slop || dy < -slop || dy > h + 40 + slop) return;
             const d = this._depth.get(node) ?? 0;
-            if (d > bestDepth) { bestDepth = d; best = uid; }
+            for (let oy = -r; oy <= r; oy++) {
+                for (let ox = -r; ox <= r; ox++) {
+                    const dist = ox * ox + oy * oy;
+                    if (dist > slop * slop || dist > bestDist) continue;
+                    if (dist === bestDist && d <= bestDepth) continue;
+                    if (!this.nodeHit(node, x + ox, y + oy)) continue;
+                    bestDist = dist; bestDepth = d; best = uid;
+                }
+            }
         });
         return best;
+    }
+
+    /** 这栋楼此刻画出来的部分（楼本身 / 工地 / 塔吊 / 楼顶气泡）有没有盖住这一点 */
+    private nodeHit(node: Node, x: number, y: number): boolean {
+        const ui = node.getComponent(UITransform)!;
+        const w = ui.contentSize.width, h = ui.contentSize.height;
+        if (w <= 0 || h <= 0) return false;            // 色块楼没有尺寸，交给按格子判定
+        const dx = x - node.position.x, dy = y - node.position.y;
+        // 先用外框粗筛（气泡在楼顶上方，外框往上多留 28）
+        if (dx < -w / 2 || dx > w / 2 || dy < 0 || dy > h + 28) return false;
+        if (node.getChildByName('Alert') && Math.abs(dx) <= 16 && Math.abs(dy - h - 12) <= 16) return true;
+        const sp = node.getComponent(Sprite);
+        if (sp && sp.enabled && sp.spriteFrame && this.spriteHit(sp, w, h, dx, dy)) return true;
+        for (const name of ['Site', 'Crane']) {
+            const c = node.getChildByName(name);
+            const cs = c && c.active ? c.getComponent(Sprite) : null;
+            if (!cs || !cs.spriteFrame) continue;
+            const cui = c!.getComponent(UITransform)!;
+            if (this.spriteHit(cs, cui.contentSize.width, cui.contentSize.height, dx - c!.position.x, dy - c!.position.y)) return true;
+        }
+        return false;
+    }
+
+    /** 底边中点为原点的一张图：有蒙版按蒙版；没有（散图）退回「矩形去掉底下两个角」 */
+    private spriteHit(sp: Sprite, w: number, h: number, dx: number, dy: number): boolean {
+        if (dx < -w / 2 || dx >= w / 2 || dy < 0 || dy >= h) return false;
+        const hit = this._art ? this._art.opaqueAt(sp.spriteFrame!, dx + w / 2, dy) : null;
+        if (hit !== null) return hit;
+        const iso = this._iso;
+        const slope = iso ? iso.hh / iso.hw : 0.5;
+        return dy >= Math.abs(dx) * slope - 2;
+    }
+
+    /**
+     * 楼顶中点（Objects 本地坐标；T425 追踪箭头指这里）。施工中按看得见的工地高度。
+     * 色块楼按占地估一个高度；没有这栋楼返回 null。
+     */
+    topOf(uid: number): { x: number; y: number } | null {
+        const node = this._nodes.get(uid);
+        if (!node || !node.isValid) return null;
+        let h = node.getComponent(UITransform)!.contentSize.height;
+        const sp = node.getComponent(Sprite);
+        const site = node.getChildByName('Site');
+        if (site && (!sp || !sp.enabled)) h = site.getComponent(UITransform)!.contentSize.height;
+        if (h <= 0) h = 30;
+        return { x: node.position.x, y: node.position.y + h };
     }
 
     /** 点的位置是不是楼顶气泡（气泡中心在楼顶上方 12，留宽一点好点中） */

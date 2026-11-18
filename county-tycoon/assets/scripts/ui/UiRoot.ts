@@ -10,6 +10,7 @@ import { IntroCards } from './IntroCards';
 import { MonthReportPanel } from './MonthReportPanel';
 import { ResidentListPanel } from './ResidentListPanel';
 import { ResidentPanel } from './ResidentPanel';
+import { TrackChip } from './TrackChip';
 import { TimeController } from './TimeController';
 import { NoticeLayer } from './NoticeLayer';
 import { CenterPanel } from './CenterPanel';
@@ -53,6 +54,15 @@ export class UiRoot extends Component {
     requestPlace: ((defId: string) => void) | null = null;
     /** 环境视图开关（GameRoot 接到 WorldView），返回开着没 */
     toggleEnvView: (() => boolean) | null = null;
+    /** 居民追踪（T425，GameRoot 接到 WorldView）：开始 / 结束（null） */
+    requestTrack: ((id: number | null) => void) | null = null;
+    /** 镜头移到追踪的人 / 他家 */
+    requestTrackFocus: ((what: 'person' | 'home') => void) | null = null;
+    /** 追踪的人此刻在路上去哪 / 在哪栋楼里（追踪条写字用） */
+    trackWhere: (() => { walking: boolean; uid: number | null; to: number | null } | null) | null = null;
+    private _trackChip: TrackChip | null = null;
+    private _trackId: number | null = null;
+    private _trackT = 0;
     /** 当前的放置/拆除提示（GameRoot 和建筑栏会调 setPlacementHint） */
     private _hint = '';
 
@@ -109,6 +119,7 @@ export class UiRoot extends Component {
 
         this.buildTopBar();
         this.buildClock();
+        this.buildTrackChip();
         this.buildPanelLayer();
         // 公告栏 + 大公示（D026）：压在面板上面、开场卡片下面
         this._notices = NoticeLayer.create(this.node, this.sim);
@@ -221,6 +232,7 @@ export class UiRoot extends Component {
     }
 
     protected update(dt: number): void {
+        this.updateTrackChip(dt);
         // 资金在盖楼 / 拆楼时也会变，顶栏不能只在月底刷新：每 0.5 秒对一次（只是改几段文字）
         this._tick += dt;
         if (this._tick < 0.5) return;
@@ -378,13 +390,81 @@ export class UiRoot extends Component {
         const old = this._residentPanel;
         this._residentPanel = null;
         if (old && old.node && old.node.isValid) old.node.destroy();
-        const panel = ResidentPanel.show(layer, this.sim, this.model, residentId);
+        const onTrack = this.requestTrack ? (id: number) => this.startTrack(id) : undefined;
+        const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
             panel.onClosed = () => {
                 if (this._residentPanel === panel) this._residentPanel = null;
             };
             this._residentPanel = panel;
         }
+    }
+
+    // ---------------- 居民追踪（T425） ----------------
+    /** 追踪条压在面板下面（打开面板时被盖住，关掉又露出来） */
+    private buildTrackChip(): void {
+        const chip = TrackChip.create(this.node);
+        chip.onFocusPerson = () => this.requestTrackFocus?.('person');
+        chip.onFocusHome = () => {
+            const r = this._trackId !== null && this.sim ? this.sim.resident(this._trackId) : null;
+            if (r && r.homeId === null) { this._notices?.say('info', `${r.name}现在没有住处`); return; }
+            this.requestTrackFocus?.('home');
+        };
+        chip.onStop = () => this.stopTrack();
+        this._trackChip = chip;
+    }
+
+    /** 地图可见区域上下各让多少（追踪箭头贴边时别躲到顶栏 / 底栏后面） */
+    get mapInsets(): { top: number; bottom: number } {
+        return { top: TopBar.HEIGHT + 90, bottom: TrackChip.bottomReserve };
+    }
+
+    /** 档案里点了「追踪」：关掉所有面板，地图上标出这个人和他家 */
+    startTrack(id: number): void {
+        const r = this.sim ? this.sim.resident(id) : null;
+        if (!r || !this.requestTrack) return;
+        this.closeTopPanel();
+        if (this._topPanel && this._topPanel.node?.isValid) this._topPanel.node.destroy();
+        this._topPanel = null;
+        this._trackId = id;
+        this._trackT = 1;
+        this._trackChip?.show(r.name);
+        this.requestTrack(id);
+    }
+
+    stopTrack(): void {
+        this._trackId = null;
+        this._trackChip?.hide();
+        this.requestTrack?.(null);
+    }
+
+    /** 追踪的人搬走 / 去世（WorldView 发现人没了，已经自己停了） */
+    onTrackLost(id: number): void {
+        if (this._trackId !== id) return;
+        this._trackId = null;
+        this._trackChip?.hide();
+        this._notices?.say('info', '追踪的居民已经离开县城，追踪结束');
+    }
+
+    /** 追踪条的字：张三 · 去早餐铺 / 在超市上班 / 在家（0.3 秒对一次） */
+    private updateTrackChip(dt: number): void {
+        if (this._trackId === null || !this._trackChip || !this.sim) return;
+        this._trackT += dt;
+        if (this._trackT < 0.3) return;
+        this._trackT = 0;
+        const r = this.sim.resident(this._trackId);
+        if (!r) return;
+        const w = this.trackWhere ? this.trackWhere() : null;
+        const name = (uid: number | null) => (uid === null ? null : this.model?.allBuildings().find((b) => b.uid === uid)?.def.name ?? null);
+        let doing = '';
+        if (w && w.walking) {
+            doing = w.to !== null && w.to === r.homeId ? '回家路上' : `去${name(w.to) ?? '外面'}`;
+        } else if (w && w.uid !== null) {
+            if (w.uid === r.homeId) doing = '在家';
+            else if (w.uid === r.jobId) doing = `在${name(w.uid)}上班`;
+            else doing = `在${name(w.uid) ?? '外面'}`;
+        }
+        this._trackChip.setText(doing ? `${r.name} · ${doing}` : r.name);
     }
 
     /** 打开县发展中心面板 */

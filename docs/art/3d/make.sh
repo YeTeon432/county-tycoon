@@ -13,3 +13,4 @@ done
 python3 -I docs/art/3d/shadows.py $B/actors | grep -E '^\[ok\]' || true     # T405：人车影子（PIL）
 if [ $# -eq 0 ] || [ ! -f $B/ground/ground.png ]; then python3 -I docs/art/3d/ground.py $B; fi
 python3 -I docs/art/3d/pack.py $B $R
+python3 -I docs/art/3d/hitmask.py $R     # T424：点楼按真实画面判定

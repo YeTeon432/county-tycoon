@@ -202,25 +202,32 @@ export class LifeLayer extends Component {
     /** 某种建筑的客单价（T219 飘字）；返回 0 = 不飘 */
     priceOf: ((defId: string) => number) | null = null;
 
+    /** 正在被追踪的居民（T425）：出门不受「街上最多几人」限制，保证一直画得出来 */
+    tracked: number | null = null;
+
+    /**
+     * 这位居民此刻在哪（T425 追踪）：
+     *   - 在路上：walking = true，(x, y) = 头顶（Objects 本地坐标，和楼节点同一套），to = 要去的楼
+     *   - 在楼里：walking = false，uid = 哪栋楼（坐标由调用方取楼顶）
+     * 不认识这个人（还没排日程 / 已经搬走）返回 null。
+     */
+    whereIs(id: number): { walking: boolean; x: number; y: number; uid: number | null; to: number | null } | null {
+        const p = this._people.get(id);
+        if (!p) return null;
+        const a = p.agent;
+        if (a && a.node.isValid) {
+            const body = a.node.getChildByName('Body');
+            const h = body ? body.getComponent(UITransform)!.height : 12;
+            return { walking: true, x: a.node.position.x, y: a.node.position.y + h, uid: null, to: a.to };
+        }
+        const uid = p.loc ?? this._info.get(id)?.homeId ?? null;
+        return { walking: false, x: 0, y: 0, uid, to: null };
+    }
+
     /** 接上模拟层：街上的人就是这些居民 */
     setResidentSource(fn: () => readonly WalkerInfo[]): void {
         this._residents = fn;
         this._planTimer = 0;
-    }
-
-    /**
-     * 地图本地坐标点中了哪位居民（点行人看是谁）。
-     * 判定框四周各放宽 4 像素；重叠时取画在最前面的那个。
-     */
-    pickResidentAt(x: number, y: number): number | null {
-        let best: Agent | null = null, bestY = Infinity;
-        for (const a of this._agents) {
-            const ui = a.node.getComponent(UITransform)!;
-            const p = a.node.position, w = ui.contentSize.width, h = ui.contentSize.height;
-            if (x < p.x - w / 2 - 4 || x > p.x + w / 2 + 4 || y < p.y - 4 || y > p.y + h + 4) continue;
-            if (p.y < bestY) { best = a; bestY = p.y; }     // 越靠下越在前面
-        }
-        return best ? best.residentId : null;
     }
 
     static create(iso: IsoMath, model: TownModel, art: ArtLibrary, layer: BuildingLayer): Node {
@@ -473,7 +480,7 @@ export class LifeLayer extends Component {
         if (from === null || from === trip.to || !this.buildingByUid(trip.to)) return;
         const path = this.route(from, trip.to);
         // 不通路、或者街上人太多：直接「到了」，不画
-        if (!path || !info || this._agents.length >= this._traffic.maxOnStreet) { p.loc = trip.to; return; }
+        if (!path || !info || (this._agents.length >= this._traffic.maxOnStreet && p.id !== this.tracked)) { p.loc = trip.to; return; }
         p.loc = null;
         p.agent = this.spawn(info, path, trip.to);
     }

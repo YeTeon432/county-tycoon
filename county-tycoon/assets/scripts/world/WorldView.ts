@@ -8,6 +8,7 @@ import { IsoMath } from '../core/IsoMath';
 import { BuildingLayer } from './BuildingLayer';
 import { GridMap } from './GridMap';
 import { LifeLayer } from './LifeLayer';
+import { Tracker, TrackWhat } from './Tracker';
 import { DayClock } from '../core/DayClock';
 
 const { ccclass } = _decorator;
@@ -52,6 +53,11 @@ export class WorldView extends Component {
     private _map: GridMap | null = null;
     private _buildings: BuildingLayer | null = null;
     private _life: LifeLayer | null = null;
+    /** 居民追踪（T425）：箭头画在地图上面，屏幕坐标 */
+    private _tracker: Tracker | null = null;
+    private _trackId: number | null = null;
+    /** 镜头正在平滑移向的位置（世界容器坐标）；手一碰就取消 */
+    private _panTarget: { x: number; y: number } | null = null;
     private _model: TownModel | null = null;
     private _iso: IsoMath | null = null;
     private readonly _art = new ArtLibrary();
@@ -112,6 +118,8 @@ export class WorldView extends Component {
     private static readonly TAP_SLOP = 12;
     /** 惯性衰减（越大停得越快） */
     private static readonly FLING_DECAY = 5;
+    /** 点在楼缝里时，手指附近多大范围内找楼（UI 单位，换算到地图要除以倍率；T424） */
+    private static readonly PICK_SLOP = 12;
 
     /** 复用的临时向量，避免每帧产生垃圾 */
     private static readonly _vecA = new Vec2();
@@ -154,8 +162,6 @@ export class WorldView extends Component {
     onPlaceRejected: ((def: BuildingDef, reason: string) => void) | null = null;
     /** 非道路建筑确认放置成功后（通知底栏取消选中高亮） */
     onBuildingConfirmed: (() => void) | null = null;
-    /** 空手点中了街上的某位居民（T311） */
-    onResidentTapped: ((residentId: number) => void) | null = null;
     /** 空手点了一栋建筑（道路除外） */
     onBuildingTapped: ((uid: number) => void) | null = null;
     /** 放置/拆除之后的通知，给 HUD 刷新计数用 */
@@ -166,6 +172,11 @@ export class WorldView extends Component {
     blockReason: ((def: BuildingDef) => string | null) | null = null;
     /** 预览出现 / 挪动 / 换朝向 / 消失时通知（确认条据此显示） */
     onPendingChanged: ((p: PendingPlace | null) => void) | null = null;
+
+    /** 追踪用：这位居民的名字和家（每帧问一次，搬家了箭头跟着换）；null = 人没了 */
+    trackInfo: ((id: number) => { name: string; homeId: number | null } | null) | null = null;
+    /** 追踪的人搬走 / 去世了（追踪已自动结束） */
+    onTrackLost: ((id: number) => void) | null = null;
 
     /** 建好地图并接管输入 */
     create(config: WorldConfig, model: TownModel): void {
@@ -209,6 +220,9 @@ export class WorldView extends Component {
 
         this._world.setPosition(0, 0, 0);
         this.applyTransform();
+
+        // 追踪箭头压在整张地图上面（WorldView 节点下、World 容器之后）
+        this._tracker = Tracker.create(this.node);
 
         this.registerInput();
     }
@@ -301,6 +315,7 @@ export class WorldView extends Component {
             this._dragDist = 0;
             this._dragged = false;
             this._velX = 0; this._velY = 0;
+            this._panTarget = null;
         }
         if (this._touches.size >= 2) this._dragged = true;   // 双指开始就作废点击
         this.rebaseGesture();
@@ -511,6 +526,8 @@ export class WorldView extends Component {
     /** 松手后的惯性滑动 */
     protected update(dt: number): void {
         this.syncConstruction(dt);
+        this.stepPan(dt);
+        this.updateTrack(dt);
         if (this._touches.size > 0) return;
         const v = Math.hypot(this._velX, this._velY);
         if (v < 8) { this._velX = 0; this._velY = 0; return; }
@@ -522,13 +539,13 @@ export class WorldView extends Component {
 
     /** 屏幕/UI 坐标 → 地块坐标 → 交给上层处理 */
     private tapAt(uiX: number, uiY: number): void {
-        // 空手时先看是不是点中了街上的人（人比格子小，优先判定）
-        if (!this._selected && !this._demolishing && this._life && this.onResidentTapped) {
-            const lp = this.uiToLocal(uiX, uiY);
-            const id = lp ? this._life.pickResidentAt(lp.x, lp.y) : null;
-            if (id !== null) {
-                this.onResidentTapped(id);
-                return;
+        // 追踪：点了屏幕边上的圆 → 镜头移到人 / 他家
+        if (this._tracker && this._tracker.tracking) {
+            const trans = this.node.getComponent(UITransform);
+            if (trans) {
+                const v = trans.convertToNodeSpaceAR(new Vec3(uiX, uiY, 0));
+                const what = this._tracker.hit(v.x, v.y);
+                if (what) { this.focusTrack(what); return; }
             }
         }
         const cell = this.uiToCell(uiX, uiY);
@@ -548,9 +565,10 @@ export class WorldView extends Component {
             else this.previewAt(this._selected, col, row);
         } else {
             // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做。
-            // 先按楼的画面轮廓找（点楼身也算），找不到再看脚下那一格
+            // 街上的人和车不能点（T424：老是抢走点楼；想看某人从居民总览「追踪」）。
+            // 先按楼的真实画面找（点楼身、楼顶都算），点在楼缝里就找手指附近最近的楼，再找不到才看脚下那一格
             const lp = this.uiToLocal(uiX, uiY);
-            const hitUid = lp && this._buildings ? this._buildings.pickBuildingAt(lp.x, lp.y) : null;
+            const hitUid = lp && this._buildings ? this._buildings.pickBuildingAt(lp.x, lp.y, WorldView.PICK_SLOP / this._zoom) : null;
             const b = this._model
                 ? (hitUid !== null ? this._model.allBuildings().find((x) => x.uid === hitUid) ?? null : this._model.getAt(col, row))
                 : null;
@@ -691,6 +709,103 @@ export class WorldView extends Component {
         if (this.onDemolished) this.onDemolished(removed.uid);
         this.redrawTown();
         if (this.onTownChanged) this.onTownChanged();
+    }
+
+    // ---------------- 居民追踪（T425） ----------------
+    /** 开始追踪某位居民（null = 结束）。镜头先移到他身上，之后地图照常自由拖 */
+    track(id: number | null): void {
+        const tr = this._tracker;
+        if (!tr) return;
+        this._trackId = id;
+        if (this._life) this._life.tracked = id;
+        const info = id !== null && this.trackInfo ? this.trackInfo(id) : null;
+        if (id === null || !info) {
+            this._trackId = null;
+            if (this._life) this._life.tracked = null;
+            tr.end();
+            return;
+        }
+        tr.begin(info.name);
+        this.focusTrack('person');
+    }
+
+    get trackingId(): number | null {
+        return this._trackId;
+    }
+
+    /** 可见地图区域四边让多少（界面告诉：顶栏、底栏有多高） */
+    setTrackInsets(top: number, bottom: number): void {
+        if (this._tracker) { this._tracker.insetTop = top; this._tracker.insetBottom = bottom; }
+    }
+
+    /** 追踪的人此刻在干什么（追踪条写字用）：在路上去哪 / 在哪栋楼里 */
+    trackWhere(): { walking: boolean; uid: number | null; to: number | null } | null {
+        if (this._trackId === null || !this._life) return null;
+        const w = this._life.whereIs(this._trackId);
+        return w ? { walking: w.walking, uid: w.uid, to: w.to } : null;
+    }
+
+    /** 镜头平滑移到追踪的人 / 他家 */
+    focusTrack(what: TrackWhat): void {
+        const p = this.trackLocal(what);
+        if (p) this.panToLocal(p.x, p.y);
+    }
+
+    /** 追踪目标在地图本地坐标里的位置（人：头顶；在楼里或家：楼顶） */
+    private trackLocal(what: TrackWhat): { x: number; y: number } | null {
+        const id = this._trackId, life = this._life, layer = this._buildings;
+        if (id === null || !life || !layer) return null;
+        if (what === 'home') {
+            const info = this.trackInfo ? this.trackInfo(id) : null;
+            return info && info.homeId !== null ? layer.topOf(info.homeId) : null;
+        }
+        const w = life.whereIs(id);
+        if (!w) return null;
+        if (w.walking) return { x: w.x, y: w.y };
+        return w.uid !== null ? layer.topOf(w.uid) : null;
+    }
+
+    private updateTrack(dt: number): void {
+        const tr = this._tracker, world = this._world;
+        if (!tr || !tr.tracking || this._trackId === null || !world) return;
+        const id = this._trackId;
+        const info = this.trackInfo ? this.trackInfo(id) : null;
+        if (!info) {
+            this.track(null);
+            if (this.onTrackLost) this.onTrackLost(id);
+            return;
+        }
+        const wp = world.position, z = this._zoom;
+        const toView = (p: { x: number; y: number } | null) => (p ? { x: wp.x + p.x * z, y: wp.y + p.y * z } : null);
+        const person = this.trackLocal('person');
+        const home = info.homeId !== null && this._buildings ? this._buildings.topOf(info.homeId) : null;
+        const w = this._life ? this._life.whereIs(id) : null;
+        const stacked = !!w && !w.walking && w.uid !== null && w.uid === info.homeId;
+        const vis = view.getVisibleSize();
+        tr.draw(toView(person), toView(home), stacked, vis.width, vis.height, dt);
+    }
+
+    /** 让地图本地坐标 (x, y) 移到可见区域中间（顶栏、底栏挡住的部分不算） */
+    private panToLocal(x: number, y: number): void {
+        const tr = this._tracker;
+        const midY = tr ? (tr.insetBottom - tr.insetTop) / 2 : 0;
+        this._panTarget = { x: -x * this._zoom, y: midY - y * this._zoom };
+        this._velX = 0; this._velY = 0;
+    }
+
+    private stepPan(dt: number): void {
+        const t = this._panTarget, world = this._world;
+        if (!t || !world) return;
+        const p = world.position;
+        const k = 1 - Math.exp(-dt * 8);
+        const nx = p.x + (t.x - p.x) * k, ny = p.y + (t.y - p.y) * k;
+        world.setPosition(nx, ny, p.z);
+        this.clampPosition();
+        const q = world.position;
+        // 到了，或者被地图边界卡住走不动了
+        if (Math.abs(t.x - q.x) < 1 && Math.abs(t.y - q.y) < 1 || (Math.abs(q.x - nx) > 0.01 || Math.abs(q.y - ny) > 0.01) && Math.abs(q.x - p.x) < 0.5 && Math.abs(q.y - p.y) < 0.5) {
+            this._panTarget = null;
+        }
     }
 
     /** 镜头对准某一格（开局对准出生点用） */

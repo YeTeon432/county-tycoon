@@ -7,7 +7,7 @@ import { Portrait } from './Portrait';
 import { BODY_NAME, bodyOf } from '../core/Appearance';
 import { ListRow, ScrollList } from './ScrollList';
 import {
-    formatMoney, makeLabel, makeLabelLeft, makePanelNode, makeSectionTitle, makeStatTile, moodColor, moodLabel,
+    formatMoney, makeButton, makeLabel, makeLabelLeft, makePanelNode, makeSectionTitle, makeStatTile, moodColor, moodLabel,
     UI_COLOR, UI_FONT, UI_PALETTE, UI_RADIUS,
 } from './UiTheme';
 
@@ -29,14 +29,27 @@ export class ResidentPanel extends Panel {
     private _sim: SimApi | null = null;
     private _model: TownModel | null = null;
 
-    static show(parent: Node, sim: SimApi, model: TownModel, residentId: number): ResidentPanel | null {
+    /**
+     * @param onTrack 「追踪」按钮（T425）：在地图上用箭头标出这个人和他家；不传就不显示按钮
+     */
+    static show(parent: Node, sim: SimApi, model: TownModel, residentId: number, onTrack?: (id: number) => void): ResidentPanel | null {
         const r = sim.resident(residentId);
         if (!r) return null;
         const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`);
         panel._sim = sim;
         panel._model = model;
         panel.fill(sim, r);
+        if (onTrack) panel.buildTrackButton(() => onTrack(r.id));
         return panel;
+    }
+
+    /** 标题行、关闭按钮左边（和建筑详情的「换朝向」同一个位置） */
+    private buildTrackButton(onTap: () => void): void {
+        const head = this.card ? this.card.getChildByName('Header') : null;
+        if (!head) return;
+        const W = 148, H = 52;
+        const btn = makeButton(head, 'TrackBtn', '追踪', W, H, 'primary', onTap, 'arrow-down');
+        btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
     }
 
     private fill(sim: SimApi, r: Resident): void {

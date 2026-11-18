@@ -124,9 +124,22 @@ export class GameRoot extends Component {
         if (view) {
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
-            // T311：街上的行人是真实居民，点一下看档案
-            view.onResidentTapped = (id) => ui.openResidentById(id);
             const sim = this._sim;
+            // T425 居民追踪：档案里点「追踪」→ 地图上箭头标出这个人（橙）和他家（蓝）
+            if (sim) {
+                view.trackInfo = (id) => {
+                    const r = sim.resident(id);
+                    return r ? { name: r.name, homeId: r.homeId } : null;
+                };
+                view.onTrackLost = (id) => ui.onTrackLost(id);
+                ui.requestTrack = (id) => {
+                    const m = ui.mapInsets;
+                    view.setTrackInsets(m.top, m.bottom);
+                    view.track(id);
+                };
+                ui.requestTrackFocus = (what) => view.focusTrack(what);
+                ui.trackWhere = () => view.trackWhere();
+            }
             if (view.life && sim) {
                 view.life.setResidentSource(() => sim.state.residents);
                 // T219：到店飘「+¥N」用真实客单价

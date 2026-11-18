@@ -22,6 +22,28 @@ import { ImageAsset, JsonAsset, Rect, Size, SpriteFrame, Texture2D, Vec2, resour
 const BUILDING_DIR = 'art/buildings';
 const BUILDING_ATLAS = 'art/atlas';
 const BUILDING_ATLAS_FRAMES = 'art/atlas-frames';
+/** T424 点楼蒙版（docs/art/3d/hitmask.py 生成）：每帧一张「哪里有画面」的位图，可选 */
+const BUILDING_HITMASK = 'art/atlas-hitmask';
+
+/** atlas-hitmask.json：每帧 [宽格数, 高格数, base64 位图] */
+interface HitMaskMeta { cell?: number; frames?: Record<string, [number, number, string]> }
+
+/** 一帧的点击蒙版：w×h 格，一格 = 图集里 cell×cell 像素；bits 逐行，每行 rb 字节，高位在左 */
+interface HitMask { w: number; h: number; rb: number; cell: number; bits: Uint8Array }
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+/** 小游戏环境不一定有 atob，自己解 */
+function decodeBase64(s: string): Uint8Array {
+    const clean = s.replace(/[^A-Za-z0-9+/]/g, '');
+    const out = new Uint8Array(Math.floor(clean.length * 3 / 4));
+    let n = 0, buf = 0, bitsIn = 0;
+    for (let i = 0; i < clean.length; i++) {
+        buf = (buf << 6) | B64.indexOf(clean[i]);
+        bitsIn += 6;
+        if (bitsIn >= 8) { bitsIn -= 8; out[n++] = (buf >> bitsIn) & 0xff; }
+    }
+    return n === out.length ? out : out.subarray(0, n);
+}
 const GROUND_ATLAS = 'art/ground/ground';
 const GROUND_FRAMES = 'art/ground/ground-frames';
 
@@ -55,6 +77,9 @@ export class ArtLibrary {
     private _scale = 1;
     /** 单帧倍率（atlas-frames.json 里第 5 个数）；没写的帧用图集倍率。人车是 8 倍，建筑 4 倍 */
     private readonly _frameScale = new Map<SpriteFrame, number>();
+    /** 帧 → 点击蒙版（T424）；没有蒙版的帧（散图、人车）调用方自己退回按矩形判定 */
+    private readonly _hitMask = new Map<SpriteFrame, HitMask>();
+    private _maskMeta: HitMaskMeta | null = null;
 
     /** 已加载的建筑图数量（调试 / 测试用） */
     get count(): number {
@@ -78,6 +103,24 @@ export class ArtLibrary {
     worldSize(frame: SpriteFrame): { width: number; height: number } {
         const k = this._frameScale.get(frame) ?? this._scale;
         return { width: frame.rect.width / k, height: frame.rect.height / k };
+    }
+
+    /** 这一帧有没有点击蒙版 */
+    hasHitMask(frame: SpriteFrame): boolean {
+        return this._hitMask.has(frame);
+    }
+
+    /**
+     * 点击蒙版查一点（T424）。x 从图左边量、y 从图**底边**往上量，单位是世界单位（同 worldSize）。
+     * 图外返回 false；没有蒙版返回 null（调用方退回按矩形）。
+     */
+    opaqueAt(frame: SpriteFrame, x: number, y: number): boolean | null {
+        const m = this._hitMask.get(frame);
+        if (!m) return null;
+        const k = (this._frameScale.get(frame) ?? this._scale) / m.cell;   // 世界单位 → 蒙版格
+        const gx = Math.floor(x * k), gy = m.h - 1 - Math.floor(y * k);
+        if (gx < 0 || gx >= m.w || gy < 0 || gy >= m.h) return false;
+        return (m.bits[gy * m.rb + (gx >> 3)] & (0x80 >> (gx & 7))) !== 0;
     }
 
     /** 某个建筑的贴图；没有图就是 null */
@@ -113,11 +156,13 @@ export class ArtLibrary {
         const hasGroundFrames = !!resources.getInfoWithPath(GROUND_FRAMES, JsonAsset);
         const hasAtlas = !!resources.getInfoWithPath(BUILDING_ATLAS, ImageAsset)
             && !!resources.getInfoWithPath(BUILDING_ATLAS_FRAMES, JsonAsset);
+        const hasMask = hasAtlas && !!resources.getInfoWithPath(BUILDING_HITMASK, JsonAsset);
         let pending = infos.length + (hasGround ? 1 : 0) + (hasGroundFrames ? 1 : 0) + (hasAtlas ? 1 : 0);
 
         const finish = () => {
             pending--;
             if (pending <= 0) {
+                this.applyHitMask();
                 this._loaded = true;
                 console.log(`[ArtLibrary] 建筑图 ${this._buildings.size} 张，地面帧 ${this._ground.length} 个`);
                 onDone();
@@ -151,7 +196,7 @@ export class ArtLibrary {
                             });
                         }
                     }
-                    finish();
+                    if (hasMask) this.loadHitMask(finish); else finish();
                 });
             });
         }
@@ -215,6 +260,33 @@ export class ArtLibrary {
             if (Number(k) > 0) this._frameScale.set(f, Number(k));
             this._buildings.set(id, f);
         }
+    }
+
+    /** 读点击蒙版（只读进来，等全部图集帧登记完再在 applyHitMask 里配对）；读不到就算了（点楼退回按矩形） */
+    private loadHitMask(done: () => void): void {
+        resources.load(BUILDING_HITMASK, JsonAsset, (err, json) => {
+            const meta = !err && json && json.json ? (json.json as HitMaskMeta) : null;
+            if (!meta || !meta.frames) console.warn('[ArtLibrary] 点楼蒙版加载失败，点楼按矩形判定', err);
+            else this._maskMeta = meta;
+            done();
+        });
+    }
+
+    /** 蒙版和帧配对。背面图集（D031 pages）是异步加载的，所以放到全部加载完再做 */
+    private applyHitMask(): void {
+        const meta = this._maskMeta;
+        this._maskMeta = null;
+        if (!meta || !meta.frames) return;
+        const cell = Number(meta.cell) > 0 ? Number(meta.cell) : 4;
+        for (const id of Object.keys(meta.frames)) {
+            const f = this._buildings.get(id);
+            const [w, h, b64] = meta.frames[id];
+            if (!f || !(w > 0) || !(h > 0)) continue;
+            // 散图覆盖了图集帧时尺寸对不上，不用这张蒙版
+            if (Math.ceil(f.rect.width / cell) !== w || Math.ceil(f.rect.height / cell) !== h) continue;
+            this._hitMask.set(f, { w, h, rb: (w + 7) >> 3, cell, bits: decodeBase64(b64) });
+        }
+        console.log(`[ArtLibrary] 点楼蒙版 ${this._hitMask.size} 张`);
     }
 
     /** 图集按网格切成等大的帧（从左到右、从上到下），共用同一张纹理（同纹理的精灵能合批，整片地面一次绘制） */

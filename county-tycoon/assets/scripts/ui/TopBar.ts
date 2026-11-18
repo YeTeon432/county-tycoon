@@ -62,6 +62,8 @@ export class TopBar extends Component {
     onReportTap: (() => void) | null = null;
     /** 玩家点了「人口」→ 打开居民总览 */
     onPopulationTap: (() => void) | null = null;
+    /** 玩家点了「县发展中心」按钮 */
+    onCenterTap: (() => void) | null = null;
 
     private _sim: SimApi | null = null;
     private _speed: Speed = 1;
@@ -82,6 +84,8 @@ export class TopBar extends Component {
     private _fast: ReturnType<typeof makeRoundButton> | null = null;
     private _report: ReturnType<typeof makeRoundButton> | null = null;
     private _reportDot: Node | null = null;
+    /** 县发展中心按钮右上角的红点：目标全完成、可以申请升级时亮 */
+    private _centerDot: Node | null = null;
     private _fastBadge: Label | null = null;
     /** 有没有"还没看过"的新账单 */
     private _reportFresh = false;
@@ -166,7 +170,7 @@ export class TopBar extends Component {
         const y = H / 2 - TopBar.MARGIN_TOP - TopBar.CHIP_H - 14 - S / 2;
         const GAP = 12;
 
-        // 从右往左：账单 / 快进 / 播放·暂停
+        // 从右往左：账单 / 县发展中心 / 快进 / 播放·暂停
         let x = W / 2 - 16 - S / 2;
         const report = makeRoundButton(this.node, 'ReportBtn', 'bill', S, () => {
             this.setReportFresh(false);
@@ -174,19 +178,17 @@ export class TopBar extends Component {
         });
         report.node.setPosition(x, y, 0);
         this._report = report;
-        // 红点：右上角，白边
-        const dot = makePanelNode(report.node, 'Dot', 22, 22);
-        dot.setPosition(S / 2 - 8, S / 2 - 8, 0);
-        const dg = dot.addComponent(Graphics);
-        dg.fillColor = UI_PALETTE.white;
-        dg.circle(0, 0, 11);
-        dg.fill();
-        dg.fillColor = UI_PALETTE.coral;
-        dg.circle(0, 0, 8);
-        dg.fill();
-        dot.active = false;
-        this._reportDot = dot;
+        this._reportDot = this.makeDot(report.node, S);
         this.guard(report.node);
+
+        x -= S + GAP;
+        // 县发展中心：研究、目标、升级、人才引进都在里面，不用再满地图找那栋楼（彩色图标，不染色）
+        const center = makeRoundButton(this.node, 'CenterBtn', 'center', S, () => {
+            if (this.onCenterTap) this.onCenterTap();
+        }, UI_PALETTE.white);
+        center.node.setPosition(x, y, 0);
+        this._centerDot = this.makeDot(center.node, S);
+        this.guard(center.node);
 
         x -= S + GAP;
         // 快进：点一下换一档 1× → 2× → 3× → 1×；暂停中点它 = 直接 2×
@@ -232,6 +234,26 @@ export class TopBar extends Component {
         this._hint.node.setPosition(-hintW / 2 + 18, 0, 0);
         this._hintBox = box;
         // 提示条不登记 InputGuard：它只是文字，点它应该照样能点到地图
+    }
+
+    /** 圆按钮右上角的红点（白边），默认藏着 */
+    private makeDot(parent: Node, S: number): Node {
+        const dot = makePanelNode(parent, 'Dot', 22, 22);
+        dot.setPosition(S / 2 - 8, S / 2 - 8, 0);
+        const dg = dot.addComponent(Graphics);
+        dg.fillColor = UI_PALETTE.white;
+        dg.circle(0, 0, 11);
+        dg.fill();
+        dg.fillColor = UI_PALETTE.coral;
+        dg.circle(0, 0, 8);
+        dg.fill();
+        dot.active = false;
+        return dot;
+    }
+
+    /** 发展目标全部完成（可以申请升级）时，县发展中心按钮亮红点 */
+    setCenterReady(ready: boolean): void {
+        if (this._centerDot) this._centerDot.active = ready;
     }
 
     private pickSpeed(speed: Speed): void {

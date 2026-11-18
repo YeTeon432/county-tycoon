@@ -255,7 +255,7 @@ export function moodColor(mood: number): Color {
  * 单色白（用 color 参数染色）：pause play fast close cross check rotate lock demolish arrow-down plus minus
  */
 export type IconName =
-    | 'calendar' | 'coin' | 'people' | 'smile' | 'bill' | 'home' | 'shop'
+    | 'calendar' | 'coin' | 'people' | 'smile' | 'bill' | 'home' | 'shop' | 'center'
     | 'pause' | 'play' | 'fast' | 'close' | 'cross' | 'check' | 'rotate' | 'lock' | 'demolish'
     | 'arrow-down' | 'plus' | 'minus';
 

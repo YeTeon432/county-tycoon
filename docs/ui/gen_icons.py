@@ -5,7 +5,7 @@
 用 PIL 在 8 倍画布上画，再缩到 96×96（超采样抗锯齿）。不用 emoji 字体：各机型显示不一致。
 
 两类图标：
-  - 彩色图标（日历、硬币、人、笑脸、账单、房子、店铺）：自带配色，直接显示
+  - 彩色图标（日历、硬币、人、笑脸、账单、房子、店铺、发展中心）：自带配色，直接显示
   - 单色图标（暂停、播放、快进、关闭、换朝向、对勾、叉、锁、拆除、箭头）：纯白，
     游戏里用 Sprite.color 染成需要的颜色（白 × 颜色 = 颜色）
 
@@ -172,6 +172,27 @@ def shop():
     save(im, 'shop')
 
 
+def center():
+    """县发展中心：带小旗的大楼（顶栏入口按钮）"""
+    im, d = canvas()
+    # 旗杆 + 小旗
+    rrect(d, 46, 6, 50, 30, 2, INK)
+    poly(d, [(50, 7), (70, 12), (50, 19)], CORAL)
+    # 屋顶（三角山墙）
+    poly(d, [(48, 22), (90, 42), (6, 42)], BLUE)
+    rrect(d, 8, 40, 88, 47, 3, (38, 104, 176, 255))
+    # 楼身 + 四根柱子
+    rrect(d, 14, 46, 82, 80, 3, (255, 244, 225, 255))
+    for i in range(4):
+        x = 20 + i * 16
+        rrect(d, x, 50, x + 8, 78, 2, WHITE)
+        rrect(d, x + 6, 50, x + 8, 78, 1, (220, 208, 188, 255))
+    # 台阶
+    rrect(d, 8, 78, 88, 85, 2, (200, 206, 214, 255))
+    rrect(d, 4, 84, 92, 91, 2, (170, 178, 190, 255))
+    save(im, 'center')
+
+
 # ───────────────────────── 单色（白，代码里染色） ─────────────────────────
 
 def pause():
@@ -292,7 +313,7 @@ def minus():
     save(im, 'minus')
 
 
-ALL = [calendar, coin, people, smile, bill, home, shop,
+ALL = [calendar, coin, people, smile, bill, home, shop, center,
        pause, play, fast, close, cross, check, rotate, lock, demolish, arrow_down, plus, minus]
 
 if __name__ == '__main__':

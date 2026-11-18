@@ -241,7 +241,9 @@ export class UiRoot extends Component {
         if (this._waitFirstBuild) this.notifyBuilt();
         if (this._notices && this.sim && this.sim.goals) {
             const g = this.sim.goals();
-            this._notices.setGoals(g.filter((x) => x.done).length, g.length);
+            const done = g.filter((x) => x.done).length;
+            this._notices.setGoals(done, g.length);
+            if (this._topBar) this._topBar.setCenterReady(g.length > 0 && done >= g.length);
         }
         if (this._bar && !this._bar.hasArt) this.findSiblings();
     }
@@ -258,6 +260,7 @@ export class UiRoot extends Component {
         };
         bar.onReportTap = () => this.openReport();
         bar.onPopulationTap = () => this.openResidentList();
+        bar.onCenterTap = () => this.openCenter('goals');
         this._topBar = bar;
     }
 

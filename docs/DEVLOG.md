@@ -387,4 +387,9 @@
 - **验证**（编辑器预览 + 无头 Chrome）：同一开局 2D / 3D 各截一张 50% 叠在一起，地面、马路、楼没有重影；转到 90° 和 2D 叠也没有重影；30° / 60° 楼跟着地面转。点县发展中心开面板；放置预览 → 确定扣钱 → 工地 + 塔吊 → 完工 3D 楼出现；拆楼正常。绘制次数开局 56～59。
 - **已知问题**：行人、车还是 2D，永远画在楼上面（走到楼后面会穿帮，T540f）；环境图层也压在楼上面；完工「弹一下」只弹 2D 节点，3D 楼没动画；影子先关了（平面投影在运行时开没生效，2D 版本来也没有落地影子，T540g 再定）。
 - **下一步**：T540e 楼的细节（工地 / 塔吊 / 放置预览换 3D、完工动画），T540f 人车。
+## 2026-11-19 T540 微信包：面板构建跑不起来，命令行构建正常
+- **现象**：在 Cocos 构建面板里出微信包，开发者工具报 `web-adapter` 的 `defineProperty called on non-object`、`summer-compiler miss js file subpackages/resources/game.js`，清缓存、重开项目都不行。
+- **排查**（关掉编辑器，用 `build-configs/wechatgame.json` 命令行构建）：A = 改 3D 前（ea22b04）能跑；B = 现在（4aa4f6c）也能跑 → 3D 改动没问题，是那次面板构建的设置有问题。面板构建时项目里多了 `build-templates/wechatgame/`（找菜单时误点「创建项目构建模板」生成的，AppID 变成模板里的 wx6ac3…），已挪出项目；具体是模板还是面板选项没再细分。
+- **以后出包**：关编辑器后命令行构建（退出码 36 = 成功）：`CocosCreator --project <绝对路径>/county-tycoon --build "configPath=<绝对路径>/county-tycoon/build-configs/wechatgame.json"`（配置路径必须写绝对路径）。编辑器开着时命令行构建会冲突失败。
+- **包体**：resources 分包 改 3D 前 6.1 MB → 现在 13 MB（模型 6.0 MB、atlas 3.8 MB、背面图集 atlas-1 2.0 MB）；模拟器不卡包大小，真机预览 / 上传待试。
 

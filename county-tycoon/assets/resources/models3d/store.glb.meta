@@ -1,0 +1,110 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "2c40893e-c4a5-4895-8c87-02517654b31a",
+  "files": [],
+  "subMetas": {
+    "22909": {
+      "importer": "gltf-scene",
+      "uuid": "2c40893e-c4a5-4895-8c87-02517654b31a@22909",
+      "displayName": "",
+      "id": "22909",
+      "name": "store.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "53647": {
+      "importer": "gltf-material",
+      "uuid": "2c40893e-c4a5-4895-8c87-02517654b31a@53647",
+      "displayName": "",
+      "id": "53647",
+      "name": "emit.material",
+      "userData": {
+        "gltfIndex": 1
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "e10e4": {
+      "importer": "gltf-mesh",
+      "uuid": "2c40893e-c4a5-4895-8c87-02517654b31a@e10e4",
+      "displayName": "",
+      "id": "e10e4",
+      "name": "立方体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 1812
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "2c40893e-c4a5-4895-8c87-02517654b31a@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "2c40893e-c4a5-4895-8c87-02517654b31a@e10e4"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "2c40893e-c4a5-4895-8c87-02517654b31a@ce988",
+        "2c40893e-c4a5-4895-8c87-02517654b31a@53647"
+      ],
+      "scenes": [
+        "2c40893e-c4a5-4895-8c87-02517654b31a@22909"
+      ]
+    }
+  }
+}

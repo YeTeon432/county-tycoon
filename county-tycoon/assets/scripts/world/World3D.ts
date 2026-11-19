@@ -1,6 +1,6 @@
 import {
     _decorator, Component, Node, Camera, DirectionalLight, Prefab, resources, instantiate, MeshRenderer, Material,
-    Color, Vec3, Quat, director, Layers, gfx, view, utils, Texture2D, Mesh, renderer, SpriteFrame,
+    Color, Vec3, Quat, director, Layers, gfx, view, utils, Texture2D, Mesh, renderer, SpriteFrame, tween, Tween,
 } from 'cc';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
@@ -19,6 +19,20 @@ export interface Actor3D {
     /** 0～1（出门淡入、进门淡出） */
     alpha: number;
 }
+
+/** 工地（T540e）：n = 1 / 2（工地模型大小），stage 0～2，crane = 塔吊第几帧（0～3） */
+export interface Site3D { col: number; row: number; w: number; h: number; n: number; stage: number; crane: number }
+/** 放置预览（T540e） */
+export interface Preview3D { id: string; col: number; row: number; w: number; h: number; facing: string | null; ok: boolean }
+
+/**
+ * 贴在 3D 地面上的色块（T540e / T547）：放置预览的占地菱形、环境图层、覆盖范围。
+ * c / r / w / h 是格子，颜色 0～255（a 是透明度）；stroke 给了就沿边描一圈。
+ */
+export interface Decal { c: number; r: number; w: number; h: number; fill: Color | null; stroke?: Color | null }
+/** 三层各一个网格，越往后越压在上面（离地高度不同） */
+export type DecalLayer = 'env' | 'reach' | 'ghost';
+const DECAL_Y: Record<DecalLayer, number> = { env: 0.004, reach: 0.006, ghost: 0.008 };
 
 /** 一张纹理一批：人车的纸片合成一个动态网格，一次绘制 */
 interface ActorBatch { node: Node; mesh: Mesh }
@@ -56,6 +70,13 @@ export class World3D extends Component {
     private readonly _nodes = new Map<number, { node: Node; key: string }>();
     private readonly _terrain: Node[] = [];
     private _hidden: ReadonlySet<number> = new Set();
+    /** uid → 工地模型（三个阶段各一个、塔吊四帧各一个，换阶段 / 换帧只切 active） */
+    private readonly _sites = new Map<number, { root: Node; stages: (Node | null)[]; cranes: (Node | null)[]; key: string }>();
+    private _preview: { node: Node; key: string; ok: boolean } | null = null;
+    private _decalMat: Material | null = null;
+    private readonly _decals = new Map<DecalLayer, Node>();
+    /** 材质还没到时先记下，到了再画 */
+    private readonly _decalPending = new Map<DecalLayer, readonly Decal[]>();
     /** 模型、材质都到了 */
     onReady: (() => void) | null = null;
     /** 街上的人车（T540f）；没设就不画 */
@@ -123,6 +144,12 @@ export class World3D extends Component {
             const am = new Material();
             am.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_TEXTURE: true, USE_VERTEX_COLOR: true } });
             this._actorMat = am;
+            // 贴地色块：同一个 unlit 半透明，不要贴图，颜色全在顶点色里
+            const dm = new Material();
+            dm.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
+            this._decalMat = dm;
+            this._decalPending.forEach((list, layer) => this.setDecals(layer, list));
+            this._decalPending.clear();
             resources.loadDir('models3d', Prefab, (e2, list) => {
                 if (e2) console.error('[World3D] 模型', e2.message);
                 for (const p of list ?? []) this._prefabs.set(p.name, p);
@@ -280,6 +307,116 @@ export class World3D extends Component {
         this.syncTerrain();
     }
 
+    // ---------------------------------------------------------------- 贴地色块（T540e / T547）
+    /** 换掉一层贴地色块（空数组 = 清掉）。压在地面上、楼下面：楼会挡住它，转视角跟着地面走 */
+    setDecals(layer: DecalLayer, list: readonly Decal[]): void {
+        const mat = this._decalMat;
+        if (!mat) { this._decalPending.set(layer, list); return; }
+        let node = this._decals.get(layer);
+        const pos: number[] = [], col: number[] = [], idx: number[] = [];
+        const y = DECAL_Y[layer];
+        const quad = (x0: number, z0: number, x1: number, z1: number, c: Color) => {
+            const i = pos.length / 3;
+            pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
+            for (let k = 0; k < 4; k++) col.push(c.r / 255, c.g / 255, c.b / 255, c.a / 255);
+            // 从上往下看是顺时针 → 正面朝上（同地面网格）
+            idx.push(i, i + 2, i + 1, i, i + 3, i + 2);
+        };
+        const lw = 0.06;   // 描边宽（格）
+        for (const d of list) {
+            const x0 = d.c, z0 = d.r, x1 = d.c + d.w, z1 = d.r + d.h;
+            if (d.fill) quad(x0, z0, x1, z1, d.fill);
+            if (d.stroke) {
+                quad(x0, z0, x1, z0 + lw, d.stroke);
+                quad(x0, z1 - lw, x1, z1, d.stroke);
+                quad(x0, z0 + lw, x0 + lw, z1 - lw, d.stroke);
+                quad(x1 - lw, z0 + lw, x1, z1 - lw, d.stroke);
+            }
+        }
+        if (idx.length === 0) { if (node) node.active = false; return; }
+        if (!node) {
+            node = this.child(this.node, `Decal-${layer}`);
+            const mr = node.addComponent(MeshRenderer);
+            mr.shadowCastingMode = 0;
+            mr.setMaterial(mat, 0);
+            this._decals.set(layer, node);
+        }
+        const mr = node.getComponent(MeshRenderer)!;
+        mr.mesh = utils.MeshUtils.createMesh({ positions: pos, colors: col, indices: idx });
+        node.active = true;
+    }
+
+    // ---------------------------------------------------------------- 工地、放置预览、封顶（T540e）
+    /** 有没有 3D 工地模型（旧包里没有就继续用 2D 工地图） */
+    get hasSites(): boolean {
+        return this._prefabs.has('build-1-0') && this._prefabs.has('crane-1-0');
+    }
+
+    /**
+     * 工地：围挡 / 框架 / 安全网三个阶段 + 塔吊（4 帧来回摆），和 2D 工地图同一套建模（construction.py）。
+     * 工地模型是 n×n，摆在楼占地的中心。site = null：完工，撤掉工地，楼从矮一截弹起来。
+     */
+    setSite(uid: number, site: Site3D | null): void {
+        let s = this._sites.get(uid);
+        if (!site) {
+            if (s) { s.root.destroy(); this._sites.delete(uid); }
+            const b = this._nodes.get(uid);
+            if (b && s) {
+                Tween.stopAllByTarget(b.node);
+                b.node.setScale(1, 0.75, 1);
+                tween(b.node)
+                    .to(0.18, { scale: new Vec3(1, 1.08, 1) }, { easing: 'quadOut' })
+                    .to(0.14, { scale: new Vec3(1, 1, 1) }, { easing: 'quadIn' })
+                    .start();
+            }
+            return;
+        }
+        if (!this._mats) return;
+        const key = `${site.col},${site.row},${site.w},${site.h},${site.n}`;
+        if (s && s.key !== key) { s.root.destroy(); this._sites.delete(uid); s = undefined; }
+        if (!s) {
+            const root = this.child(this._root, `Site${uid}`);
+            root.setPosition(site.col + site.w / 2 - site.n / 2, 0, site.row + site.h / 2 - site.n / 2);
+            const put = (id: string) => {
+                const m = this.place(id, 0, 0, site.n, site.n, 0);
+                if (m) { m.removeFromParent(); root.addChild(m); m.active = false; }
+                return m;
+            };
+            s = {
+                root, key,
+                stages: [0, 1, 2].map((k) => put(`build-${site.n}-${k}`)),
+                cranes: [0, 1, 2, 3].map((k) => put(`crane-${site.n}-${k}`)),
+            };
+            this._sites.set(uid, s);
+        }
+        s.stages.forEach((m, k) => { if (m && m.active !== (k === site.stage)) m.active = k === site.stage; });
+        s.cranes.forEach((m, k) => { if (m && m.active !== (k === site.crane)) m.active = k === site.crane; });
+    }
+
+    /** 放置预览：真模型摆在那里（和盖好以后一样），放不下时染红。null = 收起 */
+    setPreview(p: Preview3D | null): void {
+        const cur = this._preview;
+        if (!p || !this._mats || !this._prefabs.has(p.id)) {
+            if (cur) { cur.node.destroy(); this._preview = null; }
+            return;
+        }
+        const key = `${p.id}|${p.col},${p.row}|${p.facing ?? ''}`;
+        if (cur && cur.key === key && cur.ok === p.ok) return;
+        if (cur) cur.node.destroy();
+        const node = this.place(p.id, p.col, p.row, p.w, p.h, World3D.TURN[p.facing ?? 'L'] ?? 0);
+        if (!node) { this._preview = null; return; }
+        node.name = 'Preview';
+        if (!p.ok) {
+            const red = new Color(255, 110, 100, 255);
+            node.walk((c) => {
+                const mr = c.getComponent(MeshRenderer);
+                if (!mr) return;
+                for (let i = 0; i < mr.sharedMaterials.length; i++) mr.getMaterialInstance(i)!.setProperty('mainColor', red);
+            });
+        }
+        this._preview = { node, key, ok: p.ok };
+    }
+
     // ---------------------------------------------------------------- 楼
     private syncBuildings(): void {
         const alive = new Set<number>();
@@ -296,6 +433,11 @@ export class World3D extends Component {
             this._nodes.set(b.uid, { node, key });
         }
         this._nodes.forEach((v, uid) => { if (!alive.has(uid)) { v.node.destroy(); this._nodes.delete(uid); } });
+        // 盖到一半拆掉的楼：工地也撤掉（BuildingLayer 那边楼节点没了，不会再来通知完工）
+        if (this._sites.size > 0) {
+            const all = new Set(this._model.allBuildings().map((b) => b.uid));
+            this._sites.forEach((v, uid) => { if (!all.has(uid)) { v.root.destroy(); this._sites.delete(uid); } });
+        }
     }
 
     /**

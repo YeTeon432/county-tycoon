@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "4ad00529-0754-4aec-8695-96bc44db1c84",
+  "files": [],
+  "subMetas": {
+    "e10e4": {
+      "importer": "gltf-mesh",
+      "uuid": "4ad00529-0754-4aec-8695-96bc44db1c84@e10e4",
+      "displayName": "",
+      "id": "e10e4",
+      "name": "立方体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 520
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "4ad00529-0754-4aec-8695-96bc44db1c84@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "7a9f5": {
+      "importer": "gltf-scene",
+      "uuid": "4ad00529-0754-4aec-8695-96bc44db1c84@7a9f5",
+      "displayName": "",
+      "id": "7a9f5",
+      "name": "crane-1-1.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "4ad00529-0754-4aec-8695-96bc44db1c84@e10e4"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "4ad00529-0754-4aec-8695-96bc44db1c84@ce988"
+      ],
+      "scenes": [
+        "4ad00529-0754-4aec-8695-96bc44db1c84@7a9f5"
+      ]
+    }
+  }
+}

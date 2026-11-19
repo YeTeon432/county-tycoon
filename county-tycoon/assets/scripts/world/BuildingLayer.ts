@@ -4,6 +4,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 import { hexToColor, shade } from '../core/ColorUtil';
+import type { Decal, DecalLayer, Preview3D, Site3D } from './World3D';
 
 const { ccclass } = _decorator;
 
@@ -53,6 +54,15 @@ export class BuildingLayer extends Component {
      * 点楼按它的画面蒙版判定、楼顶气泡按它的高度摆，都不用改。
      */
     has3D: ((defId: string) => boolean) | null = null;
+    /**
+     * 3D 工地 / 放置预览（T540e）：WorldView 接到 World3D。接上且有工地模型时，2D 工地图、塔吊、预览图都不显示
+     * （节点还在：进度条高度、点工地判定照旧按它们算），由 World3D 画真模型，被前面的楼挡住、跟着视角转。
+     */
+    site3D: ((uid: number, site: Site3D | null) => void) | null = null;
+    sites3DReady: (() => boolean) | null = null;
+    preview3D: ((p: Preview3D | null) => void) | null = null;
+    /** 贴地色块画到 3D 地面上（占地菱形、环境图层、覆盖范围；T540e / T547）。接上后 2D 的这几层不画 */
+    decal3D: ((layer: DecalLayer, list: readonly Decal[]) => void) | null = null;
     /** 山 / 树林节点 -> 模型 id */
     private readonly _terrainId = new Map<Node, string>();
     /** uid -> 建筑 id（藏不藏 2D 图要查） */
@@ -191,7 +201,7 @@ export class BuildingLayer extends Component {
      * uid -> 工地占地。开工第一帧记一次，之后不再每帧遍历 allBuildings()
      * （工地多的时候那是 60 次/秒 × 工地数 的全图扫描）
      */
-    private readonly _site = new Map<number, { n: number; w: number; h: number; stage: number }>();
+    private readonly _site = new Map<number, { n: number; w: number; h: number; stage: number; col: number; row: number }>();
     /** uid -> 进度条上次画的样子（进度量化到 0.5%），没变就不重画 Graphics */
     private readonly _barAt = new Map<number, { p: number; w: number; y: number }>();
 
@@ -218,6 +228,7 @@ export class BuildingLayer extends Component {
             this._barAt.delete(uid);
             if (!site && !crane && !bar) return;
             if (bar) bar.destroy();
+            if (this.site3D) this.site3D(uid, null);
             // 楼露出来：从「矮一截」弹到原样；工地淡出收尾，别一帧硬切（网拆掉、楼落定）
             if (sprite) sprite.enabled = !this.is3D(this._defOf.get(uid));
             const op = node.getComponent(UIOpacity);
@@ -238,7 +249,7 @@ export class BuildingLayer extends Component {
         if (!info) {
             const b = this._model?.allBuildings().find((x) => x.uid === uid);
             const bw = b ? b.def.width : 1, bh = b ? b.def.height : 1;
-            info = { n: Math.max(bw, bh) >= 2 ? 2 : 1, w: bw, h: bh, stage: -1 };
+            info = { n: Math.max(bw, bh) >= 2 ? 2 : 1, w: bw, h: bh, stage: -1, col: b ? b.col : 0, row: b ? b.row : 0 };
             this._site.set(uid, info);
         }
         const n = info.n;
@@ -255,6 +266,9 @@ export class BuildingLayer extends Component {
             const k = Math.floor(this._craneT / 0.35 + uid) % 6;
             const cf = art.get(`crane-${n}-${k < 4 ? k : 6 - k}`);
             const s2 = cf ? this.overlay(node, 'Crane', cf, 1) : null;
+            const in3D = !!this.site3D && !!this.sites3DReady && this.sites3DReady();
+            for (const o of [s1, s2]) { const sp = o ? o.getComponent(Sprite) : null; if (sp && sp.enabled === in3D) sp.enabled = !in3D; }
+            if (in3D) this.site3D!(uid, { col: info.col, row: info.row, w: info.w, h: info.h, n, stage, crane: k < 4 ? k : 6 - k });
             // 进度条贴着「看得见的工地」，不是贴目标楼的最终高度：学校那种高楼要盖到 100 多，
             // 工地才 53，按楼高放会飘在半空
             topY = s1.getComponent(UITransform)!.contentSize.height;
@@ -336,7 +350,7 @@ export class BuildingLayer extends Component {
      * 完工：楼从矮一点弹到原样 + 脚下一圈尘土散开。
      * 尘土以「占地菱形中心」为圆心（节点原点是最下顶点，直接画会飘到楼前的地上），压在楼后面。
      */
-    private playTopOut(node: Node, info?: { n: number; w: number; h: number; stage: number }): void {
+    private playTopOut(node: Node, info?: { n: number; w: number; h: number; stage: number; col: number; row: number }): void {
         Tween.stopAllByTarget(node);
         node.setScale(1, 0.75, 1);
         tween(node)
@@ -441,6 +455,16 @@ export class BuildingLayer extends Component {
         const g = this._envG, iso = this._iso;
         if (!g || !iso) return;
         g.clear();
+        if (this.decal3D) {
+            const list: Decal[] = [];
+            for (const [c, r, v] of cells) {
+                if (!v) continue;
+                const a = Math.min(170, 50 + Math.abs(v) * 40);
+                list.push({ c, r, w: 1, h: 1, fill: v > 0 ? new Color(76, 200, 90, a) : new Color(232, 70, 60, a) });
+            }
+            this.decal3D('env', list);
+            return;
+        }
         const p = { x: 0, y: 0 };
         const pt = (c: number, r: number) => { iso.toLocal(c, r, p); return { x: p.x, y: p.y }; };
         for (const [c, r, v] of cells) {
@@ -487,6 +511,16 @@ export class BuildingLayer extends Component {
         const g = this._reachG, iso = this._iso;
         if (!g || !iso) return;
         g.clear();
+        if (this.decal3D) {
+            const list: Decal[] = [];
+            if (reach) {
+                const road = new Color(70, 150, 240, 110), fill = new Color(255, 205, 60, 120), edge = new Color(240, 160, 20, 230);
+                for (const [c, r] of reach.roads) list.push({ c, r, w: 1, h: 1, fill: road });
+                for (const h of reach.homes) list.push({ c: h.col, r: h.row, w: h.width, h: h.height, fill, stroke: edge });
+            }
+            this.decal3D('reach', list);
+            return;
+        }
         if (!reach) return;
         const p = { x: 0, y: 0 };
         const quad = (c: number, r: number, w: number, h: number) => {
@@ -781,7 +815,8 @@ export class BuildingLayer extends Component {
     /** 放置预览：占地菱形，绿白可放 / 红色不可放 */
     showGhost(def: BuildingDef | null, col: number, row: number): void {
         if (this._ghostSprite) this._ghostSprite.node.active = false;
-        if (!def) { if (this._ghost) this._ghost.clear(); return; }
+        if (this.preview3D) this.preview3D(null);
+        if (!def) { if (this._ghost) this._ghost.clear(); if (this.decal3D) this.decal3D('ghost', []); return; }
         const model = this._model;
         if (!model) return;
         this.showGhostShape(def, col, row, model.canPlace(def, col, row));
@@ -793,6 +828,13 @@ export class BuildingLayer extends Component {
         if (!g || !iso) return;
 
         g.clear();
+        if (this.decal3D) {
+            this.decal3D('ghost', [{
+                c: col, r: row, w: def.width, h: def.height,
+                fill: ok ? this._cGhostOk : this._cGhostBad, stroke: ok ? this._cGhostEdgeOk : this._cGhostEdgeBad,
+            }]);
+            return;
+        }
         const pts = iso.footprint(col, row, def.width, def.height);
         const path = () => {
             g.moveTo(pts[0].x, pts[0].y);
@@ -810,6 +852,8 @@ export class BuildingLayer extends Component {
 
     clearGhost(): void {
         if (this._ghost) this._ghost.clear();
+        if (this.preview3D) this.preview3D(null);
+        if (this.decal3D) this.decal3D('ghost', []);
         if (this._ghostSprite) this._ghostSprite.node.active = false;
     }
 
@@ -821,6 +865,13 @@ export class BuildingLayer extends Component {
         this.showGhostShape(def, col, row, ok);
         const gs = this._ghostSprite, iso = this._iso;
         if (!gs || !iso) return;
+        // 有 3D 模型：摆真模型（被前面的楼挡住、转视角跟着转），2D 预览图不显示
+        if (!def.flat && this.preview3D && this.is3D(def.id)) {
+            gs.node.active = false;
+            this.preview3D({ id: def.id, col, row, w: def.width, h: def.height, facing, ok });
+            return;
+        }
+        if (this.preview3D) this.preview3D(null);
         const frame = def.flat ? null : this.usableFrame(def, facing);
         if (!frame) { gs.node.active = false; return; }
         const sz = this._art!.worldSize(frame);

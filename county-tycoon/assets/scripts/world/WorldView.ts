@@ -251,6 +251,11 @@ export class WorldView extends Component {
             map.redraw();
             w3.groundFrame = (c, r) => map.modelFrame(c, r);
             this._buildings!.has3D = (id) => w3.has(id);
+            // 工地、塔吊、放置预览也是 3D 模型（T540e）
+            this._buildings!.site3D = (uid, site) => w3.setSite(uid, site);
+            this._buildings!.sites3DReady = () => w3.hasSites;
+            this._buildings!.preview3D = (p) => w3.setPreview(p);
+            this._buildings!.decal3D = (layer, list) => w3.setDecals(layer, list);
             w3.onReady = () => { if (this._buildings) this._buildings.refresh3D(); };
         }
 

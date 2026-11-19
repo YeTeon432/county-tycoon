@@ -15,6 +15,6 @@ if [ $# -eq 0 ] || [ ! -f $B/ground/ground.png ]; then python3 -I docs/art/3d/gr
 python3 -I docs/art/3d/pack.py $B $R
 python3 -I docs/art/3d/hitmask.py $R     # T424：点楼按真实画面判定
 # D033：楼 / 山树的 3D 模型（游戏实时渲染用），和上面的预渲染图同一套建模
-for s in homes_shops civic_industry housing terrain_obj new_buildings; do
+for s in homes_shops civic_industry housing terrain_obj new_buildings construction; do
   "$BL" -b -P docs/art/3d/export_glb.py -- $R/models3d $s "$@" 2>&1 | grep -E '^\[(ok|warn)\]|Error|Traceback' || true
 done

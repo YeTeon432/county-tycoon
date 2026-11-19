@@ -237,15 +237,4 @@ export class IsoMath {
         const [vx, vy] = this.view(gx, gy);
         return vx + vy;
     }
-
-    /**
-     * 建筑图的后缀（D031）：按「门面在屏幕上朝哪」取
-     *   ''   左下  '_br' 左上  '_b' 右上  '_r' 右下
-     * facing 'L'（默认）门面朝左下、'R' 朝右下；每转一档（顺时针）门面在屏幕上也顺时针挪一格。
-     */
-    frameSuffix(facing: 'L' | 'R' | 'UR' | 'UL' | null): string {
-        const order = ['', '_br', '_b', '_r'];
-        const base = facing === 'R' ? 3 : facing === 'UR' ? 2 : facing === 'UL' ? 1 : 0;
-        return order[(base + this._rot) % 4];
-    }
 }

@@ -206,10 +206,9 @@ export class LifeLayer extends Component {
     priceOf: ((defId: string) => number) | null = null;
 
     /**
-     * 真 3D（T540f）：人车由 World3D 画成 3D 里的纸片（能被楼挡住），这里的 2D 精灵只算位置、选帧，不显示。
+     * 人车由 World3D 画成 3D 里的纸片（T540f，能被楼挡住），这里的 2D 精灵只算位置、选帧，不显示。
      * 气泡、金币、飘字还是 2D，压在最上面。
      */
-    use3D = false;
     private readonly _views: Actor3D[] = [];
 
     /** 3D 版每帧要画的人车（World3D.actorSource） */
@@ -624,7 +623,7 @@ export class LifeLayer extends Component {
             const ss = sn.addComponent(Sprite);
             ss.sizeMode = Sprite.SizeMode.CUSTOM;
             ss.spriteFrame = sh;
-            ss.enabled = !this.use3D;
+            ss.enabled = false;
             sn.setPosition(0, SHADOW[kind].settle, 0);
             node.addChild(sn);
         }
@@ -634,7 +633,7 @@ export class LifeLayer extends Component {
         const sprite = body.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.trim = false;
-        sprite.enabled = !this.use3D;
+        sprite.enabled = false;
         node.addChild(body);
         const shSize = sh ? this._art!.worldSize(sh) : { width: 0, height: 0 };
 

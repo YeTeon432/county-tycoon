@@ -159,9 +159,29 @@ export class World3D extends Component {
         });
     }
 
-    /** 有没有这栋楼的 3D 模型（没有的继续画 2D 图） */
+    /** 有没有这栋楼的 3D 模型 */
     has(defId: string): boolean {
         return this._prefabs.has(defId);
+    }
+
+    private readonly _heights = new Map<string, number>();
+    /**
+     * 模型有多高（格，1 = 一格宽；T540h）：点楼的包围盒、楼顶气泡、进度条都按它。
+     * 取 glb 网格包围盒的最高点；模型还没加载到返回 0（调用方自己估一个）。
+     */
+    heightOf(id: string): number {
+        const hit = this._heights.get(id);
+        if (hit !== undefined) return hit;
+        const pf = this._prefabs.get(id);
+        if (!pf || !pf.data) return 0;
+        let top = 0;
+        (pf.data as Node).walk((c) => {
+            const mr = c.getComponent(MeshRenderer);
+            const mx = mr && mr.mesh ? mr.mesh.struct.maxPosition : null;
+            if (mx) top = Math.max(top, mx.y * c.scale.y);
+        });
+        this._heights.set(id, top);
+        return top;
     }
 
     get ready(): boolean {
@@ -470,7 +490,7 @@ export class World3D extends Component {
         return pivot;
     }
 
-    // ---------------------------------------------------------------- 山、树林（地形上立起来的，规则同 BuildingLayer.syncTerrainObjects）
+    // ---------------------------------------------------------------- 山、树林（地形上立起来的）
     private syncTerrain(): void {
         for (const n of this._terrain) n.destroy();
         this._terrain.length = 0;

@@ -1,9 +1,8 @@
-import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Sprite, SpriteFrame, Tween, tween, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Tween, tween, Vec2, Vec3 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
-import { hexToColor, shade } from '../core/ColorUtil';
 import type { Decal, DecalLayer, Preview3D, Site3D } from './World3D';
 
 const { ccclass } = _decorator;
@@ -15,15 +14,13 @@ export interface ReachDraw {
 }
 
 /**
- * 建筑层（等距，D014）。
+ * 建筑层（等距，D014；T540h 起只剩「看不见的那一半」）。
  *
- * 每栋建筑一个子节点，节点原点 = 占地菱形的最下顶点：
- *   - 有贴图：Sprite，锚点在图的底边中点
- *   - 没贴图：Graphics 画一个等距色块（屋顶 + 左墙 + 右墙），颜色取 buildings.json 的 color
- * 每次重画后按 iso.depth 排兄弟顺序，后面的建筑压住前面的。
- * 贴地的东西（马路，def.flat）不在这里画，交给 GridMap。
- *
- * 放置预览是单独一层 Graphics（Ghost 节点），永远压在最上面。
+ * 楼、山树、工地、塔吊、放置预览、贴地色块都由 World3D 画成 3D（D033）。这里每栋楼留一个**看不见的 2D 节点**：
+ *   - 原点 = 占地菱形的最下顶点，锚点 (0.5, 0)，大小 = 3D 包围盒（占地 × 模型高度）投到屏幕上的外框；
+ *   - 点楼按包围盒投影的六边形判定（T540h，取代 T424 的画面蒙版：转到任何角度都对）；
+ *   - 楼顶气泡、小旗、施工进度条、完工尘土挂在它下面，按它的高度摆。
+ * 3D 相机和 2D 坐标严格对齐（World3D.syncCamera），所以这些 2D 东西和 3D 楼在屏幕上对得上。
  */
 @ccclass('BuildingLayer')
 export class BuildingLayer extends Component {
@@ -32,51 +29,32 @@ export class BuildingLayer extends Component {
     private _art: ArtLibrary | null = null;
 
     private _objRoot: Node | null = null;
-    private _ghost: Graphics | null = null;
-    private _envG: Graphics | null = null;
-    /** 覆盖范围（T538）：店 / 学校的放置预览、追踪居民的心愿范围 */
-    private _reachG: Graphics | null = null;
     private _reach: ReachDraw | null = null;
-    /** 放置预览的半透明贴图（D022） */
-    private _ghostSprite: Sprite | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
     private readonly _nodes = new Map<number, Node>();
-    /** uid -> 节点当前显示的是哪张图（null = 色块）。贴图晚到、朝向变化时据此重建 */
-    private readonly _shown = new Map<number, SpriteFrame | null>();
     /** 节点 -> 前后排序键（建筑和会动的东西共用，见 sortAll） */
     private readonly _depth = new Map<Node, number>();
-    /** 山、树林的精灵节点 */
-    private readonly _terrainNodes: Node[] = [];
-    /** 山 / 树林节点在哪一格（跟手转视角时重摆用） */
-    private readonly _terrainCell = new Map<Node, [number, number]>();
-    /**
-     * 这种楼 / 山树有 3D 模型吗（D033）：有就不画 2D 图（World3D 画），但图还挂着——
-     * 点楼按它的画面蒙版判定、楼顶气泡按它的高度摆，都不用改。
-     */
-    has3D: ((defId: string) => boolean) | null = null;
-    /**
-     * 3D 工地 / 放置预览（T540e）：WorldView 接到 World3D。接上且有工地模型时，2D 工地图、塔吊、预览图都不显示
-     * （节点还在：进度条高度、点工地判定照旧按它们算），由 World3D 画真模型，被前面的楼挡住、跟着视角转。
-     */
+    /** uid -> 楼（算包围盒要占地和 id） */
+    private readonly _placed = new Map<number, PlacedBuilding>();
+    /** uid -> 包围盒投影的凸多边形（节点本地坐标，[x0, y0, x1, y1, ...] 逆时针） */
+    private readonly _hull = new Map<number, number[]>();
+    /** uid -> 上次算包围盒时的 id + 位置（翻盖换了 id 要重算） */
+    private readonly _key = new Map<number, string>();
+
+    /** 模型高度（格）；World3D.heightOf。没加载到返回 0 */
+    heightOf: ((id: string) => number) | null = null;
+    /** 3D 工地（T540e） */
     site3D: ((uid: number, site: Site3D | null) => void) | null = null;
     sites3DReady: (() => boolean) | null = null;
+    /** 3D 放置预览（T540e） */
     preview3D: ((p: Preview3D | null) => void) | null = null;
-    /** 贴地色块画到 3D 地面上（占地菱形、环境图层、覆盖范围；T540e / T547）。接上后 2D 的这几层不画 */
+    /** 贴地色块画到 3D 地面上（占地菱形、环境图层、覆盖范围；T540e / T547） */
     decal3D: ((layer: DecalLayer, list: readonly Decal[]) => void) | null = null;
-    /** 山 / 树林节点 -> 模型 id */
-    private readonly _terrainId = new Map<Node, string>();
-    /** uid -> 建筑 id（藏不藏 2D 图要查） */
-    private readonly _defOf = new Map<number, string>();
-    /** 尺寸不对的图只警告一次 */
-    private readonly _warned = new Set<string>();
 
-    private readonly _cMain = new Color();
-    private readonly _cTmp = new Color();
     private readonly _cGhostOk = new Color(255, 255, 255, 80);
     private readonly _cGhostBad = new Color(224, 74, 74, 110);
     private readonly _cGhostEdgeOk = new Color(255, 255, 255, 230);
     private readonly _cGhostEdgeBad = new Color(224, 74, 74, 240);
-    private readonly _cGhostTint = new Color(255, 120, 110, 255);
 
     static create(iso: IsoMath, model: TownModel, art: ArtLibrary): Node {
         const node = new Node('BuildingLayer');
@@ -99,108 +77,131 @@ export class BuildingLayer extends Component {
         this._iso = iso;
         this._model = model;
         this._art = art;
-        // 环境图层（D026，DESIGN 22）：贴在地面上、压在楼下面
-        this._envG = BuildingLayer.makeChild(this.node, 'EnvOverlay').addComponent(Graphics);
-        this._reachG = BuildingLayer.makeChild(this.node, 'ReachOverlay').addComponent(Graphics);
         this._objRoot = BuildingLayer.makeChild(this.node, 'Objects');
-        this._ghost = BuildingLayer.makeChild(this.node, 'Ghost').addComponent(Graphics);
-        const gs = BuildingLayer.makeChild(this.node, 'GhostSprite');
-        gs.getComponent(UITransform)!.setAnchorPoint(new Vec2(0.5, 0));
-        gs.addComponent(UIOpacity).opacity = 170;
-        this._ghostSprite = gs.addComponent(Sprite);
-        this._ghostSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        this._ghostSprite.trim = false;
-        gs.active = false;
         this.redraw();
     }
 
-    /** 建筑增删、贴图加载完之后调一次 */
+    /** 建筑增删之后调一次 */
     redraw(): void {
         const model = this._model;
-        const root = this._objRoot;
-        if (!model || !root) return;
-
-        const list = model.allBuildings();
+        if (!model || !this._objRoot) return;
         const alive = new Set<number>();
-        for (let i = 0; i < list.length; i++) {
-            const b = list[i];
+        for (const b of model.allBuildings()) {
             if (b.def.flat) continue;
             alive.add(b.uid);
             this.syncNode(b);
         }
-
         this._nodes.forEach((node, uid) => {
-            if (!alive.has(uid)) {
-                // destroy 要到帧末才生效，先摘下来，同一帧内再查子节点也是对的
-                node.removeFromParent();
-                node.destroy();
-                this._depth.delete(node);
-                this._nodes.delete(uid);
-                this._shown.delete(uid);
-                this._defOf.delete(uid);
-                this._site.delete(uid);
-                this._barAt.delete(uid);
-            }
+            if (alive.has(uid)) return;
+            // destroy 要到帧末才生效，先摘下来，同一帧内再查子节点也是对的
+            node.removeFromParent();
+            node.destroy();
+            this._depth.delete(node);
+            this._nodes.delete(uid);
+            this._placed.delete(uid);
+            this._hull.delete(uid);
+            this._key.delete(uid);
+            this._site.delete(uid);
+            this._barAt.delete(uid);
         });
+        this.sortAll();
+    }
 
-        this.sortByDepth(list);
+    private syncNode(b: PlacedBuilding): void {
+        const iso = this._iso!;
+        let node = this._nodes.get(b.uid);
+        const old = this._placed.get(b.uid);
+        if (!node) {
+            node = BuildingLayer.makeChild(this._objRoot!, `B${b.uid}_${b.def.id}`);
+            node.getComponent(UITransform)!.setAnchorPoint(new Vec2(0.5, 0));
+            this._nodes.set(b.uid, node);
+        } else if (old === b && this._key.get(b.uid) === `${b.def.id}|${b.col},${b.row}`) {
+            return;
+        }
+        this._key.set(b.uid, `${b.def.id}|${b.col},${b.row}`);
+        this._placed.set(b.uid, b);
+        this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
+        const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
+        node.setPosition(p.x, p.y, 0);
+        this.applyShape(b.uid);
+    }
+
+    /** 3D 里 1 格高在屏幕上是几个 2D 单位（俯角 30°：hw·√2·cos30°） */
+    private get vk(): number {
+        return this._iso ? this._iso.hw * Math.sqrt(6) / 2 : 19.6;
+    }
+
+    /** 这种楼此刻看得见的高度（格）：施工中按工地，模型没加载到按占地估 */
+    private height3D(uid: number): number {
+        const b = this._placed.get(uid);
+        if (!b) return 1;
+        const site = this._site.get(uid);
+        const id = site ? `build-${site.n}-${Math.max(0, site.stage)}` : b.def.id;
+        const h = this.heightOf ? this.heightOf(id) : 0;
+        return h > 0 ? h : 0.6 + 0.3 * Math.max(b.def.width, b.def.height);
+    }
+
+    /** 放置确认条的高度用：这种楼在屏幕上有多高（2D 单位，从占地最下顶点量） */
+    visualHeight(id: string, w: number, h: number): number {
+        const iso = this._iso;
+        const hh = iso ? iso.hh : 8;
+        const H = this.heightOf ? this.heightOf(id) : 0;
+        return (w + h) * hh + (H > 0 ? H : 1) * this.vk;
     }
 
     /**
-     * 地形上立起来的东西：山、树林（支线 C 画在建筑图集里的 terrain-*）。
-     * 每格一个精灵，和建筑、行人共用前后排序，所以人和楼会被山挡住、也能挡住山。
-     * 地形变了（以后砍树开荒）再调一次即可，已有的节点会清掉重建。
+     * 按 3D 包围盒（占地 × 高度）算节点大小和点击用的六边形；位置、视角、施工阶段、模型加载变了都要重算。
+     * 楼顶气泡 / 小旗跟着挪。
      */
-    syncTerrainObjects(): void {
-        const art = this._art, model = this._model, iso = this._iso, root = this._objRoot;
-        if (!art || !model || !iso || !root) return;
-        const t = model.terrain;
-        for (const n of this._terrainNodes) { this._depth.delete(n); n.removeFromParent(); n.destroy(); }
-        this._terrainId.clear();
-        this._terrainNodes.length = 0;
-        this._terrainCell.clear();
-        if (!t) return;
-        const pickId = (kind: string, c: number, r: number) => {
-            const h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
-            if (kind === 'mountain') return `terrain-mountain-${h % 3}`;
-            if (kind === 'forest') return `terrain-forest-${h % 4}`;
-            if (kind === 'pond' && h % 3 === 0) return 'terrain-pond-lily';
-            return null;
-        };
-        for (let r = 0; r < t.height; r++) {
-            for (let c = 0; c < t.width; c++) {
-                if (model.getAt(c, r)) continue;           // 已经盖了东西的格子不再立树
-                const tid = pickId(t.typeAt(c, r), c, r);
-                const frame = tid ? art.get(tid) : null;
-                if (!tid || !frame) continue;
-                const node = BuildingLayer.makeChild(root, `T${c}_${r}`);
-                const ui = node.getComponent(UITransform)!;
-                ui.setAnchorPoint(new Vec2(0.5, 0));
-                const sz = art.worldSize(frame);
-                ui.setContentSize(sz.width, sz.height);
-                const p = iso.footBottom(c, r, 1, 1);
-                node.setPosition(p.x, p.y, 0);
-                const s = node.addComponent(Sprite);
-                s.sizeMode = Sprite.SizeMode.CUSTOM;
-                s.trim = false;
-                s.spriteFrame = frame;
-                s.enabled = !this.is3D(tid);
-                this._terrainId.set(node, tid);
-                this._depth.set(node, iso.depth(c, r, 1, 1));
-                this._terrainNodes.push(node);
-                this._terrainCell.set(node, [c, r]);
-            }
+    private applyShape(uid: number): void {
+        const node = this._nodes.get(uid), b = this._placed.get(uid), iso = this._iso;
+        if (!node || !b || !iso) return;
+        const V = this.height3D(uid) * this.vk;
+        const pts: [number, number][] = [];
+        const p = { x: 0, y: 0 };
+        const ox = node.position.x, oy = node.position.y;
+        for (const [c, r] of [[b.col, b.row], [b.col + b.def.width, b.row], [b.col + b.def.width, b.row + b.def.height], [b.col, b.row + b.def.height]]) {
+            iso.toLocal(c, r, p);
+            pts.push([p.x - ox, p.y - oy], [p.x - ox, p.y - oy + V]);
         }
-        this.sortAll();
+        const hull = BuildingLayer.convexHull(pts);
+        this._hull.set(uid, hull);
+        let minX = 0, maxX = 0, maxY = 0;
+        for (let i = 0; i < hull.length; i += 2) {
+            minX = Math.min(minX, hull[i]); maxX = Math.max(maxX, hull[i]); maxY = Math.max(maxY, hull[i + 1]);
+        }
+        const ui = node.getComponent(UITransform)!;
+        const w = Math.max(-minX, maxX) * 2;
+        const h0 = ui.contentSize.height;
+        ui.setContentSize(w, maxY);
+        if (Math.abs(h0 - maxY) < 0.01) return;
+        // 气泡按新高度重建（心愿气泡的上下浮动是绝对坐标，挪不了，只能重来）
+        const alert = node.getChildByName('Alert');
+        if (alert) {
+            const kind = (alert as any)._kind as 'leave' | 'wish';
+            alert.removeFromParent();
+            alert.destroy();
+            this.setAlert(uid, kind);
+        }
+        const flag = node.getChildByName('Flag');
+        if (flag) flag.setPosition(-w * 0.28, maxY - 4, 0);
+    }
+
+    /** 凸包（Andrew 单调链），返回逆时针的 [x0, y0, x1, y1, ...] */
+    private static convexHull(pts: [number, number][]): number[] {
+        const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        const cross = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        const lower: [number, number][] = [], upper: [number, number][] = [];
+        for (const q of P) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+        for (let i = P.length - 1; i >= 0; i--) { const q = P[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+        const out: number[] = [];
+        for (const q of lower.slice(0, -1).concat(upper.slice(0, -1))) out.push(q[0], q[1]);
+        return out;
     }
 
     /** 塔吊动画时间（游戏秒，跟倍速走） */
     private _craneT = 0;
-
-    /**
-     * uid -> 工地占地。开工第一帧记一次，之后不再每帧遍历 allBuildings()
-     * （工地多的时候那是 60 次/秒 × 工地数 的全图扫描）
-     */
+    /** uid -> 工地占地。开工第一帧记一次 */
     private readonly _site = new Map<number, { n: number; w: number; h: number; stage: number; col: number; row: number }>();
     /** uid -> 进度条上次画的样子（进度量化到 0.5%），没变就不重画 Graphics */
     private readonly _barAt = new Map<number, { p: number; w: number; y: number }>();
@@ -211,81 +212,41 @@ export class BuildingLayer extends Component {
     }
 
     /**
-     * 施工中的样子（D026，DESIGN 24）：楼本身先藏起来，换成工地图（围挡打地基 → 框架 + 脚手架 → 安全网封顶，
-     * 按进度切三档）+ 塔吊（吊臂来回摆 4 帧）+ 头顶进度条。progress = null 表示完工：撤掉工地，楼「落成」弹一下。
-     * 图在 docs/art/3d/construction.py。没有图（旧图集）时退回半透明 + 进度条。
+     * 施工中（D026，DESIGN 24）：工地三阶段 + 塔吊由 World3D 画（T540e），这里管头顶进度条。
+     * progress = null 表示完工：撤掉工地，楼「落成」弹一下 + 脚下一圈尘土。
      */
     setConstruction(uid: number, progress: number | null): void {
         const node = this._nodes.get(uid);
-        const art = this._art;
-        if (!node || !art) return;
-        const sprite = node.getComponent(Sprite);
-        const site = node.getChildByName('Site'), crane = node.getChildByName('Crane');
+        if (!node) return;
         let bar = node.getChildByName('BuildBar');
         if (progress === null) {
             const info = this._site.get(uid);
+            if (!info && !bar) return;
             this._site.delete(uid);
             this._barAt.delete(uid);
-            if (!site && !crane && !bar) return;
             if (bar) bar.destroy();
             if (this.site3D) this.site3D(uid, null);
-            // 楼露出来：从「矮一截」弹到原样；工地淡出收尾，别一帧硬切（网拆掉、楼落定）
-            if (sprite) sprite.enabled = !this.is3D(this._defOf.get(uid));
-            const op = node.getComponent(UIOpacity);
-            if (op) op.opacity = 255;
-            for (const f of [site, crane]) {
-                if (!f) continue;
-                f.setSiblingIndex(node.children.length - 1);   // 压在楼上面淡出，不然楼先露出来又被网盖住
-                let fop = f.getComponent(UIOpacity);
-                if (!fop) fop = f.addComponent(UIOpacity);
-                Tween.stopAllByTarget(fop);
-                tween(fop).to(0.26, { opacity: 0 }, { easing: 'quadIn' }).call(() => f.destroy()).start();
-            }
+            this.applyShape(uid);
             this.playTopOut(node, info);
             return;
         }
-        // 占地只在开工第一帧查一次：以前每帧 allBuildings()，工地一多就是 60 次/秒的全图扫描
         let info = this._site.get(uid);
         if (!info) {
-            const b = this._model?.allBuildings().find((x) => x.uid === uid);
+            const b = this._placed.get(uid);
             const bw = b ? b.def.width : 1, bh = b ? b.def.height : 1;
             info = { n: Math.max(bw, bh) >= 2 ? 2 : 1, w: bw, h: bh, stage: -1, col: b ? b.col : 0, row: b ? b.row : 0 };
             this._site.set(uid, info);
         }
         const n = info.n;
         const stage = progress < 0.34 ? 0 : progress < 0.67 ? 1 : 2;
-        const siteFrame = art.get(`build-${n}-${stage}`);
-        const ui = node.getComponent(UITransform)!;
-        let topY = ui.contentSize.height;
-        /** 有工地图时的上下顺序（从下到上），进度条建好后再排 */
-        let order: (Node | null)[] | null = null;
-        if (siteFrame) {
-            if (sprite) sprite.enabled = false;
-            const s1 = this.overlay(node, 'Site', siteFrame, 0);
-            // 吊臂 0→3→0 来回摆，每帧 0.35 游戏秒；各工地错开一点
-            const k = Math.floor(this._craneT / 0.35 + uid) % 6;
-            const cf = art.get(`crane-${n}-${k < 4 ? k : 6 - k}`);
-            const s2 = cf ? this.overlay(node, 'Crane', cf, 1) : null;
-            const in3D = !!this.site3D && !!this.sites3DReady && this.sites3DReady();
-            for (const o of [s1, s2]) { const sp = o ? o.getComponent(Sprite) : null; if (sp && sp.enabled === in3D) sp.enabled = !in3D; }
-            if (in3D) this.site3D!(uid, { col: info.col, row: info.row, w: info.w, h: info.h, n, stage, crane: k < 4 ? k : 6 - k });
-            // 进度条贴着「看得见的工地」，不是贴目标楼的最终高度：学校那种高楼要盖到 100 多，
-            // 工地才 53，按楼高放会飘在半空
-            topY = s1.getComponent(UITransform)!.contentSize.height;
-            // 地基阶段塔吊在前，楼长高后塔吊在楼后面（立在后角）。进度条始终垫在塔吊下面：
-            // 1×1 塔吊压低后，封顶时吊臂正好在进度条那个高度，条在上面会把吊臂整个盖住；
-            // 条和工地图不重叠（条在工地顶上方），所以垫在工地下面也不会被挡
-            order = stage === 0 ? [s1, s2] : [s2, s1];
-            if (info.stage !== stage) {
-                if (info.stage >= 0) BuildingLayer.fadeIn(s1);   // 换阶段时淡入一下，别硬切
-                info.stage = stage;
-            }
-        } else {
-            let op = node.getComponent(UIOpacity);
-            if (!op) op = node.addComponent(UIOpacity);
-            op.opacity = 140;
+        if (info.stage !== stage) { info.stage = stage; this.applyShape(uid); }
+        // 吊臂 0→3→0 来回摆，每帧 0.35 游戏秒；各工地错开一点
+        const k = Math.floor(this._craneT / 0.35 + uid) % 6;
+        if (this.site3D && (!this.sites3DReady || this.sites3DReady())) {
+            this.site3D(uid, { col: info.col, row: info.row, w: info.w, h: info.h, n, stage, crane: k < 4 ? k : 6 - k });
         }
-        // 进度条不跟着塔吊尖走：那样会飘到两三倍楼高，压在邻居楼的窗上，分不清是哪块工地的
+        // 进度条贴着工地顶（不跟塔吊尖走：那样会飘到两三倍楼高，压在邻居楼的窗上）
+        const topY = node.getComponent(UITransform)!.contentSize.height;
         const hw = this._iso ? this._iso.hw : 16;
         const w = Math.min(34, Math.max(18, (info.w + info.h) * hw * 0.62)), h = 4;
         const y = topY + 4;
@@ -294,12 +255,6 @@ export class BuildingLayer extends Component {
         if (!bar) {
             bar = BuildingLayer.makeChild(node, 'BuildBar');
             bar.addComponent(Graphics);
-        }
-        if (order) {
-            const seq = [bar, ...order];
-            for (let i = 0; i < seq.length; i++) { const c = seq[i]; if (c && c.getSiblingIndex() !== i) c.setSiblingIndex(i); }
-        } else {
-            bar.setSiblingIndex(node.children.length - 1);
         }
         if (!last || last.w !== w || last.y !== y) bar.setPosition(0, y, 0);
         if (!last || last.w !== w || last.y !== y || last.p !== p) {
@@ -315,52 +270,17 @@ export class BuildingLayer extends Component {
         }
     }
 
-    /** 工地换阶段的淡入（0.18 秒），比硬切好认；不停连着换也不会打架 */
-    private static fadeIn(node: Node): void {
-        let op = node.getComponent(UIOpacity);
-        if (!op) op = node.addComponent(UIOpacity);
-        Tween.stopAllByTarget(op);
-        op.opacity = 110;
-        tween(op).to(0.18, { opacity: 255 }, { easing: 'quadOut' }).start();
-    }
-
-    /** 在楼节点里放一张和楼同锚点（底边中点）的图；已有就只换帧 */
-    private overlay(node: Node, name: string, frame: SpriteFrame, index: number): Node {
-        let c = node.getChildByName(name);
-        if (!c) {
-            c = BuildingLayer.makeChild(node, name);
-            c.getComponent(UITransform)!.setAnchorPoint(new Vec2(0.5, 0));
-            const sp = c.addComponent(Sprite);
-            sp.sizeMode = Sprite.SizeMode.CUSTOM;
-            sp.trim = false;
-            c.setSiblingIndex(index);
-        }
-        const sp = c.getComponent(Sprite)!;
-        if (sp.spriteFrame !== frame) {
-            sp.spriteFrame = frame;
-            const sz = this._art!.worldSize(frame);
-            c.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
-            // 楼节点是 anchor (0.5, 0)，子节点放在 (0, 0) 就是同一个底边中点
-            c.setPosition(0, 0, 0);
-        }
-        return c;
-    }
-
     /**
-     * 完工：楼从矮一点弹到原样 + 脚下一圈尘土散开。
-     * 尘土以「占地菱形中心」为圆心（节点原点是最下顶点，直接画会飘到楼前的地上），压在楼后面。
+     * 完工：楼从矮一点弹到原样（3D 楼由 World3D 弹）+ 脚下一圈尘土散开。
+     * 尘土以「占地菱形中心」为圆心（节点原点是最下顶点，直接画会飘到楼前的地上）。
      */
-    private playTopOut(node: Node, info?: { n: number; w: number; h: number; stage: number; col: number; row: number }): void {
-        Tween.stopAllByTarget(node);
-        node.setScale(1, 0.75, 1);
-        tween(node)
-            .to(0.18, { scale: new Vec3(1, 1.08, 1) }, { easing: 'quadOut' })
-            .to(0.14, { scale: new Vec3(1, 1, 1) }, { easing: 'quadIn' })
-            .start();
+    private playTopOut(node: Node, info?: { n: number; w: number; h: number; col: number; row: number }): void {
         const iso = this._iso;
         const w = info ? info.w : 1, h = info ? info.h : 1;
-        const cx = iso ? (h - w) * iso.hw / 2 : 0;
-        const cy = iso ? (w + h) * iso.hh / 2 : 6;
+        // 占地中心（按当前视角投影，转过视角也在楼脚下）
+        const c = iso && info ? iso.toLocal(info.col + w / 2, info.row + h / 2) : null;
+        const cx = c ? c.x - node.position.x : 0;
+        const cy = c ? c.y - node.position.y : 6;
         const dust = BuildingLayer.makeChild(node, 'Dust');
         dust.setSiblingIndex(0);          // 压在楼下面，像从楼脚下散出来
         dust.setPosition(cx, cy, 0);
@@ -447,36 +367,17 @@ export class BuildingLayer extends Component {
     }
 
     /**
-     * 环境图层：cells = [col, row, 值]，正绿负红，越大越浓。空数组 = 清掉。
-     * 环境视图（看全县）和放工厂时的污染范围预览共用。
+     * 环境图层：cells = [col, row, 值]，正绿负红，越大越浓。空数组 = 清掉。贴在 3D 地面上（T547）。
      */
     drawEnv(cells: [number, number, number][]): void {
-        this._envCells = cells;
-        const g = this._envG, iso = this._iso;
-        if (!g || !iso) return;
-        g.clear();
-        if (this.decal3D) {
-            const list: Decal[] = [];
-            for (const [c, r, v] of cells) {
-                if (!v) continue;
-                const a = Math.min(170, 50 + Math.abs(v) * 40);
-                list.push({ c, r, w: 1, h: 1, fill: v > 0 ? new Color(76, 200, 90, a) : new Color(232, 70, 60, a) });
-            }
-            this.decal3D('env', list);
-            return;
-        }
-        const p = { x: 0, y: 0 };
-        const pt = (c: number, r: number) => { iso.toLocal(c, r, p); return { x: p.x, y: p.y }; };
+        if (!this.decal3D) return;
+        const list: Decal[] = [];
         for (const [c, r, v] of cells) {
             if (!v) continue;
             const a = Math.min(170, 50 + Math.abs(v) * 40);
-            g.fillColor = v > 0 ? new Color(76, 200, 90, a) : new Color(232, 70, 60, a);
-            const q = [pt(c, r), pt(c + 1, r), pt(c + 1, r + 1), pt(c, r + 1)];
-            g.moveTo(q[0].x, q[0].y);
-            for (let i = 1; i < 4; i++) g.lineTo(q[i].x, q[i].y);
-            g.close();
-            g.fill();
+            list.push({ c, r, w: 1, h: 1, fill: v > 0 ? new Color(76, 200, 90, a) : new Color(232, 70, 60, a) });
         }
+        this.decal3D('env', list);
     }
 
     /** 特色街道成员楼顶的小旗（D026）：color = null 去掉 */
@@ -502,98 +403,34 @@ export class BuildingLayer extends Component {
         g.fill();
     }
 
-    /**
-     * 覆盖范围（T538）：走得到的路铺一层浅蓝，范围内的住宅脚下描一圈黄。null = 清掉。
-     * 压在楼下面（和环境图层一样贴地），楼本身不遮。
-     */
+    /** 覆盖范围（T538）：蓝色 = 沿路走得到的路，黄框 = 范围内的住宅；null = 清掉。贴在 3D 地面上（T547） */
     drawReach(reach: ReachDraw | null): void {
         this._reach = reach;
-        const g = this._reachG, iso = this._iso;
-        if (!g || !iso) return;
-        g.clear();
-        if (this.decal3D) {
-            const list: Decal[] = [];
-            if (reach) {
-                const road = new Color(70, 150, 240, 110), fill = new Color(255, 205, 60, 120), edge = new Color(240, 160, 20, 230);
-                for (const [c, r] of reach.roads) list.push({ c, r, w: 1, h: 1, fill: road });
-                for (const h of reach.homes) list.push({ c: h.col, r: h.row, w: h.width, h: h.height, fill, stroke: edge });
-            }
-            this.decal3D('reach', list);
-            return;
+        if (!this.decal3D) return;
+        const list: Decal[] = [];
+        if (reach) {
+            const road = new Color(70, 150, 240, 110), fill = new Color(255, 205, 60, 120), edge = new Color(240, 160, 20, 230);
+            for (const [c, r] of reach.roads) list.push({ c, r, w: 1, h: 1, fill: road });
+            for (const h of reach.homes) list.push({ c: h.col, r: h.row, w: h.width, h: h.height, fill, stroke: edge });
         }
-        if (!reach) return;
-        const p = { x: 0, y: 0 };
-        const quad = (c: number, r: number, w: number, h: number) => {
-            const q = [[c, r], [c + w, r], [c + w, r + h], [c, r + h]];
-            iso.toLocal(q[0][0], q[0][1], p);
-            g.moveTo(p.x, p.y);
-            for (let i = 1; i < 4; i++) { iso.toLocal(q[i][0], q[i][1], p); g.lineTo(p.x, p.y); }
-            g.close();
-        };
-        g.fillColor = new Color(70, 150, 240, 110);
-        for (const [c, r] of reach.roads) { quad(c, r, 1, 1); g.fill(); }
-        g.fillColor = new Color(255, 205, 60, 120);
-        g.strokeColor = new Color(240, 160, 20, 230);
-        g.lineWidth = 1.5;
-        for (const h of reach.homes) { quad(h.col, h.row, h.width, h.height); g.fill(); g.stroke(); }
+        this.decal3D('reach', list);
     }
 
-    /** 上一次 drawEnv 的格子，转视角后重画用 */
-    private _envCells: [number, number, number][] = [];
-
     /**
-     * 视角转了（D031）：所有楼换成对应方向的图、挪到新位置、重算前后顺序。
-     * 楼顶气泡、小旗、工地都是楼节点的子节点，跟着走，只按新图高度重摆。
-     *
-     * live = true：跟手转的每一帧都调（iso.spin ≠ 0）。楼身保持竖直、跟着占地中心走，
-     * 转过 45° 时换下一个方向的图；山 / 树林只挪位置不重建；环境图层、放置预览先藏起来。
-     * live = false：停稳后调一次，山 / 树林重建、环境图层重画。
+     * 视角转了（D031）：节点挪到新位置、重算前后顺序和点击六边形。楼本身由 3D 相机转，贴地色块跟着地面走。
+     * live：跟手转的每一帧都调，停稳后再调一次（live = false）。
      */
-    relayout(live = false): void {
-        const model = this._model, iso = this._iso;
-        if (!model || !iso) return;
-        const p = { x: 0, y: 0 }, off = { x: 0, y: 0 };
-        for (const b of model.allBuildings()) {
-            const node = this._nodes.get(b.uid);
-            if (!node) continue;
-            iso.toLocal(b.col + b.def.width / 2, b.row + b.def.height / 2, p);
-            iso.footOffset(b.def.width, b.def.height, off);
-            node.setPosition(p.x + off.x, p.y + off.y, 0);
+    relayout(_live = false): void {
+        const iso = this._iso;
+        if (!iso) return;
+        this._placed.forEach((b, uid) => {
+            const node = this._nodes.get(uid);
+            if (!node) return;
+            const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
+            node.setPosition(p.x, p.y, 0);
             this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
-            const sprite = node.getComponent(Sprite);
-            const frame = this.usableFrame(b.def, b.facing);
-            if (!sprite || !frame || this._shown.get(b.uid) === frame) continue;
-            sprite.spriteFrame = frame;
-            const sz = this._art!.worldSize(frame);
-            node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
-            this._shown.set(b.uid, frame);
-            // 气泡按新高度重建（心愿气泡的上下浮动是绝对坐标，挪不了，只能重来）
-            const alert = node.getChildByName('Alert');
-            if (alert) {
-                const kind = (alert as any)._kind as 'leave' | 'wish';
-                alert.removeFromParent();
-                alert.destroy();
-                this.setAlert(b.uid, kind);
-            }
-            const flag = node.getChildByName('Flag');
-            if (flag) flag.setPosition(-sz.width * 0.28, sz.height - 4, 0);
-        }
-        if (this._envG) this._envG.node.active = !live;
-        if (this._reachG) this._reachG.node.active = !live;
-        if (this._ghost) this._ghost.node.active = !live;
-        if (live) {
-            iso.footOffset(1, 1, off);
-            this._terrainCell.forEach(([c, r], node) => {
-                iso.toLocal(c + 0.5, r + 0.5, p);
-                node.setPosition(p.x + off.x, p.y + off.y, 0);
-                this._depth.set(node, iso.depth(c, r, 1, 1));
-            });
-            if (this._ghostSprite) this._ghostSprite.node.active = false;
-        } else {
-            this.syncTerrainObjects();
-            this.drawEnv(this._envCells);
-            this.drawReach(this._reach);
-        }
+            this.applyShape(uid);
+        });
         this.sortAll();
     }
 
@@ -603,12 +440,9 @@ export class BuildingLayer extends Component {
     }
 
     /**
-     * 按画面点楼（坐标同行人：Objects 节点里的本地坐标）。
-     * T424：按图的真实画面判定（atlas-hitmask.json），不再按整张图的矩形——矩形里约 40% 是透明的，
-     * 前面的楼会用透明的部分把后面楼的点击抢走（县发展中心被四周高楼围着就怎么都点不到）。
-     * 1. 先找「点的地方真有画面」的楼，重叠时取画在前面的（排序键大的）；楼顶气泡也算这栋。
-     * 2. 一栋都没点中（点在楼缝里）且 slop > 0：找 slop 范围内画面离手指最近的那栋。
-     * 施工中算工地图和塔吊；色块楼（没贴图）返回不了，交给按格子判定。
+     * 按画面点楼（坐标同行人：Objects 节点里的本地坐标）。按 3D 包围盒投到屏幕上的六边形判定（T540h）。
+     * 1. 先找点中的楼，重叠时取画在前面的（排序键大的）；楼顶气泡也算这栋。
+     * 2. 一栋都没点中（点在楼缝里）且 slop > 0：找 slop 范围内离手指最近的那栋。
      */
     pickBuildingAt(x: number, y: number, slop = 0): number | null {
         let best: number | null = null, bestDepth = -Infinity;
@@ -641,50 +475,35 @@ export class BuildingLayer extends Component {
         return best;
     }
 
-    /** 这栋楼此刻画出来的部分（楼本身 / 工地 / 塔吊 / 楼顶气泡）有没有盖住这一点 */
+    /** 这栋楼（或工地）的包围盒 / 楼顶气泡有没有盖住这一点 */
     private nodeHit(node: Node, x: number, y: number): boolean {
-        const ui = node.getComponent(UITransform)!;
-        const w = ui.contentSize.width, h = ui.contentSize.height;
-        if (w <= 0 || h <= 0) return false;            // 色块楼没有尺寸，交给按格子判定
+        const uid = BuildingLayer.uidOf(node);
+        const hull = this._hull.get(uid);
+        if (!hull) return false;
         const dx = x - node.position.x, dy = y - node.position.y;
-        // 先用外框粗筛（气泡在楼顶上方，外框往上多留 28）
-        if (dx < -w / 2 || dx > w / 2 || dy < 0 || dy > h + 28) return false;
+        const h = node.getComponent(UITransform)!.contentSize.height;
         if (node.getChildByName('Alert') && Math.abs(dx) <= 16 && Math.abs(dy - h - 12) <= 16) return true;
-        const sp = node.getComponent(Sprite);
-        // 3D 楼的 2D 图不显示但还在，照样按它判定；施工中（有工地图）不算楼本身
-        const shown = sp && (sp.enabled || (!node.getChildByName('Site') && this.is3D(this._defOf.get(this.uidOf(node)))));
-        if (sp && shown && sp.spriteFrame && this.spriteHit(sp, w, h, dx, dy)) return true;
-        for (const name of ['Site', 'Crane']) {
-            const c = node.getChildByName(name);
-            const cs = c && c.active ? c.getComponent(Sprite) : null;
-            if (!cs || !cs.spriteFrame) continue;
-            const cui = c!.getComponent(UITransform)!;
-            if (this.spriteHit(cs, cui.contentSize.width, cui.contentSize.height, dx - c!.position.x, dy - c!.position.y)) return true;
+        // 逆时针凸多边形：点在每条边的左边
+        const n = hull.length;
+        for (let i = 0; i < n; i += 2) {
+            const ax = hull[i], ay = hull[i + 1], bx = hull[(i + 2) % n], by = hull[(i + 3) % n];
+            if ((bx - ax) * (dy - ay) - (by - ay) * (dx - ax) < 0) return false;
         }
-        return false;
+        return true;
     }
 
-    /** 底边中点为原点的一张图：有蒙版按蒙版；没有（散图）退回「矩形去掉底下两个角」 */
-    private spriteHit(sp: Sprite, w: number, h: number, dx: number, dy: number): boolean {
-        if (dx < -w / 2 || dx >= w / 2 || dy < 0 || dy >= h) return false;
-        const hit = this._art ? this._art.opaqueAt(sp.spriteFrame!, dx + w / 2, dy) : null;
-        if (hit !== null) return hit;
-        const iso = this._iso;
-        const slope = iso ? iso.hh / iso.hw : 0.5;
-        return dy >= Math.abs(dx) * slope - 2;
+    private static uidOf(node: Node): number {
+        const m = /^B(\d+)_/.exec(node.name);
+        return m ? Number(m[1]) : -1;
     }
 
     /**
-     * 楼顶中点（Objects 本地坐标；T425 追踪箭头指这里）。施工中按看得见的工地高度。
-     * 色块楼按占地估一个高度；没有这栋楼返回 null。
+     * 楼顶中点（Objects 本地坐标；T425 追踪箭头指这里）。施工中按工地高度；没有这栋楼返回 null。
      */
     topOf(uid: number): { x: number; y: number } | null {
         const node = this._nodes.get(uid);
         if (!node || !node.isValid) return null;
         let h = node.getComponent(UITransform)!.contentSize.height;
-        const sp = node.getComponent(Sprite);
-        const site = node.getChildByName('Site');
-        if (site && (!sp || !sp.enabled)) h = site.getComponent(UITransform)!.contentSize.height;
         if (h <= 0) h = 30;
         return { x: node.position.x, y: node.position.y + h };
     }
@@ -725,183 +544,37 @@ export class BuildingLayer extends Component {
         }
     }
 
-    private sortByDepth(_list: PlacedBuilding[]): void {
-        this.sortAll();
-    }
-
-    /**
-     * 能用的贴图：要有图，且宽度符合 (w+h)·半宽·倍率。
-     * 按朝向 + 视角取后缀（D031：'' / _r / _b / _br），缺了就用默认图。
-     */
-    private usableFrame(def: BuildingDef, facing: Facing | null) {
-        const art = this._art;
-        const iso = this._iso!;
-        const suffix = iso.frameSuffix(facing);
-        const frame = art ? ((suffix ? art.get(`${def.id}${suffix}`) : null) ?? art.get(def.id)) : null;
-        if (!frame) return null;
-        const want = (def.width + def.height) * iso.hw * art!.scale;
-        const fw = frame.rect.width;
-        if (fw !== want) {
-            if (!this._warned.has(def.id)) {
-                this._warned.add(def.id);
-                console.warn(`[BuildingLayer] ${def.id}.png 宽 ${fw}，等距 ${def.width}×${def.height} 应为 ${want}，先用色块`);
-            }
-            return null;
-        }
-        return frame;
-    }
-
-    private syncNode(b: PlacedBuilding): void {
-        const iso = this._iso!;
-        // 朝向由 TownModel 定好并锁住，这里只读（null = 还没挨过路，先用默认图）
-        const frame = this.usableFrame(b.def, b.facing);
-        let node = this._nodes.get(b.uid);
-        if (node && this._shown.get(b.uid) === frame) return;
-        if (node) {
-            node.removeFromParent();
-            node.destroy();
-        }
-
-        if (node) this._depth.delete(node);
-        node = BuildingLayer.makeChild(this._objRoot!, `B${b.uid}_${b.def.id}`);
-        this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
-        const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
-        node.setPosition(p.x, p.y, 0);
-
-        if (frame) {
-            const ui = node.getComponent(UITransform)!;
-            ui.setAnchorPoint(new Vec2(0.5, 0));
-            const sz = this._art!.worldSize(frame);
-            ui.setContentSize(sz.width, sz.height);
-            const sprite = node.addComponent(Sprite);
-            sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-            sprite.type = Sprite.Type.SIMPLE;
-            sprite.trim = false;
-            sprite.spriteFrame = frame;
-            sprite.enabled = !this.is3D(b.def.id);
-        } else {
-            this.drawBlock(node.addComponent(Graphics), b.def);
-        }
-        this._nodes.set(b.uid, node);
-        this._defOf.set(b.uid, b.def.id);
-        this._shown.set(b.uid, frame);
-    }
-
-    /** 没贴图：等距色块。原点是占地最下顶点，墙高按占地大小给一个合理值 */
-    private drawBlock(g: Graphics, def: BuildingDef): void {
-        const iso = this._iso!;
-        const w = def.width, h = def.height;
-        const hw = iso.hw, hh = iso.hh;
-        const H = 10 + 6 * Math.max(w, h);
-        const B = { x: 0, y: 0 };
-        const R = { x: h * hw, y: h * hh };
-        const L = { x: -w * hw, y: w * hh };
-        const T = { x: (h - w) * hw, y: (w + h) * hh };
-        const quad = (pts: { x: number; y: number }[], c: Color) => {
-            g.fillColor = c;
-            g.moveTo(pts[0].x, pts[0].y);
-            for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
-            g.close();
-            g.fill();
-        };
-        const up = (p: { x: number; y: number }) => ({ x: p.x, y: p.y + H });
-
-        hexToColor(def.color, this._cMain);
-        quad([L, B, up(B), up(L)], shade(this._cMain, 0.85, this._cTmp));
-        quad([B, R, up(R), up(B)], shade(this._cMain, 0.65, this._cTmp));
-        quad([up(T), up(R), up(B), up(L)], this._cMain);
-    }
-
-    /** 放置预览：占地菱形，绿白可放 / 红色不可放 */
+    /** 放置预览的占地菱形（贴在 3D 地面上）；def = null 收起 */
     showGhost(def: BuildingDef | null, col: number, row: number): void {
-        if (this._ghostSprite) this._ghostSprite.node.active = false;
         if (this.preview3D) this.preview3D(null);
-        if (!def) { if (this._ghost) this._ghost.clear(); if (this.decal3D) this.decal3D('ghost', []); return; }
-        const model = this._model;
-        if (!model) return;
-        this.showGhostShape(def, col, row, model.canPlace(def, col, row));
+        if (!def || !this._model) { if (this.decal3D) this.decal3D('ghost', []); return; }
+        this.showGhostShape(def, col, row, this._model.canPlace(def, col, row));
     }
 
     private showGhostShape(def: BuildingDef, col: number, row: number, ok: boolean): void {
-        const g = this._ghost;
-        const iso = this._iso;
-        if (!g || !iso) return;
-
-        g.clear();
-        if (this.decal3D) {
-            this.decal3D('ghost', [{
-                c: col, r: row, w: def.width, h: def.height,
-                fill: ok ? this._cGhostOk : this._cGhostBad, stroke: ok ? this._cGhostEdgeOk : this._cGhostEdgeBad,
-            }]);
-            return;
-        }
-        const pts = iso.footprint(col, row, def.width, def.height);
-        const path = () => {
-            g.moveTo(pts[0].x, pts[0].y);
-            for (let i = 1; i < pts.length; i++) g.lineTo(pts[i].x, pts[i].y);
-            g.close();
-        };
-        g.fillColor = ok ? this._cGhostOk : this._cGhostBad;
-        path();
-        g.fill();
-        g.lineWidth = 1.5;
-        g.strokeColor = ok ? this._cGhostEdgeOk : this._cGhostEdgeBad;
-        path();
-        g.stroke();
+        if (!this.decal3D) return;
+        this.decal3D('ghost', [{
+            c: col, r: row, w: def.width, h: def.height,
+            fill: ok ? this._cGhostOk : this._cGhostBad, stroke: ok ? this._cGhostEdgeOk : this._cGhostEdgeBad,
+        }]);
     }
 
     clearGhost(): void {
-        if (this._ghost) this._ghost.clear();
         if (this.preview3D) this.preview3D(null);
         if (this.decal3D) this.decal3D('ghost', []);
-        if (this._ghostSprite) this._ghostSprite.node.active = false;
     }
 
-    /**
-     * 放置预览（D022）：占地菱形 + 半透明的真实贴图（按给定朝向）。
-     * ok=false 时贴图染红。没有贴图的建筑只画菱形。
-     */
+    /** 放置预览（D022）：占地菱形 + 真模型（按给定朝向，放不下染红；T540e） */
     showPreview(def: BuildingDef, col: number, row: number, facing: Facing | null, ok: boolean): void {
         this.showGhostShape(def, col, row, ok);
-        const gs = this._ghostSprite, iso = this._iso;
-        if (!gs || !iso) return;
-        // 有 3D 模型：摆真模型（被前面的楼挡住、转视角跟着转），2D 预览图不显示
-        if (!def.flat && this.preview3D && this.is3D(def.id)) {
-            gs.node.active = false;
-            this.preview3D({ id: def.id, col, row, w: def.width, h: def.height, facing, ok });
-            return;
-        }
-        if (this.preview3D) this.preview3D(null);
-        const frame = def.flat ? null : this.usableFrame(def, facing);
-        if (!frame) { gs.node.active = false; return; }
-        const sz = this._art!.worldSize(frame);
-        gs.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
-        gs.spriteFrame = frame;
-        gs.color = ok ? Color.WHITE : this._cGhostTint;
-        const p = iso.footBottom(col, row, def.width, def.height);
-        gs.node.setPosition(p.x, p.y, 0);
-        gs.node.active = true;
+        if (!this.preview3D) return;
+        if (def.flat) { this.preview3D(null); return; }
+        this.preview3D({ id: def.id, col, row, w: def.width, h: def.height, facing, ok });
     }
 
-    private is3D(id: string | undefined): boolean {
-        return !!id && !!this.has3D && this.has3D(id);
-    }
-
-    private uidOf(node: Node): number {
-        const m = /^B(\d+)_/.exec(node.name);
-        return m ? Number(m[1]) : -1;
-    }
-
-    /** 3D 模型加载完：已有的楼、山树把 2D 图藏起来（施工中的楼本来就藏着，不动） */
+    /** 3D 模型加载完：按模型高度重算每栋楼的包围盒 */
     refresh3D(): void {
-        this._nodes.forEach((node, uid) => {
-            const sp = node.getComponent(Sprite);
-            if (sp && !node.getChildByName('Site')) sp.enabled = !this.is3D(this._defOf.get(uid));
-        });
-        for (const n of this._terrainNodes) {
-            const sp = n.getComponent(Sprite);
-            if (sp) sp.enabled = !this.is3D(this._terrainId.get(n));
-        }
+        this._placed.forEach((_b, uid) => this.applyShape(uid));
     }
 
     private static makeChild(parent: Node, name: string): Node {

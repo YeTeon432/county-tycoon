@@ -426,7 +426,8 @@ _SPRITES = []
 
 
 def sprite(name, w, h, facing=True):
-    """登记一张建筑图。facing=True 会多出 <name>_r（门面朝右下）、_b（朝右上）、_br（朝左上）三张（D031）。"""
+    """登记一张建筑图。facing=True 会多出 <name>_r（门面朝右下）。
+    D033 起地图上的楼是 3D 模型，这些图只给建造栏卡片 / 放置提示用；背面图 _b / _br（D031）T540h 起不再出。"""
     def deco(fn):
         _SPRITES.append((name, w, h, facing, fn, None))
         return fn
@@ -558,5 +559,4 @@ def run():
             continue
         _render_one(name, w, h, fn, '', out_dir, width_px)
         if facing:
-            for v in ('_r', '_b', '_br'):
-                _render_one(name, w, h, fn, v, out_dir)
+            _render_one(name, w, h, fn, '_r', out_dir)

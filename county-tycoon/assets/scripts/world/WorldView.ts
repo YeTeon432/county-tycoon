@@ -63,9 +63,8 @@ export class WorldView extends Component {
     private _model: TownModel | null = null;
     private _iso: IsoMath | null = null;
     private readonly _art = new ArtLibrary();
-    /** 真 3D 的地面、楼、山树（D033）；网址带 ?flat2d 时不建，退回 2D 画法对比用 */
+    /** 真 3D 的地面、楼、山树、人车（D033）。T540h 起没有 2D 画法了（?flat2d 去掉） */
     private _3d: World3D | null = null;
-    static readonly use3D = !(typeof location !== 'undefined' && location.search.indexOf('flat2d') >= 0);
 
     /** 当前缩放档位在 zoomLevels 里的下标 */
     private _zoomIndex = 0;
@@ -97,7 +96,6 @@ export class WorldView extends Component {
     /** 停稳 / 按钮转的动画 */
     private _snap: { from: number; to: number; t: number; dur: number } | null = null;
     /** 地面的旋转节点：压扁 0.5 → 转 → 拉回 2 倍，等于在地平面上绕竖轴转 */
-    private _groundSpin: Node | null = null;
     /** 视角转了（D031），给 HUD 用 */
     onViewRotated: ((rot: number) => void) | null = null;
 
@@ -221,36 +219,23 @@ export class WorldView extends Component {
         const iso = new IsoMath(config);
         this._iso = iso;
 
-        const mapNode = GridMap.create(config, iso, model, this._art);
-        // 地面挂在三层节点下面（D031 跟手转）：等距地面 = 正俯视的格子转 45° 再压扁一半，
-        // 所以「压扁 0.5 → 绕原点转 → 拉高 2 倍」就是在地平面上绕地图中心（本地原点）转
-        const tilt = new Node('GroundTilt');
-        tilt.setScale(1, 0.5, 1);
-        world.addChild(tilt);
-        const spin = new Node('GroundSpin');
-        tilt.addChild(spin);
-        const flat = new Node('GroundFlat');
-        flat.setScale(1, 2, 1);
-        spin.addChild(flat);
-        flat.addChild(mapNode);
-        this._groundSpin = spin;
-        this._map = mapNode.getComponent(GridMap);
+        // 地面每格取哪一帧（画在 World3D 里）
+        const map = GridMap.create(model, this._art);
+        world.addChild(map.node);
+        this._map = map;
 
         // 建筑层压在地面之上
         const buildingNode = BuildingLayer.create(iso, model, this._art);
         world.addChild(buildingNode);
         this._buildings = buildingNode.getComponent(BuildingLayer);
 
-        // 真 3D（D033）：3D 相机先画地面和楼，2D 相机只清深度、把行人气泡界面压在上面
-        if (WorldView.use3D) {
+        // 真 3D（D033）：3D 相机先画地面、楼、人车，2D 相机只清深度、把气泡、进度条、界面压在上面
+        {
             if (cam) cam.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;
             const w3 = World3D.create(iso, model, bg);
             this._3d = w3;
-            const map = this._map!;
-            map.render2D = false;
-            map.redraw();
             w3.groundFrame = (c, r) => map.modelFrame(c, r);
-            this._buildings!.has3D = (id) => w3.has(id);
+            this._buildings!.heightOf = (id) => w3.heightOf(id);
             // 工地、塔吊、放置预览也是 3D 模型（T540e）
             this._buildings!.site3D = (uid, site) => w3.setSite(uid, site);
             this._buildings!.sites3DReady = () => w3.hasSites;
@@ -267,7 +252,6 @@ export class WorldView extends Component {
         // 人车也进 3D（T540f）：画成纸片，被楼挡住
         if (this._3d && this._life) {
             const life = this._life;
-            life.use3D = true;
             this._3d.actorSource = () => life.actors3D();
         }
 
@@ -296,12 +280,7 @@ export class WorldView extends Component {
 
     /** 建筑或马路有变化：地面（马路拼接）和建筑层都要重画 */
     redrawTown(): void {
-        if (this._map) this._map.redraw();
-        if (this._buildings) {
-            this._buildings.redraw();
-            // 树林上盖了楼，那格的树要撤掉；拆了楼树也不会长回来（树林已经砍了）——先简单整体重建
-            this._buildings.syncTerrainObjects();
-        }
+        if (this._buildings) this._buildings.redraw();
         if (this._life) this._life.onTownChanged();
         if (this._3d) this._3d.redraw();
     }
@@ -567,8 +546,6 @@ export class WorldView extends Component {
         iso.rot = rot;
         iso.spin = spin;
         this._viewAngle = spin === 0 ? k * q : phi;
-        if (rotChanged && this._map) this._map.redraw();
-        if (this._groundSpin) this._groundSpin.angle = -spin * 180 / Math.PI;   // 节点角度逆时针为正
 
         const [gx, gy] = this._spinPivot;
         const p = iso.toLocal(gx, gy);
@@ -821,8 +798,7 @@ export class WorldView extends Component {
         const trans = this.node.getComponent(UITransform);
         if (!p || !iso || !world || !trans) return null;
         const foot = iso.footBottom(p.col, p.row, p.def.width, p.def.height);
-        const frame = this._art.get(`${p.def.id}${iso.frameSuffix(p.facing)}`) ?? this._art.get(p.def.id);
-        const h = frame ? this._art.worldSize(frame).height : (p.def.width + p.def.height) * iso.hh;
+        const h = this._buildings ? this._buildings.visualHeight(p.def.id, p.def.width, p.def.height) : (p.def.width + p.def.height) * iso.hh;
         const wp = world.position;
         out.set(wp.x + foot.x * this._zoom, wp.y + (foot.y + h) * this._zoom, 0);
         return trans.convertToWorldSpaceAR(out, out);
@@ -1164,7 +1140,7 @@ export class WorldView extends Component {
      */
     private clampPosition(): void {
         const world = this._world;
-        const map = this._map;
+        const map = this._iso;
         if (!world || !map) return;
 
         const visible = view.getVisibleSize();

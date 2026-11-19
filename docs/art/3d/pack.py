@@ -5,9 +5,7 @@ D021 3D 渲染版图集打包（由 docs/art/gen/pack.py 改来）：倍率 4、
   art/atlas.png          所有建筑图，按高度排的货架式装箱，每张四周留 2 像素透明边防串色
   art/atlas-frames.json  {"scale": 4, "frames": {"<文件名>": [x, y, w, h]}}，坐标原点在左上；
                          人车 / 影子 / 金币是 8 倍图，写成 [x, y, w, h, 8]（头像 face-* 不加）
-  art/atlas-1.png        D031：背面图（*_b / *_br，视角转到背面才用）单独一张，2048 宽、高按需补成 2 的幂；
-                         帧表写在 atlas-frames.json 的 "pages": [{"image": "art/atlas-1", "frames": {...}}]。
-                         正面图和人车留在第一张：不转视角时跟以前一样只用一张纹理，合批不受影响。
+  （D031 的背面图集 atlas-1 T540h 起不再出：地图上的楼是 3D 模型，转视角不换图；旧的 *_b / *_br 图跳过）
 地面图集 ground.png 原样拷过去（它自己就是一张图集）。
 """
 import json, os, shutil, sys
@@ -55,10 +53,8 @@ def pack(group, out):
 
 os.makedirs(os.path.join(RES, 'art', 'ground'), exist_ok=True)
 place = pack([t for t in ims if not is_back(t[0])], 'atlas')
-back = pack([t for t in ims if is_back(t[0])], 'atlas-1')
 frames = {n: list(v) + ([HISCALE] if n in HIRES else []) for n, v in place.items()}
-meta = {'scale': SCALE, 'frames': frames,
-        'pages': [{'image': 'art/atlas-1', 'frames': {n: list(v) for n, v in back.items()}}]}
+meta = {'scale': SCALE, 'frames': frames}
 json.dump(meta, open(os.path.join(RES, 'art', 'atlas-frames.json'), 'w'), indent=1, sort_keys=True)
 shutil.copy(os.path.join(SRC, 'ground', 'ground.png'), os.path.join(RES, 'art', 'ground', 'ground.png'))
 # 地面帧名表（T231）：支线 D 按名字取帧，不认帧号

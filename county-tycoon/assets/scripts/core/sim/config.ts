@@ -160,7 +160,7 @@ export interface EconomyConfig {
     savingsSpendRate: number;
     /** 各类需求占可支配收入的比例，四类加起来 1 */
     demandWeight: Record<Demand, number>;
-    /** "附近店铺"的最大沿路距离（格） */
+    /** 店铺没写 radius 时的默认辐射半径（沿路格数）；找工作算不通路时的兜底距离 */
     serviceRadius: number;
     /** 距离每多一格的优先度惩罚（0 = 只看距离排序，1 = 无所谓距离） */
     distancePenalty: number;
@@ -323,7 +323,7 @@ const LEVELS: TownLevel[] = ['village', 'town', 'county', 'city', 'top100'];
 function fallbackEcon(defId: string): BuildingEcon {
     return {
         id: defId, cost: 0, upkeep: 0, housing: 0, jobs: [], demand: null,
-        capacity: 0, price: 0, env: 0, unlock: 'village', publicJob: false, costRate: 0, buildDays: 0,
+        capacity: 0, price: 0, radius: 0, env: 0, unlock: 'village', publicJob: false, costRate: 0, buildDays: 0,
         rent: 0, homeLevel: 0, homeMood: 0, upgradeTo: '', selfBuilt: false,
     };
 }
@@ -368,6 +368,7 @@ function parseEcon(raw: any, defId: string): BuildingEcon {
         demand,
         capacity: Math.max(0, Math.floor(num(raw?.capacity, 0))),
         price: Math.max(0, Math.round(num(raw?.price, 0))),
+        radius: Math.max(0, num(raw?.radius, 0)),
         env: Math.round(num(raw?.env, 0)),
         unlock,
         publicJob: raw?.publicJob === true,

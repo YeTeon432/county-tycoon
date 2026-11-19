@@ -3,7 +3,7 @@ import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from '.
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
 import { assignJob, clearJob, openingsFor, staffing, totalPositions, Opening } from './labor';
-import { consumeForResident, shopCapacity } from './consumption';
+import { consumeForResident, shopCapacity, shopRadius } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
@@ -455,8 +455,8 @@ export class Simulation implements SimApi {
         const cfg = this._cfg.economy;
         const rt = cfg.residents;
         if (r.homeId === null || r.age < rt.workMinAge) return out;
-        const radius = this.serviceRadiusOf(r);
-        const cover = this.homeCoverage(r.homeId, world, radius);
+        const range = this.tier(r).range;
+        const cover = this.homeCoverage(r.homeId, world, range);
         // 1. 找工作
         if (r.jobId === null && !r.idle && r.age < rt.retireAge && r.monthsUnemployed >= 1) {
             out.push({ kind: 'job', text: '想找份工作，县里没有合适的岗位', ...this.suggestJob(r), radius: 0 });
@@ -474,7 +474,10 @@ export class Simulation implements SimApi {
         for (const d of DEMAND_ORDER) {
             if (cover.has(d)) continue;
             const ids = this.shopsOf(d);
-            out.push({ kind: 'shop', demand: d, text: WISH_SHOP_TEXT[d], ...this.suggestFor(ids, `在他家 ${Math.round(radius)} 格内（沿路）盖一家`), radius });
+            // 范围按建议盖的那种店自己的半径算（每种店半径不同）
+            const sug = this.suggestFor(ids, '').suggest || ids[0];
+            const radius = Math.round(this.shopRadiusOf(sug) * range);
+            out.push({ kind: 'shop', demand: d, text: WISH_SHOP_TEXT[d], ...this.suggestFor(ids, `在他家 ${radius} 格内（沿路）盖一家`), radius });
         }
         // 5. 上班太远
         if (r.jobId !== null) {
@@ -514,7 +517,7 @@ export class Simulation implements SimApi {
             case 'job': return r.jobId === null && !r.idle;
             case 'school': return !this.hasNearby(r.homeId, 'school', SCHOOL_RANGE);
             case 'clinic': return !this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE);
-            case 'shop': return !!w.demand && !this.homeCoverage(r.homeId, world, this.serviceRadiusOf(r)).has(w.demand);
+            case 'shop': return !!w.demand && !this.homeCoverage(r.homeId, world, this.tier(r).range).has(w.demand);
             case 'commute': {
                 if (r.jobId === null) return false;
                 const d = this.distance(r.homeId, r.jobId);
@@ -728,7 +731,7 @@ export class Simulation implements SimApi {
         if (defId === 'plaza') return PLAZA_RANGE;
         if (defId === 'kindergarten') return KINDERGARTEN_RANGE;
         const e = this._cfg.building(defId);
-        return e && e.demand ? this._cfg.economy.serviceRadius : 0;
+        return e && e.demand ? shopRadius(e, this._cfg) : 0;
     }
 
     private toServiceReach(reach: Reach, radius: number, homes: number[], byVehicle: boolean): ServiceReach {
@@ -1279,7 +1282,7 @@ export class Simulation implements SimApi {
                 this._flows.outflow.fuel += fuel;
             }
             if (budget <= 0) continue;
-            const res = consumeForResident(r, budget, ctx, this.serviceRadiusOf(r));
+            const res = consumeForResident(r, budget, ctx, this.tier(r).range);
             r.savings -= res.spent;
             this._missed.set(r.id, res.missed);
         }
@@ -1720,7 +1723,7 @@ export class Simulation implements SimApi {
         add('vehicle', '有车出门方便', tier.mood);
         // 家附近店铺齐不齐（按自己的交通工具算"附近"）
         if (r.homeId !== null) {
-            const cover = this.homeCoverage(r.homeId, world, this.serviceRadiusOf(r));
+            const cover = this.homeCoverage(r.homeId, world, this.tier(r).range);
             if (cover.size === 0) add('shops', '家附近什么店都没有', -8);
             else add('shops', '家附近有店', cover.size * 3);
         } else {
@@ -1770,8 +1773,9 @@ export class Simulation implements SimApi {
         return (r.moodParts ?? []).filter((p) => p.value < 0).sort((a, b) => a.value - b.value).slice(0, 2).map((p) => p.label);
     }
 
-    private homeCoverage(homeUid: number, world: World, radius: number): Set<Demand> {
-        const key = `${homeUid}:${radius}`;
+    /** 家附近有哪几类店：每家店按自己的半径 × 这个人的交通倍率 range 算 */
+    private homeCoverage(homeUid: number, world: World, range: number): Set<Demand> {
+        const key = `${homeUid}:${range}`;
         const cached = this._homeCoverage.get(key);
         if (cached) return cached;
         const set = new Set<Demand>();
@@ -1780,7 +1784,7 @@ export class Simulation implements SimApi {
             if (!shops) continue;
             for (const b of shops) {
                 const d = this.distance(homeUid, b.uid);
-                if (isFinite(d) && d <= radius) { set.add(demand); break; }
+                if (isFinite(d) && d <= this.shopRadiusOf(b.defId) * range) { set.add(demand); break; }
             }
         }
         this._homeCoverage.set(key, set);
@@ -2041,9 +2045,10 @@ export class Simulation implements SimApi {
         return tiers[r.vehicle] ?? tiers.walk;
     }
 
-    /** 这个人的"附近"有多远：serviceRadius × 交通倍率 */
-    private serviceRadiusOf(r: Resident): number {
-        return this._cfg.economy.serviceRadius * this.tier(r).range;
+    /** 某种店的辐射半径（步行沿路格数；没配就是 serviceRadius） */
+    private shopRadiusOf(defId: string): number {
+        const e = this._cfg.building(defId);
+        return e ? shopRadius(e, this._cfg) : this._cfg.economy.serviceRadius;
     }
 
     /**

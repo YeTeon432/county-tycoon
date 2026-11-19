@@ -173,6 +173,8 @@ export interface BuildingEcon {
     demand: Demand | null;
     capacity: number;            // 每月最多服务人次
     price: number;               // 客单价
+    /** 店铺辐射半径：步行沿道路几格，有车的人乘交通倍率（feat/shop-radius 的半径部分）。0 = 用 serviceRadius */
+    radius: number;
     env: number;                 // 对周边环境
     unlock: TownLevel;
     publicJob: boolean;          // 岗位工资由财政发（学校、卫生院、发展中心）

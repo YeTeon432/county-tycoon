@@ -5,7 +5,7 @@ import { BuildingEcon, BuildingSim, Demand, Resident } from './types';
 /**
  * 每月消费（DESIGN 2.3 第 2 步）。
  *
- * 每个人的钱按四类需求拆开，各自去"家沿道路 8 格以内"的同类店里花。
+ * 每个人的钱按四类需求拆开，各自去「在这家店辐射半径以内」的同类店里花（每种店半径不同，economy.json 的 radius）。
  * 距离越近、口碑越好越优先；店满员了（capacity）剩下的钱就存下来，心情扣一点。
  */
 
@@ -44,12 +44,20 @@ export function shopCapacity(b: BuildingSim, econ: BuildingEcon, staff: number):
     return Math.floor(econ.capacity * ratio);
 }
 
-/** 从某栋楼出发，沿道路能走到、且这月还没排满的同类店 */
+/** 店铺的辐射半径（步行沿路格数）；没配就用全局 serviceRadius */
+export function shopRadius(econ: BuildingEcon, cfg: SimConfig): number {
+    return econ.radius > 0 ? econ.radius : cfg.economy.serviceRadius;
+}
+
+/**
+ * 从某栋楼出发，沿道路能走到、且这月还没排满的同类店。
+ * 每家店按自己的辐射半径算：距离 ≤ 店的半径 × 这个人的交通倍率（步行 1，DESIGN 11.2）。
+ */
 export function reachableShops(
     ctx: ConsumptionCtx,
     homeUid: number | null,
     demand: Demand,
-    radius: number,
+    range: number,
 ): Array<{ building: BuildingSim; distance: number; weight: number }> {
     const list = ctx.shopsByDemand.get(demand);
     if (!list || !list.length) return [];
@@ -60,11 +68,13 @@ export function reachableShops(
         if (!econ) continue;
         const cap = shopCapacity(b, econ, ctx.staff.get(b.uid) ?? 0);
         if ((ctx.served.get(b.uid) ?? 0) >= cap) continue;
+        const radius = shopRadius(econ, ctx.cfg) * range;
         const distance = homeUid === null ? radius : ctx.town.roadDistance(homeUid, b.uid);
         if (!isFinite(distance) || distance > radius) continue;
         // 口碑 50 算标准；距离越远越不值得跑
         const repFactor = Math.max(0.2, Math.min(2, 0.5 + (b.reputation / 100)));
-        const weight = Math.max(0.01, repFactor * (1 - penalty * distance));
+        // 距离按占这家店半径的比例算（8 = 以前的统一半径），半径大的店不吃亏
+        const weight = Math.max(0.01, repFactor * (1 - penalty * distance * 8 / radius));
         out.push({ building: b, distance, weight });
     }
     out.sort((a, b) => b.weight - a.weight || a.building.uid - b.building.uid);
@@ -79,8 +89,8 @@ export function consumeForResident(
     r: Resident,
     budget: number,
     ctx: ConsumptionCtx,
-    /** 这个人的"附近"半径（serviceRadius × 交通倍率，DESIGN 11.2）；不传用 serviceRadius */
-    radius?: number,
+    /** 交通倍率（步行 1，DESIGN 11.2）；每家店的半径乘它 */
+    range = 1,
 ): ConsumptionResult {
     const cfg = ctx.cfg.economy;
     const result: ConsumptionResult = { spent: 0, missed: 0 };
@@ -90,7 +100,7 @@ export function consumeForResident(
     for (const demand of demands) {
         const amount = budget * cfg.demandWeight[demand];
         if (amount <= 0.5) continue;
-        const shops = reachableShops(ctx, r.homeId, demand, radius ?? cfg.serviceRadius);
+        const shops = reachableShops(ctx, r.homeId, demand, range);
         if (!shops.length) {
             result.missed++;
             continue;

@@ -415,3 +415,9 @@
   - 居民档案心愿卡片右上角「看范围」= 追踪他 + 公告「蓝色是他家沿路 N 格内的路，挨着这些路盖就行」。
 - **验证**：模拟测试 101/101（新增 4 条）；tsc 项目代码零错误（tests/sim 的 padStart 老问题照旧）。网页版无头截图：`docs/ui-acceptance/t538-reach-place.png`（开局放早餐铺：9 格路变蓝、2 栋房描黄框，顶栏提示对）、`t538-wish-card.png`（心愿卡片「看范围」按钮）、`t538-reach-wish.png`（追踪后画他家范围 + 公告）。
 - **待验收**：真机看颜色深浅、黄框在高楼下面看不看得见、提示字是否太长。
+## 2026-11-19 合并：新建筑（T543）、覆盖范围（T538）；每种店半径（T546，D035）
+- **合并**：claude/elegant-yonath（新建筑 11 种，原编号 T540～T542 / D033 和 3D 撞号 → T543～T545 / D034）；claude/miniapp-version-update-data（覆盖范围 T538）。和新建筑在 Simulation.ts（幸福度那几行）、测试文件冲突，两边都留；幼儿园 8 格提成 `KINDERGARTEN_RANGE`，并进覆盖范围。
+- **店铺半径**：feat/shop-radius 只搬半径（见 D035）。`BuildingEcon.radius`、`consumption.shopRadius()`；`reachableShops / consumeForResident` 的参数从「半径」改成「交通倍率」，每家店半径 × 倍率；`homeCoverage` 同理；缺店心愿显示的格数按建议盖的那种店；覆盖范围 `reachRadius` 用店的半径。测试改 2 条（写死了 8 格）、加 1 条（同样 7 格，早餐铺够不着、奶茶店够得着）。
+- **验证**：模拟测试 106/106；tsc 零错误；50 年长跑正常（峰值 1284，末年心情 63）。
+- **没做**：3D 版里看覆盖范围的效果（编辑器关着，下次开预览时补截图）。新建筑没有 3D 模型，地图上是 2D 色块（T544）。
+

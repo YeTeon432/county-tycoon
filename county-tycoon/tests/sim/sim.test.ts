@@ -664,12 +664,38 @@ suite('交通工具', () => {
         ok(a.summary().vehicles > 0, `5 年里应当有人买车，实际 ${a.summary().vehicles}`);
     });
 
+    test('每种店半径不同：同样 7 格，早餐铺（5）够不着，奶茶店（8）够得着', () => {
+        const cfg = loadConfig();
+        const view = (id: string) => {
+            const m = new MapBuilder(30, 6);
+            m.hRoad(0, 25, 0);
+            const house = m.build('house', 0, 1);
+            const shop = m.build(id, 7, 1);
+            return { m, house, shop };
+        };
+        for (const [id, reach] of [['breakfast', false], ['milk-tea', true]] as [string, boolean][]) {
+            const { m, house, shop } = view(id);
+            const d = m.view().roadDistance(house, shop);
+            const rad = cfg.building(id)!.radius;
+            eq(d <= rad, reach, `${id} 半径 ${rad}，距离 ${d}`);
+            const sim = new Simulation(cfg, m.view(), { seed: 3, opening: false });
+            const r = (sim as any).createResident(null, 'M', 30);
+            r.savings = 12000;
+            sim.state.residents.push(r);
+            (sim as any).assignHomes(sim.state.residents);
+            sim.stepMonth();
+            const b = sim.building(shop)!;
+            const local = b.lastRevenue - (b.lastOutside ?? 0);
+            ok(reach ? local > 0 : local === 0, `${id}：县里人花的钱 ${local}`);
+        }
+    });
+
     test('有车的人消费半径更大', () => {
         const cfg = loadConfig();
         const m = new MapBuilder(40, 6);
         m.hRoad(0, 35, 0);
         const house = m.build('house', 0, 1);
-        const shop = m.build('breakfast', 10, 1); // 步行 8 格够不着，电动车 12 格够得着
+        const shop = m.build('milk-tea', 10, 1);  // 奶茶店半径 8：步行够不着，电动车 12 格够得着
         const run = (v: 'walk' | 'ebike') => {
             const sim = new Simulation(cfg, m.view(), { seed: 2, opening: false });
             const r = (sim as any).createResident(null, 'M', 30);
@@ -683,7 +709,8 @@ suite('交通工具', () => {
             return b.lastRevenue - (b.lastOutside ?? 0);   // 只看县里人花的钱，不算过路客
         };
         const d = m.view().roadDistance(house, shop);
-        ok(d > cfg.economy.serviceRadius && d <= cfg.economy.serviceRadius * 1.5, `距离 ${d} 要落在 8～12 之间`);
+        const rad = cfg.building('milk-tea')!.radius;
+        ok(d > rad && d <= rad * 1.5, `距离 ${d} 要落在 ${rad}～${rad * 1.5} 之间`);
         eq(run('walk'), 0, '步行够不着');   // 钱数，不是人次
         ok(run('ebike') > 0, '骑电动车能去');
     });
@@ -1445,7 +1472,7 @@ suite('覆盖范围：放置预览 / 心愿范围', () => {
         const sim = new Simulation(cfg, t.view, { seed: 5 });
         const shop = sim.serviceReach('breakfast', 5, 6, 1, 1)!;
         ok(!!shop, '早餐铺有覆盖范围');
-        eq(shop.radius, cfg.economy.serviceRadius);
+        eq(shop.radius, cfg.building('breakfast')!.radius, '按早餐铺自己的半径');
         eq(shop.byVehicle, true);
         eq(shop.homes.slice().sort((a, b) => a - b).join(','), t.houses.slice().sort((a, b) => a - b).join(','), '两栋房都在范围内，店不算');
         ok(shop.roads.length > 0);

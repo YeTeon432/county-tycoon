@@ -1,7 +1,7 @@
-import { GoalStatus, ResearchStatus, SimApi, SimSummary, StreetStatus } from './SimApi';
+import { GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
-import { TownView } from './townView';
+import { Reach, TownView } from './townView';
 import { assignJob, clearJob, openingsFor, staffing, totalPositions, Opening } from './labor';
 import { consumeForResident, shopCapacity } from './consumption';
 import { buildWorld, World } from './world';
@@ -20,6 +20,13 @@ import {
  *   - 只写 SimState 里合同规定的字段；"这个月没买到东西""心情差了几个月"
  *     这类临时状态放在实例的 Map 里，不进存档（读档后从头累计，无关紧要）。
  */
+/** 学校 / 卫生院的服务范围（格，沿路）：心愿和覆盖范围高亮共用 */
+const SCHOOL_RANGE = 10;
+const CLINIC_RANGE = 8;
+/** 派出所 / 广场：家在范围内心情 +（幸福度分项「附近有…」） */
+const POLICE_RANGE = 10;
+const PLAZA_RANGE = 6;
+
 export class Simulation implements SimApi {
     readonly state: SimState;
     onMonth: ((report: MonthlyReport) => void) | null = null;
@@ -453,12 +460,12 @@ export class Simulation implements SimApi {
         }
         // 2. 孩子上学
         const kid = r.childIds.map((id) => this.resident(id)).find((c) => c && c.age >= rt.schoolMinAge && c.age <= rt.schoolMaxAge);
-        if (kid && !this.hasNearby(r.homeId, 'school', 10)) {
-            out.push({ kind: 'school', text: `${kid.name}到上学的年纪了，附近没有学校`, ...this.suggestFor(['school'], '在他家 10 格内建一所学校'), radius: 10 });
+        if (kid && !this.hasNearby(r.homeId, 'school', SCHOOL_RANGE)) {
+            out.push({ kind: 'school', text: `${kid.name}到上学的年纪了，附近没有学校`, ...this.suggestFor(['school'], `在他家 ${SCHOOL_RANGE} 格内建一所学校`), radius: SCHOOL_RANGE });
         }
         // 3. 老人看病
-        if (r.age >= rt.retireAge && !this.hasNearby(r.homeId, 'clinic', 8)) {
-            out.push({ kind: 'clinic', text: '年纪大了，想离卫生院近一点', ...this.suggestFor(['clinic'], '在他家 8 格内盖一间卫生院'), radius: 8 });
+        if (r.age >= rt.retireAge && !this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE)) {
+            out.push({ kind: 'clinic', text: '年纪大了，想离卫生院近一点', ...this.suggestFor(['clinic'], `在他家 ${CLINIC_RANGE} 格内盖一间卫生院`), radius: CLINIC_RANGE });
         }
         // 4. 附近缺店
         for (const d of DEMAND_ORDER) {
@@ -502,8 +509,8 @@ export class Simulation implements SimApi {
         const cfg = this._cfg.economy;
         switch (w.kind) {
             case 'job': return r.jobId === null && !r.idle;
-            case 'school': return !this.hasNearby(r.homeId, 'school', 10);
-            case 'clinic': return !this.hasNearby(r.homeId, 'clinic', 8);
+            case 'school': return !this.hasNearby(r.homeId, 'school', SCHOOL_RANGE);
+            case 'clinic': return !this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE);
             case 'shop': return !!w.demand && !this.homeCoverage(r.homeId, world, this.serviceRadiusOf(r)).has(w.demand);
             case 'commute': {
                 if (r.jobId === null) return false;
@@ -691,6 +698,49 @@ export class Simulation implements SimApi {
             sum += env * (1 - (d - 1) / 4);
         }
         return sum;
+    }
+
+    // ───────────────────────────── 覆盖范围（T538） ─────────────────────────────
+
+    /** 店按步行的消费半径；学校 / 卫生院 / 派出所 / 广场按各自的范围；其他楼没有覆盖范围 */
+    private reachRadius(defId: string): number {
+        if (defId === 'school') return SCHOOL_RANGE;
+        if (defId === 'clinic') return CLINIC_RANGE;
+        if (defId === 'police') return POLICE_RANGE;
+        if (defId === 'plaza') return PLAZA_RANGE;
+        const e = this._cfg.building(defId);
+        return e && e.demand ? this._cfg.economy.serviceRadius : 0;
+    }
+
+    private toServiceReach(reach: Reach, radius: number, homes: number[], byVehicle: boolean): ServiceReach {
+        const w = this._town.width;
+        return { radius, roads: reach.roads.map((i) => [i % w, Math.floor(i / w)] as [number, number]), homes, byVehicle };
+    }
+
+    serviceReach(defId: string, col: number, row: number, w: number, h: number): ServiceReach | null {
+        const radius = this.reachRadius(defId);
+        const town = this._town;
+        if (!radius || !town.spotReach) return null;
+        const reach = town.spotReach(col, row, w, h, radius);
+        const homes: number[] = [];
+        reach.near.forEach((_d, uid) => {
+            const info = town.building(uid);
+            const e = info ? this._cfg.building(info.defId) : null;
+            if (e && e.housing > 0) homes.push(uid);
+        });
+        const e = this._cfg.building(defId);
+        return this.toServiceReach(reach, radius, homes, !!(e && e.demand));
+    }
+
+    wishReach(residentId: number): ServiceReach | null {
+        const r = this.resident(residentId);
+        const w = r ? r.wish : null;
+        const town = this._town;
+        if (!r || !w || r.homeId === null || !town.uidReach) return null;
+        if (w.kind !== 'shop' && w.kind !== 'school' && w.kind !== 'clinic') return null;
+        const radius = Math.round(w.radius);
+        if (radius <= 0) return null;
+        return this.toServiceReach(town.uidReach(r.homeId, radius), radius, [r.homeId], false);
     }
 
     // ───────────────────────────── 住房：翻盖、搬家（DESIGN 23） ─────────────────────────────
@@ -1680,9 +1730,9 @@ export class Simulation implements SimApi {
         add('env', env < 0 ? '家附近有污染' : '家附近环境好', env);
         // 公共服务
         if (r.homeId !== null) {
-            if (this.hasNearby(r.homeId, 'clinic', 8)) add('clinic', '附近有卫生院', 5);
-            if (this.hasNearby(r.homeId, 'police', 10)) add('police', '附近有派出所', 3);
-            if (this.hasNearby(r.homeId, 'plaza', 6)) add('plaza', '附近有广场', 4);
+            if (this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE)) add('clinic', '附近有卫生院', 5);
+            if (this.hasNearby(r.homeId, 'police', POLICE_RANGE)) add('police', '附近有派出所', 3);
+            if (this.hasNearby(r.homeId, 'plaza', PLAZA_RANGE)) add('plaza', '附近有广场', 4);
         }
         // 想买的东西买不到
         add('missed', '想买的东西买不到', -(this._missed.get(r.id) ?? 0) * 4);

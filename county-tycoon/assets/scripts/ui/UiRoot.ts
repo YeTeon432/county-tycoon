@@ -446,6 +446,12 @@ export class UiRoot extends Component {
         this._trackT = 1;
         this._trackChip?.show(r.name);
         this.requestTrack(id);
+        // T538：有「在他家 N 格内盖…」的心愿，地图上同时画出范围，这里说一句怎么看
+        const reach = this.sim && this.sim.wishReach ? this.sim.wishReach(id) : null;
+        if (reach && r.wish) {
+            const where = reach.roads.length ? `蓝色是他家沿路 ${reach.radius} 格内的路，挨着这些路盖就行` : '他家不挨路，先给他家修条路';
+            this._notices?.say('info', `${r.wish.hint}：${where}`);
+        }
     }
 
     stopTrack(): void {

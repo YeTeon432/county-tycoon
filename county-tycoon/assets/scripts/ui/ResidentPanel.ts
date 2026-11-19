@@ -28,6 +28,8 @@ export class ResidentPanel extends Panel {
 
     private _sim: SimApi | null = null;
     private _model: TownModel | null = null;
+    /** 「追踪」（T425）；心愿卡片的「看范围」也走它（T538：追踪时地图画出心愿范围） */
+    private _onTrack: ((id: number) => void) | null = null;
 
     /**
      * @param onTrack 「追踪」按钮（T425）：在地图上用箭头标出这个人和他家；不传就不显示按钮
@@ -38,6 +40,7 @@ export class ResidentPanel extends Panel {
         const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`);
         panel._sim = sim;
         panel._model = model;
+        panel._onTrack = onTrack ?? null;
         panel.fill(sim, r);
         if (onTrack) panel.buildTrackButton(() => onTrack(r.id));
         return panel;
@@ -115,7 +118,17 @@ export class ResidentPanel extends Panel {
             cg.fillColor = new Color(232, 241, 252, 255);
             cg.roundRect(-W / 2, -wh / 2, W, wh, UI_RADIUS);
             cg.fill();
-            const t1 = makeLabelLeft(card, 'T1', `心愿：${r.wish.text}（还有 ${left} 天）`, UI_FONT.body, UI_PALETTE.blue, W - 40);
+            // 要「在他家 N 格内」盖的心愿：右上角「看范围」→ 追踪他，地图上画出范围（T538）
+            const k = r.wish.kind;
+            const onTrack = this._onTrack;
+            const ranged = !!onTrack && r.homeId !== null && r.wish.radius > 0 && (k === 'shop' || k === 'school' || k === 'clinic');
+            const BW = 150;
+            if (ranged) {
+                const id = r.id;
+                const btn = makeButton(card, 'RangeBtn', '看范围', BW, 48, 'primary', () => onTrack!(id));
+                btn.node.setPosition(W / 2 - 16 - BW / 2, 20, 0);
+            }
+            const t1 = makeLabelLeft(card, 'T1', `心愿：${r.wish.text}（还有 ${left} 天）`, UI_FONT.body, UI_PALETTE.blue, W - 40 - (ranged ? BW + 16 : 0));
             t1.isBold = true;
             t1.node.setPosition(-W / 2 + 20, 20, 0);
             const t2 = makeLabelLeft(card, 'T2', `建议：${r.wish.hint}。实现了幸福度 +15`, UI_FONT.small, UI_COLOR.text, W - 40);

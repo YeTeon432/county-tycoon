@@ -1340,4 +1340,66 @@ suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () =>
     });
 });
 
+// ───────────────────────── 覆盖范围（T538） ─────────────────────────
+suite('覆盖范围：放置预览 / 心愿范围', () => {
+    test('spotReach：沿路走 N 步以内的路和楼，步数和 roadDistance 一致', () => {
+        const map = new MapBuilder(20, 12);
+        map.hRoad(0, 19, 5);
+        const nearHome = map.build('house', 4, 4);   // 门口 (4,5)
+        const farHome = map.build('house', 6, 4);    // 门口 (6,5)
+        const v = map.view();
+        const r = v.spotReach(2, 6, 1, 1, 3);        // 门口 (2,5) 算第 1 步
+        eq(r.roads.length, 5, '走得到 (0..4, 5) 五格');
+        eq(r.near.get(nearHome), 3);
+        ok(!r.near.has(farHome), '5 步外的不算');
+        // 真盖下去，roadDistance 得一样
+        const shop = map.build('breakfast', 2, 6);
+        eq(map.view().roadDistance(shop, nearHome), 3);
+    });
+
+    test('spotReach：不挨路的地方什么都够不着', () => {
+        const map = new MapBuilder(20, 12);
+        map.hRoad(0, 19, 5);
+        map.build('house', 4, 4);
+        const r = map.view().spotReach(2, 9, 1, 1, 8);
+        eq(r.roads.length, 0);
+        eq(r.near.size, 0);
+    });
+
+    test('serviceReach：店按步行消费半径、只算住宅；学校 10 格；住宅没有覆盖范围', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 5 });
+        const shop = sim.serviceReach('breakfast', 5, 6, 1, 1)!;
+        ok(!!shop, '早餐铺有覆盖范围');
+        eq(shop.radius, cfg.economy.serviceRadius);
+        eq(shop.byVehicle, true);
+        eq(shop.homes.slice().sort((a, b) => a - b).join(','), t.houses.slice().sort((a, b) => a - b).join(','), '两栋房都在范围内，店不算');
+        ok(shop.roads.length > 0);
+        const school = sim.serviceReach('school', 5, 6, 2, 2)!;
+        eq(school.radius, 10);
+        eq(school.byVehicle, false);
+        eq(sim.serviceReach('house', 5, 6, 1, 1), null);
+    });
+
+    test('wishReach：店 / 学校 / 卫生院心愿从他家沿路画范围，别的心愿没有', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 5 });
+        sim.stepMonth();
+        const r = sim.state.residents.find((x) => x.homeId !== null)!;
+        ok(!!r, '要有住进来的人');
+        r.wish = { kind: 'shop', demand: 'fun', text: '', hint: '', suggest: '', radius: 6, since: 0, until: 99 };
+        const w = sim.wishReach(r.id)!;
+        ok(!!w);
+        eq(w.radius, 6);
+        eq(w.homes.join(','), String(r.homeId));
+        ok(w.roads.length > 0);
+        r.wish = { kind: 'job', text: '', hint: '', suggest: '', radius: 0, since: 0, until: 99 };
+        eq(sim.wishReach(r.id), null);
+        r.wish = null;
+        eq(sim.wishReach(r.id), null);
+    });
+});
+
 report();

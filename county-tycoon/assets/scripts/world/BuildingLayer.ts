@@ -7,6 +7,12 @@ import { hexToColor, shade } from '../core/ColorUtil';
 
 const { ccclass } = _decorator;
 
+/** 覆盖范围要画的东西：道路格 + 住宅占地 */
+export interface ReachDraw {
+    roads: [number, number][];
+    homes: { col: number; row: number; width: number; height: number }[];
+}
+
 /**
  * 建筑层（等距，D014）。
  *
@@ -27,6 +33,9 @@ export class BuildingLayer extends Component {
     private _objRoot: Node | null = null;
     private _ghost: Graphics | null = null;
     private _envG: Graphics | null = null;
+    /** 覆盖范围（T538）：店 / 学校的放置预览、追踪居民的心愿范围 */
+    private _reachG: Graphics | null = null;
+    private _reach: ReachDraw | null = null;
     /** 放置预览的半透明贴图（D022） */
     private _ghostSprite: Sprite | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
@@ -73,6 +82,7 @@ export class BuildingLayer extends Component {
         this._art = art;
         // 环境图层（D026，DESIGN 22）：贴在地面上、压在楼下面
         this._envG = BuildingLayer.makeChild(this.node, 'EnvOverlay').addComponent(Graphics);
+        this._reachG = BuildingLayer.makeChild(this.node, 'ReachOverlay').addComponent(Graphics);
         this._objRoot = BuildingLayer.makeChild(this.node, 'Objects');
         this._ghost = BuildingLayer.makeChild(this.node, 'Ghost').addComponent(Graphics);
         const gs = BuildingLayer.makeChild(this.node, 'GhostSprite');
@@ -454,6 +464,32 @@ export class BuildingLayer extends Component {
         g.fill();
     }
 
+    /**
+     * 覆盖范围（T538）：走得到的路铺一层浅蓝，范围内的住宅脚下描一圈黄。null = 清掉。
+     * 压在楼下面（和环境图层一样贴地），楼本身不遮。
+     */
+    drawReach(reach: ReachDraw | null): void {
+        this._reach = reach;
+        const g = this._reachG, iso = this._iso;
+        if (!g || !iso) return;
+        g.clear();
+        if (!reach) return;
+        const p = { x: 0, y: 0 };
+        const quad = (c: number, r: number, w: number, h: number) => {
+            const q = [[c, r], [c + w, r], [c + w, r + h], [c, r + h]];
+            iso.toLocal(q[0][0], q[0][1], p);
+            g.moveTo(p.x, p.y);
+            for (let i = 1; i < 4; i++) { iso.toLocal(q[i][0], q[i][1], p); g.lineTo(p.x, p.y); }
+            g.close();
+        };
+        g.fillColor = new Color(70, 150, 240, 110);
+        for (const [c, r] of reach.roads) { quad(c, r, 1, 1); g.fill(); }
+        g.fillColor = new Color(255, 205, 60, 120);
+        g.strokeColor = new Color(240, 160, 20, 230);
+        g.lineWidth = 1.5;
+        for (const h of reach.homes) { quad(h.col, h.row, h.width, h.height); g.fill(); g.stroke(); }
+    }
+
     /** 上一次 drawEnv 的格子，转视角后重画用 */
     private _envCells: [number, number, number][] = [];
 
@@ -495,6 +531,7 @@ export class BuildingLayer extends Component {
             if (flag) flag.setPosition(-sz.width * 0.28, sz.height - 4, 0);
         }
         if (this._envG) this._envG.node.active = !live;
+        if (this._reachG) this._reachG.node.active = !live;
         if (this._ghost) this._ghost.node.active = !live;
         if (live) {
             iso.footOffset(1, 1, off);
@@ -507,6 +544,7 @@ export class BuildingLayer extends Component {
         } else {
             this.syncTerrainObjects();
             this.drawEnv(this._envCells);
+            this.drawReach(this._reach);
         }
         this.sortAll();
     }

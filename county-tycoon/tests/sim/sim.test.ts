@@ -1340,4 +1340,77 @@ suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () =>
     });
 });
 
+// ───────────────────────── 新建筑第一批 ─────────────────────────
+suite('新建筑第一批：婚宴 / 幼儿园 / 老街', () => {
+    const sumf = (o: Record<string, number>) => Object.keys(o).reduce((a, k) => a + o[k], 0);
+
+    test('配置：11 个新建筑都有经营数据、研究能解锁、名字对得上', () => {
+        const cfg = loadFullConfig();
+        const ids = ['noodle', 'restaurant', 'banquet', 'store', 'market', 'pharmacy', 'teahouse', 'old-street', 'dorm', 'kindergarten', 'farm'];
+        for (const id of ids) {
+            ok(cfg.building(id)!.cost > 0, `${id} 没有经营数据`);
+            ok(cfg.progress!.research.some((r) => r.unlocks.indexOf(id) >= 0), `${id} 没有研究`);
+            ok(!!DEF_NAMES[id], `${id} 没有名字`);
+        }
+    });
+
+    test('婚宴：有人结婚就去大酒楼办酒，钱记进酒楼的账，守恒', () => {
+        const cfg = loadConfig();
+        cfg.economy.residents.marryChance = 0;    // 酒楼盖好之前先别结婚
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 41 });
+        sim.state.finance.funds = 1e6;
+        const banquet = t.map.build('banquet', 15, 6, 2, 2);
+        ok(sim.onBuilt(banquet, 'banquet'), '盖得起');
+        for (let i = 0; i < 3; i++) sim.stepMonth();   // 施工 2 天
+        cfg.economy.residents.marryChance = 12;   // 之后每月必定想结婚
+        let held = false;
+        for (let m = 0; m < 36 && !held; m++) {
+            for (const r of sim.state.residents) r.savings = Math.max(r.savings, 40000);
+            const before = sim.moneyInCounty();
+            const rep = sim.stepMonth();
+            const f = sim.lastFlows;
+            near(sim.moneyInCounty() - before, sumf(f.inflow) - sumf(f.outflow), 1e-6 * Math.abs(before), `第 ${m} 个月守恒`);
+            if (rep.events.some((e) => /办了婚宴/.test(e.text))) {
+                held = true;
+                const b = sim.state.buildings.find((x) => x.uid === banquet)!;
+                ok(b.lastRevenue >= cfg.building('banquet')!.wedding!, '酒楼营业额里有婚宴');
+            }
+        }
+        ok(held, '36 个月里应该办过婚宴');
+    });
+
+    test('幼儿园：家里有 0～6 岁孩子、附近有幼儿园 → 幸福度分项', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        t.map.build('kindergarten', 8, 4);
+        const sim = new Simulation(cfg, t.view, { seed: 42 });
+        sim.stepMonth();
+        const home = t.houses[0];
+        const inHome = sim.state.residents.filter((r) => r.homeId === home);
+        ok(inHome.length >= 2, '这栋房至少住两个人');
+        const [parent, kid] = inHome;
+        kid.age = 3;
+        parent.childIds = [kid.id];
+        sim.stepMonth();
+        ok((parent.moodParts ?? []).some((p) => p.key === 'kindergarten'), '应该有「孩子上幼儿园方便」');
+    });
+
+    test('老街：6 格内的店过路客 ×1.5，远的不变；每月口碑 +', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view, { seed: 43 });
+        sim.state.finance.funds = 1e6;
+        const os = t.map.build('old-street', 12, 8, 2, 2);
+        ok(sim.onBuilt(os, 'old-street'), '盖得起');
+        for (let i = 0; i < 3; i++) sim.stepMonth();
+        const mult = (uid: number) => (sim as any).streetOutsideMult(uid) as number;
+        near(mult(t.shops.milkTea), 1.5, 1e-9, '奶茶店在老街旁边');
+        near(mult(t.shops.breakfast), 1, 1e-9, '早餐铺离得远');
+        const plain = new Simulation(cfg, basicTown(cfg).view, { seed: 43 });
+        for (let i = 0; i < 3; i++) plain.stepMonth();
+        ok((sim.state.buzz ?? 0) > (plain.state.buzz ?? 0), '有老街口碑更高');
+    });
+});
+
 report();

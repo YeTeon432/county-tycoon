@@ -299,6 +299,125 @@
       "cost": 50000,
       "days": 4,
       "level": "county"
+    },
+    {
+      "id": "r-noodle",
+      "name": "面馆",
+      "unlocks": [
+        "noodle"
+      ],
+      "cost": 3000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-store",
+      "name": "小卖部",
+      "unlocks": [
+        "store"
+      ],
+      "cost": 3000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-farm",
+      "name": "农田",
+      "unlocks": [
+        "farm"
+      ],
+      "cost": 3000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-teahouse",
+      "name": "茶馆",
+      "unlocks": [
+        "teahouse"
+      ],
+      "cost": 5000,
+      "days": 1,
+      "level": "village"
+    },
+    {
+      "id": "r-restaurant",
+      "name": "家常菜馆",
+      "unlocks": [
+        "restaurant"
+      ],
+      "cost": 8000,
+      "days": 2,
+      "level": "village",
+      "needBuilding": "noodle|breakfast",
+      "needPop": 15
+    },
+    {
+      "id": "r-pharmacy",
+      "name": "药店",
+      "unlocks": [
+        "pharmacy"
+      ],
+      "cost": 6000,
+      "days": 2,
+      "level": "village",
+      "needBuilding": "clinic"
+    },
+    {
+      "id": "r-kindergarten",
+      "name": "幼儿园",
+      "unlocks": [
+        "kindergarten"
+      ],
+      "cost": 10000,
+      "days": 2,
+      "level": "village",
+      "needPop": 15
+    },
+    {
+      "id": "r-market",
+      "name": "菜市场",
+      "unlocks": [
+        "market"
+      ],
+      "cost": 15000,
+      "days": 2,
+      "level": "town",
+      "needPop": 25
+    },
+    {
+      "id": "r-dorm",
+      "name": "工人宿舍",
+      "unlocks": [
+        "dorm"
+      ],
+      "cost": 12000,
+      "days": 2,
+      "level": "town",
+      "needBuilding": "textile|food-factory"
+    },
+    {
+      "id": "r-banquet",
+      "name": "大酒楼（有人结婚会来办婚宴）",
+      "unlocks": [
+        "banquet"
+      ],
+      "cost": 25000,
+      "days": 3,
+      "level": "town",
+      "needBuilding": "restaurant"
+    },
+    {
+      "id": "r-old-street",
+      "name": "老街改造",
+      "unlocks": [
+        "old-street"
+      ],
+      "cost": 50000,
+      "days": 4,
+      "level": "county",
+      "needBuilding": "teahouse",
+      "needPop": 60
     }
   ],
   "goals": {
@@ -495,6 +614,20 @@
         "who": "young",
         "buzz": 0,
         "effect": "成员店过路客 ×2，周边 18～35 岁居民幸福度 +4"
+      },
+      {
+        "id": "food",
+        "name": "美食街",
+        "members": [
+          "noodle",
+          "restaurant",
+          "banquet"
+        ],
+        "outsideMult": 2,
+        "mood": 4,
+        "who": "all",
+        "buzz": 0,
+        "effect": "外地人专门来吃，成员店过路客 ×2；周边居民幸福度 +4"
       }
     ]
   },

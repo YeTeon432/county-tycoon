@@ -124,8 +124,8 @@ const SCOOT_SKINS = 3;
 const MOTO_SKINS = 3;
 const CAR_SKINS = 3;
 /** 老人爱去的地方，排前面的优先 */
-const ELDER_SPOTS = ['plaza', 'breakfast', 'clinic'];
-const FOOD = ['breakfast', 'bbq', 'hotpot', 'supermarket', 'milk-tea'];
+const ELDER_SPOTS = ['plaza', 'breakfast', 'clinic', 'teahouse', 'market', 'old-street'];
+const FOOD = ['breakfast', 'bbq', 'hotpot', 'supermarket', 'milk-tea', 'noodle', 'restaurant', 'banquet', 'market', 'store'];
 const SCHOOL_AGE = 6, WORK_AGE = 18, RETIRE_AGE = 60;
 
 /** 同一个人同一天同一个用途，随机数固定（存档读回来日程不变） */

@@ -136,6 +136,7 @@ export class Simulation implements SimApi {
         this.ageEveryone();                       // 生日：长一岁、上学、退休、离世
         const world = this.refreshWorld();
         this.detectStreets();                     //    特色街道（D026）
+        this.landmarkBuzz();                      //    老街口碑
         this.assignHomes(s.residents.filter((r) => r.homeId === null));
         this.fillVacancies(world);                // 月初先把空岗填上（新盖的楼、新来的人）
         this.measureStaff(world);
@@ -613,16 +614,31 @@ export class Simulation implements SimApi {
         }
     }
 
+    /** 地标（老街）：每月口碑 +（新建筑第一批） */
+    private landmarkBuzz(): void {
+        const s = this.state;
+        for (const b of s.buildings) {
+            const e = this._cfg.building(b.defId);
+            if (e && e.buzz) s.buzz = Math.min(this._cfg.economy.buzzMax, (s.buzz ?? 0) + e.buzz);
+        }
+    }
+
     private streetOutsideMult(uid: number): number {
         const p = this._cfg.progress;
         let m = 1;
-        if (!p) return m;
-        for (const st of this.state.streets ?? []) {
+        for (const st of p ? this.state.streets ?? [] : []) {
             if (st.uids.indexOf(uid) < 0) continue;
-            const def = p.streets.list.find((x) => x.id === st.kind);
+            const def = p!.streets.list.find((x) => x.id === st.kind);
             if (def) m = Math.max(m, def.outsideMult);
         }
-        return m;
+        // 地标带客（老街）：半径内的店过路客再乘一次，几座地标取最大的那个
+        let boost = 1;
+        for (const b of this.state.buildings) {
+            const e = this._cfg.building(b.defId);
+            if (!e || !e.boostMult || e.boostMult <= 1 || !e.boostRadius) continue;
+            if (b.uid === uid || this._town.gridDistance(uid, b.uid) <= e.boostRadius) boost = Math.max(boost, e.boostMult);
+        }
+        return m * boost;
     }
 
     /** 某栋住宅附近（radius 格内）有哪些特色街道，同一种只算一次 */
@@ -1407,12 +1423,12 @@ export class Simulation implements SimApi {
             if (r.spouseId === null && r.age >= rt.marryMinAge && r.age <= rt.marryMaxAge && r.mood > 50) {
                 if (chance(this._rng, rt.marryChance / 12)) {
                     const other = this.findSpouse(r);
-                    if (other) this.marry(r, other, false);
+                    if (other) { this.marry(r, other, false); this.holdWedding(r, other, income); }
                 }
             }
             if (r.spouseId !== null && r.age >= rt.childMinAge && r.age <= rt.childMaxAge
                 && r.id < (r.spouseId ?? 0) && s.month % 12 + 1 === r.birthMonth
-                && chance(this._rng, rt.childChancePerYear)) {
+                && chance(this._rng, rt.childChancePerYear * (r.homeId !== null && this.hasNearby(r.homeId, 'kindergarten', 8) ? rt.kindergartenChildMult : 1))) {
                 this.haveChild(r);
             }
         }
@@ -1683,6 +1699,8 @@ export class Simulation implements SimApi {
             if (this.hasNearby(r.homeId, 'clinic', 8)) add('clinic', '附近有卫生院', 5);
             if (this.hasNearby(r.homeId, 'police', 10)) add('police', '附近有派出所', 3);
             if (this.hasNearby(r.homeId, 'plaza', 6)) add('plaza', '附近有广场', 4);
+            const smallKid = r.childIds.some((id) => (this.resident(id)?.age ?? 99) < 7);
+            if (smallKid && this.hasNearby(r.homeId, 'kindergarten', 8)) add('kindergarten', '孩子上幼儿园方便', rt.kindergartenMood);
         }
         // 想买的东西买不到
         add('missed', '想买的东西买不到', -(this._missed.get(r.id) ?? 0) * 4);
@@ -1755,6 +1773,55 @@ export class Simulation implements SimApi {
             if (o.mood > bestMood) { best = o; bestMood = o.mood; }
         }
         return best;
+    }
+
+    /**
+     * 婚宴（新建筑第一批）：县里有开着的大酒楼（econ.wedding > 0、有员工）就去最近那家办酒。
+     * 两人各出一半，最多花掉两人存款的一半；连一桌酒席的 30% 都凑不出来就不办。
+     * 这笔钱当月直接记进酒楼的账（营业额 / 成本 / 税 / 利润），和平常的账一样守恒。
+     */
+    private holdWedding(a: Resident, b: Resident, income: MonthlyReport['income']): void {
+        if (a.spouseId !== b.id) return;
+        const home = a.homeId ?? b.homeId;
+        let best: BuildingSim | null = null;
+        let bestD = Infinity;
+        for (const x of this.state.buildings) {
+            const e = this._cfg.building(x.defId);
+            if (!e || !e.wedding || x.workerIds.length === 0) continue;
+            const d = home !== null ? this.distance(home, x.uid) : 0;
+            const dd = isFinite(d) ? d : 1e6;
+            if (dd < bestD) { best = x; bestD = dd; }
+        }
+        if (!best) return;
+        const econ = this._cfg.building(best.defId)!;
+        const pot = Math.max(0, a.savings) + Math.max(0, b.savings);
+        const spend = Math.min(econ.wedding!, Math.floor(pot / 2));
+        if (spend < econ.wedding! * 0.3) return;
+        const fromA = Math.min(Math.max(0, a.savings), Math.ceil(spend / 2));
+        const fromB = spend - fromA;
+        a.savings -= fromA;
+        b.savings -= fromB;
+        let rate = this.state.finance.taxRate.business;
+        if ((best.taxBreakUntil ?? 0) > this.state.month) rate /= 2;
+        const cost = Math.round(spend * econ.costRate);
+        const tax = Math.round(spend * rate);
+        const profit = spend - cost - tax;
+        best.lastRevenue += spend;
+        best.lastCustomers += 1;
+        best.lastTax += tax;
+        best.lastCost = (best.lastCost ?? 0) + cost;
+        best.lastProfit = (best.lastProfit ?? 0) + profit;
+        // 财政这个月已经结过账，税和县属利润直接进资金（同买车，见 buyVehicles）
+        income.business += tax;
+        this.state.finance.funds += tax;
+        this._flows.outflow.goodsCost += cost;
+        if ((best.owner ?? 'county') === 'county') { income.profit += profit; this.state.finance.funds += profit; }
+        else this._flows.outflow.privateProfit += profit;
+        if ((best.lossMonths ?? 0) > 0 && (best.lastProfit ?? 0) >= 0) best.lossMonths = 0;
+        const where = this.buildingName(best.defId);
+        this.event(`${a.name} 和 ${b.name} 在${where}办了婚宴，花了 ¥${spend}`);
+        this.log(a, `在${where}办婚宴`);
+        this.log(b, `在${where}办婚宴`);
     }
 
     private marry(a: Resident, b: Resident, silent: boolean): void {
@@ -2145,6 +2212,8 @@ export const DEF_NAMES: Record<string, string> = {
     breakfast: '早餐铺', 'milk-tea': '奶茶店', bbq: '烧烤摊', hotpot: '火锅店',
     parcel: '快递驿站', supermarket: '超市', 'net-cafe': '网吧', 'phone-shop': '手机店',
     barber: '理发店', tutoring: '补习班',
+    noodle: '面馆', restaurant: '家常菜馆', banquet: '大酒楼', store: '小卖部', market: '菜市场', pharmacy: '药店',
+    teahouse: '茶馆', 'old-street': '老街', dorm: '工人宿舍', kindergarten: '幼儿园', farm: '农田',
     workshop: '小作坊', textile: '纺织厂', 'food-factory': '食品厂', electronics: '电子厂',
     center: '县发展中心', school: '学校', clinic: '卫生院', police: '派出所', bank: '银行',
     bridge: '桥', port: '港口', mine: '矿场', plaza: '广场', tree: '行道树',

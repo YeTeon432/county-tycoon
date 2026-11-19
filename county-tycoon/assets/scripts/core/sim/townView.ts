@@ -43,6 +43,17 @@ export interface TownView {
     refresh?(): void;
     /** 一块还没盖的地（col,row,w,h）沿路走到某栋楼几步（放置预览的特色街道提示用，D026） */
     spotDistance?(col: number, row: number, w: number, h: number, uid: number): number;
+    /**
+     * 服务范围（覆盖范围高亮用）：从一块地（还没盖的预览）或一栋楼的门口出发，沿路走 maxSteps 步以内。
+     * roads = 走得到的道路格（下标 row * width + col）；near = 走得到的楼 uid → 步数（和 roadDistance 同一算法）。
+     */
+    spotReach?(col: number, row: number, w: number, h: number, maxSteps: number): Reach;
+    uidReach?(uid: number, maxSteps: number): Reach;
+}
+
+export interface Reach {
+    roads: number[];
+    near: Map<number, number>;
 }
 
 /** 每次 refresh 时重新读一遍地图，所以接 TownModel 只需要一个取建筑的函数 */
@@ -175,6 +186,42 @@ export class SimpleTownView implements TownView {
             }
         }
         return NO_ROAD;
+    }
+
+    spotReach(col: number, row: number, w: number, h: number, maxSteps: number): Reach {
+        return this.reachFromDoors(this.doorsOf({ uid: -1, defId: '', col, row, width: w, height: h, road: false }), maxSteps, -1);
+    }
+
+    uidReach(uid: number, maxSteps: number): Reach {
+        return this.reachFromDoors(this._doors.get(uid) ?? [], maxSteps, uid);
+    }
+
+    /** 门口那一格算第 1 步（和 bfsFrom 一致），走到 maxSteps 为止 */
+    private reachFromDoors(start: number[], maxSteps: number, self: number): Reach {
+        const dist = new Map<number, number>();
+        const queue: number[] = [];
+        if (maxSteps >= 1) for (const c of start) if (!dist.has(c)) { dist.set(c, 1); queue.push(c); }
+        for (let head = 0; head < queue.length; head++) {
+            const cell = queue[head];
+            const d = dist.get(cell) as number;
+            if (d >= maxSteps) continue;
+            for (const next of this.neighbours(cell)) {
+                if (dist.has(next)) continue;
+                dist.set(next, d + 1);
+                queue.push(next);
+            }
+        }
+        const near = new Map<number, number>();
+        for (const b of this._list) {
+            if (b.uid === self || b.road) continue;
+            let best = NO_ROAD;
+            for (const cell of this._doors.get(b.uid) ?? []) {
+                const d = dist.get(cell);
+                if (d !== undefined && d < best) best = d;
+            }
+            if (best !== NO_ROAD) near.set(b.uid, best);
+        }
+        return { roads: queue, near };
     }
 
     /** 从 a 的门口出发，沿道路走到能到达的每一栋楼 */

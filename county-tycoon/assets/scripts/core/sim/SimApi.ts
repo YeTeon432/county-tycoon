@@ -54,6 +54,10 @@ export interface SimApi {
     buildingEnv?(defId: string): number;
     /** 某格的环境分（正 = 好，负 = 污染） */
     envAt?(col: number, row: number): number;
+    /** 覆盖范围（T538）：在 (col,row) 盖 defId，沿路能服务到哪些路、哪些住宅；不是店 / 学校 / 卫生院返回 null */
+    serviceReach?(defId: string, col: number, row: number, w: number, h: number): ServiceReach | null;
+    /** 覆盖范围（T538）：这位居民的店 / 学校 / 卫生院心愿要的范围（从他家沿路算）；没有这类心愿返回 null */
+    wishReach?(residentId: number): ServiceReach | null;
     /** 营商环境分项和总分（0～100） */
     businessEnv?(): { total: number; parts: { label: string; value: number; max: number }[] };
     /** 招商：签约。mode = land 供地 / subsidy 补贴（两条都要选址盖楼，D032）；成功 null，失败返回理由 */
@@ -120,4 +124,15 @@ export interface SimSummary {
     avgMood: number;
     /** 有交通工具（非步行）的人数（D022） */
     vehicles: number;
+}
+
+/** 覆盖范围高亮（T538）：沿路走 radius 步以内 */
+export interface ServiceReach {
+    radius: number;
+    /** 走得到的道路格 [col, row] */
+    roads: [number, number][];
+    /** 范围内的住宅 uid（放置预览）/ 他家（心愿） */
+    homes: number[];
+    /** 店：居民有车时范围更大（radius 是步行的） */
+    byVehicle: boolean;
 }

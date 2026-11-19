@@ -161,6 +161,9 @@ export class GameRoot extends Component {
             if (sim) {
                 view.envAt = sim.envAt ? (c, r) => sim.envAt!(c, r) : null;
                 view.envOfDef = sim.buildingEnv ? (id) => sim.buildingEnv!(id) : null;
+                // T538 覆盖范围：放店 / 学校时画它沿路够得着的路和住户；追踪居民时画他心愿要的范围
+                view.reachOfPending = sim.serviceReach ? (id, c, r, w, h) => sim.serviceReach!(id, c, r, w, h) : null;
+                view.wishReachOf = sim.wishReach ? (id) => sim.wishReach!(id) : null;
                 const flagColors: Record<string, Color> = {
                     night: new Color(232, 87, 74), daily: new Color(76, 174, 76), school: new Color(58, 134, 214),
                     influencer: new Color(240, 120, 190), youth: new Color(246, 180, 40),
@@ -207,7 +210,8 @@ export class GameRoot extends Component {
                 };
             }
             // 放置 / 拆除的提示文字，原来在旧 HUD 里，现在归顶栏第二行
-            view.onCellTapped = () => this.updatePlacementHint();
+            // 点地块的回调比预览挪位置早一步：等这一帧预览挪好了再读（不然提示的是上一个位置）
+            view.onCellTapped = () => this.scheduleOnce(() => this.updatePlacementHint(), 0);
             // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
             view.onTownChanged = () => { this.updatePlacementHint(); if (this._saver) this._saver.saveNow(); };
         }
@@ -224,12 +228,15 @@ export class GameRoot extends Component {
         // 预览中：能凑特色街道就提示（D026，DESIGN 21）
         const p = view.pending, sim = this._sim;
         const street = p && p.ok && sim && sim.streetHint ? sim.streetHint(p.def.id, p.col, p.row, p.def.width, p.def.height) : null;
+        const reach = p && p.ok ? this.reachHint(p.def.id, p.col, p.row, p.def.width, p.def.height) : null;
         const deal = sim && sim.state.pendingDeal;
         if (deal && view.selectedBuilding && view.selectedBuilding.id === deal.defId) {
             const pay = deal.mode === 'subsidy' ? `拨补贴 ¥${deal.subsidy ?? 0}` : `收出让金 ¥${deal.landFee}`;
             ui.setPlacementHint(`给${deal.company}划地建${view.selectedBuilding.name}：按「确定」交地（${pay}），点别处换位置`);
         } else if (street) {
             ui.setPlacementHint(street);
+        } else if (reach) {
+            ui.setPlacementHint(reach);
         } else if (view.demolishing) {
             ui.setPlacementHint('拆除模式：点建筑移除');
         } else if (view.selectedBuilding) {
@@ -239,6 +246,16 @@ export class GameRoot extends Component {
         } else {
             ui.setPlacementHint('');   // 空闲：顶栏第二行显示就业率和均薪（T212）；操作说明交给开场卡片和小提示
         }
+    }
+
+    /** 放置预览的覆盖范围一句话（T538）：蓝色路 / 黄色住户的意思，不是有覆盖范围的楼返回 null */
+    private reachHint(defId: string, col: number, row: number, w: number, h: number): string | null {
+        const sim = this._sim;
+        const reach = sim && sim.serviceReach ? sim.serviceReach(defId, col, row, w, h) : null;
+        if (!reach) return null;
+        if (!reach.roads.length) return `这里不挨路，居民走不过来；挨着路盖才有覆盖范围`;
+        const more = reach.byVehicle ? '；有车的居民走得更远' : '';
+        return `沿路 ${reach.radius} 格内（蓝色）能服务 ${reach.homes.length} 栋住宅（黄框）${more}`;
     }
 
     /** 住户翻盖完（模拟层把 defId 换了），地图上也换成新楼（D026） */

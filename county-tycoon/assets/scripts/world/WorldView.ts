@@ -5,7 +5,8 @@ import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 import { WorldConfig } from '../core/WorldConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
-import { BuildingLayer } from './BuildingLayer';
+import { BuildingLayer, ReachDraw } from './BuildingLayer';
+import { ServiceReach } from '../core/sim/SimApi';
 import { GridMap } from './GridMap';
 import { LifeLayer } from './LifeLayer';
 import { Tracker, TrackWhat } from './Tracker';
@@ -157,6 +158,15 @@ export class WorldView extends Component {
     envAt: ((col: number, row: number) => number) | null = null;
     envOfDef: ((defId: string) => number) | null = null;
     private _envKey = '';
+    /**
+     * 覆盖范围（T538），GameRoot 接到模拟层：
+     * reachOfPending = 放置预览的店 / 学校…沿路能服务到哪；wishReachOf = 追踪的居民心愿要的范围（从他家算）。
+     * 放置预览优先；没在放楼、正在追踪有这类心愿的人，就画他的心愿范围。
+     */
+    reachOfPending: ((defId: string, col: number, row: number, w: number, h: number) => ServiceReach | null) | null = null;
+    wishReachOf: ((residentId: number) => ServiceReach | null) | null = null;
+    private _reachKey = '';
+    private _reachT = 0;
     /** 特色街道成员：uid → 小旗颜色（GameRoot 接） */
     streetSource: (() => ReadonlyMap<number, Color>) | null = null;
     private _flags = new Map<number, Color>();
@@ -587,6 +597,7 @@ export class WorldView extends Component {
         now.forEach((p, uid) => layer.setConstruction(uid, p));
         this._building = new Set(now.keys());
         this.syncEnv(layer);
+        this.syncReach(layer, dt);
         if (this.streetSource) {
             const f = this.streetSource();
             this._flags.forEach((_c, uid) => { if (!f.has(uid)) layer.setStreetFlag(uid, null); });
@@ -599,6 +610,31 @@ export class WorldView extends Component {
             a.forEach((k, uid) => { if (this._alerts.get(uid) !== k) layer.setAlert(uid, k); });
             this._alerts = new Map(a);
         }
+    }
+
+    /**
+     * 覆盖范围图层（T538）：放置预览的店 / 学校…优先；没在放楼、正在追踪有店 / 学校 / 卫生院心愿的人，画他家的心愿范围。
+     */
+    private syncReach(layer: BuildingLayer, dt: number): void {
+        const model = this._model;
+        if (!model) return;
+        const p = this._pending;
+        this._reachT -= dt;
+        const key = `${model.allBuildings().length}|${p ? `${p.def.id}@${p.col},${p.row}` : ''}|${this._trackId ?? ''}`;
+        // 追踪时心愿会自己变（实现 / 过期 / 新心愿），每秒再对一次
+        if (key === this._reachKey && (this._trackId === null || p || this._reachT > 0)) return;
+        this._reachKey = key;
+        this._reachT = 1;
+        let reach: ServiceReach | null = null;
+        if (p && this.reachOfPending) reach = this.reachOfPending(p.def.id, p.col, p.row, p.def.width, p.def.height);
+        else if (!p && this._trackId !== null && this.wishReachOf) reach = this.wishReachOf(this._trackId);
+        if (!reach) { layer.drawReach(null); return; }
+        const homes: ReachDraw['homes'] = [];
+        for (const uid of reach.homes) {
+            const b = model.allBuildings().find((x) => x.uid === uid);
+            if (b) homes.push({ col: b.col, row: b.row, width: b.def.width, height: b.def.height });
+        }
+        layer.drawReach({ roads: reach.roads, homes });
     }
 
     /** 环境图层：开着环境视图就画全县；正在预览有污染 / 绿化的楼就画它的影响范围 */

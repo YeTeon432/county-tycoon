@@ -187,6 +187,12 @@ export interface BuildingEcon {
     selfBuilt: boolean;
     /** 成本率：营业额里多少是进货 / 原料成本，流出县外（D026） */
     costRate: number;
+    /** 办婚宴（大酒楼）：县里有人结婚就来这里办酒，一桌酒席多少钱；0 = 不办。新建筑第一批 */
+    wedding?: number;
+    /** 地标带客（老街）：boostRadius 格内的店过路客 ×boostMult；buzz = 每月口碑 + */
+    boostRadius?: number;
+    boostMult?: number;
+    buzz?: number;
 }
 
 export interface JobSlot {

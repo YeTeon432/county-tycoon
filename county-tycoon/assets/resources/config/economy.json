@@ -53,6 +53,8 @@
       "childMinAge": 22,
       "childMaxAge": 40,
       "childChancePerYear": 0.2,
+      "kindergartenMood": 5,
+      "kindergartenChildMult": 1.5,
       "schoolMinAge": 6,
       "schoolMaxAge": 17,
       "workMinAge": 18,
@@ -86,6 +88,7 @@
     { "id": "villa", "cost": 80000, "upkeep": 60, "housing": 4, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "village", "publicJob": false, "buildDays": 2, "rent": 1200, "homeLevel": 5, "homeMood": 12 },
     { "id": "apartment", "cost": 22000, "upkeep": 120, "housing": 12, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 0, "unlock": "town", "publicJob": false, "buildDays": 2, "rent": 300, "homeLevel": 3, "homeMood": 2 },
     { "id": "school-house", "cost": 30000, "upkeep": 150, "housing": 10, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "county", "publicJob": false, "buildDays": 2, "rent": 400, "homeLevel": 4, "homeMood": 6 },
+    { "id": "dorm", "cost": 15000, "upkeep": 100, "housing": 20, "jobs": [], "demand": null, "capacity": 0, "price": 0, "env": 0, "unlock": "town", "publicJob": false, "buildDays": 2, "rent": 80, "homeLevel": 1, "homeMood": -3 },
 
     { "id": "breakfast", "cost": 3000, "upkeep": 50, "housing": 0, "jobs": [{ "title": "店员", "count": 1, "salary": 2500, "edu": 0 }], "demand": "food", "capacity": 900, "price": 10, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.45, "buildDays": 1 },
     { "id": "milk-tea", "cost": 4000, "upkeep": 60, "housing": 0, "jobs": [{ "title": "店员", "count": 1, "salary": 2600, "edu": 0 }], "demand": "fun", "capacity": 600, "price": 15, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.4, "buildDays": 1 },
@@ -97,8 +100,17 @@
     { "id": "phone-shop", "cost": 5000, "upkeep": 70, "housing": 0, "jobs": [{ "title": "店员", "count": 2, "salary": 3000, "edu": 1 }], "demand": "other", "capacity": 100, "price": 300, "env": 0, "unlock": "town", "publicJob": false, "costRate": 0.7, "buildDays": 1 },
     { "id": "barber", "cost": 3500, "upkeep": 50, "housing": 0, "jobs": [{ "title": "理发师", "count": 1, "salary": 2800, "edu": 0 }], "demand": "other", "capacity": 400, "price": 25, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.15, "buildDays": 1 },
     { "id": "tutoring", "cost": 6000, "upkeep": 90, "housing": 0, "jobs": [{ "title": "老师", "count": 2, "salary": 3600, "edu": 2 }], "demand": "other", "capacity": 120, "price": 150, "env": 0, "unlock": "town", "publicJob": false, "costRate": 0.1, "buildDays": 1 },
+    { "id": "noodle", "cost": 3500, "upkeep": 50, "housing": 0, "jobs": [{ "title": "面馆师傅", "count": 1, "salary": 2600, "edu": 0 }], "demand": "food", "capacity": 700, "price": 15, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.45, "buildDays": 1 },
+    { "id": "restaurant", "cost": 9000, "upkeep": 100, "housing": 0, "jobs": [{ "title": "厨师", "count": 1, "salary": 3000, "edu": 0 }, { "title": "服务员", "count": 1, "salary": 2500, "edu": 0 }], "demand": "food", "capacity": 500, "price": 45, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.45, "buildDays": 1 },
+    { "id": "banquet", "cost": 32000, "upkeep": 320, "housing": 0, "jobs": [{ "title": "厨师", "count": 2, "salary": 3400, "edu": 0 }, { "title": "服务员", "count": 4, "salary": 2600, "edu": 0 }, { "title": "经理", "count": 1, "salary": 4200, "edu": 1 }], "demand": "food", "capacity": 300, "price": 150, "env": 0, "unlock": "town", "publicJob": false, "costRate": 0.5, "buildDays": 2, "wedding": 12000 },
+    { "id": "store", "cost": 2000, "upkeep": 30, "housing": 0, "jobs": [{ "title": "店主", "count": 1, "salary": 2400, "edu": 0 }], "demand": "daily", "capacity": 800, "price": 8, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.6, "buildDays": 1 },
+    { "id": "market", "cost": 14000, "upkeep": 150, "housing": 0, "jobs": [{ "title": "管理员", "count": 1, "salary": 2800, "edu": 0 }, { "title": "摊贩", "count": 4, "salary": 2500, "edu": 0 }], "demand": "food", "capacity": 2400, "price": 20, "env": 0, "unlock": "town", "publicJob": false, "costRate": 0.6, "buildDays": 2 },
+    { "id": "pharmacy", "cost": 4500, "upkeep": 50, "housing": 0, "jobs": [{ "title": "药剂师", "count": 1, "salary": 3200, "edu": 1 }], "demand": "daily", "capacity": 300, "price": 35, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.55, "buildDays": 1 },
+    { "id": "teahouse", "cost": 4000, "upkeep": 50, "housing": 0, "jobs": [{ "title": "伙计", "count": 1, "salary": 2500, "edu": 0 }], "demand": "fun", "capacity": 500, "price": 25, "env": 0, "unlock": "village", "publicJob": false, "costRate": 0.3, "buildDays": 1 },
+    { "id": "old-street", "cost": 60000, "upkeep": 400, "housing": 0, "jobs": [{ "title": "店员", "count": 4, "salary": 2600, "edu": 0 }, { "title": "讲解员", "count": 1, "salary": 3000, "edu": 1 }], "demand": "fun", "capacity": 1500, "price": 30, "env": 2, "unlock": "county", "publicJob": false, "costRate": 0.35, "buildDays": 2, "boostRadius": 6, "boostMult": 1.5, "buzz": 0.01 },
 
     { "id": "workshop", "cost": 4000, "upkeep": 40, "housing": 0, "jobs": [{ "title": "工人", "count": 3, "salary": 2600, "edu": 0 }], "demand": null, "capacity": 741, "price": 20, "env": -1, "unlock": "village", "publicJob": false, "costRate": 0.3, "buildDays": 1 },
+    { "id": "farm", "cost": 3000, "upkeep": 20, "housing": 0, "jobs": [{ "title": "农民", "count": 4, "salary": 2200, "edu": 0 }], "demand": null, "capacity": 700, "price": 20, "env": 1, "unlock": "village", "publicJob": false, "costRate": 0.2, "buildDays": 2 },
     { "id": "textile", "cost": 38000, "upkeep": 400, "housing": 0, "jobs": [{ "title": "车间工人", "count": 18, "salary": 3200, "edu": 0 }, { "title": "班组长", "count": 2, "salary": 4500, "edu": 1 }], "demand": null, "capacity": 7909, "price": 16, "env": -2, "unlock": "town", "publicJob": false, "costRate": 0.3, "buildDays": 2 },
     { "id": "food-factory", "cost": 34000, "upkeep": 360, "housing": 0, "jobs": [{ "title": "车间工人", "count": 15, "salary": 3100, "edu": 0 }, { "title": "质检员", "count": 2, "salary": 3800, "edu": 1 }], "demand": null, "capacity": 5711, "price": 18, "env": -2, "unlock": "town", "publicJob": false, "costRate": 0.3, "buildDays": 2 },
     { "id": "electronics", "cost": 62000, "upkeep": 620, "housing": 0, "jobs": [{ "title": "装配工", "count": 26, "salary": 3300, "edu": 1 }, { "title": "技术员", "count": 4, "salary": 5200, "edu": 2 }], "demand": null, "capacity": 9206, "price": 22, "env": -2, "unlock": "county", "publicJob": false, "costRate": 0.3, "buildDays": 3 },
@@ -111,6 +123,7 @@
     { "id": "school", "cost": 60000, "upkeep": 600, "housing": 0, "jobs": [{ "title": "老师", "count": 5, "salary": 4000, "edu": 2 }, { "title": "校长", "count": 1, "salary": 5500, "edu": 3 }], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "town", "publicJob": true, "buildDays": 2 },
     { "id": "clinic", "cost": 12000, "upkeep": 200, "housing": 0, "jobs": [{ "title": "医生", "count": 2, "salary": 4800, "edu": 2 }, { "title": "护士", "count": 1, "salary": 3400, "edu": 1 }], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "village", "publicJob": true, "buildDays": 1 },
     { "id": "police", "cost": 15000, "upkeep": 260, "housing": 0, "jobs": [{ "title": "民警", "count": 3, "salary": 4400, "edu": 1 }], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "town", "publicJob": true, "buildDays": 1 },
+    { "id": "kindergarten", "cost": 15000, "upkeep": 200, "housing": 0, "jobs": [{ "title": "幼师", "count": 2, "salary": 3200, "edu": 1 }], "demand": null, "capacity": 0, "price": 0, "env": 1, "unlock": "village", "publicJob": true, "buildDays": 1 },
 
     { "id": "bank", "cost": 30000, "upkeep": 300, "housing": 0, "jobs": [{ "title": "柜员", "count": 4, "salary": 4600, "edu": 2 }], "demand": null, "capacity": 2497, "price": 14, "env": 1, "unlock": "town", "publicJob": false, "costRate": 0.3, "buildDays": 1 },
 

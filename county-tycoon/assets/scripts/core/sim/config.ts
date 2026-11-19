@@ -271,6 +271,9 @@ export interface ResidentTuning {
     childMinAge: number;
     childMaxAge: number;
     childChancePerYear: number;
+    /** 家里有 0～6 岁孩子、8 格内有幼儿园：幸福度 +kindergartenMood，生孩子概率 ×kindergartenChildMult */
+    kindergartenMood: number;
+    kindergartenChildMult: number;
     /** 上学 */
     schoolMinAge: number;
     schoolMaxAge: number;
@@ -376,6 +379,10 @@ function parseEcon(raw: any, defId: string): BuildingEcon {
         selfBuilt: raw?.selfBuilt === true,
         // 没写就按类型给：吃的进货贵，服务类便宜，工厂原料 0.3（D026）
         costRate: clamp01(raw?.costRate, demand === 'food' ? 0.45 : demand === 'daily' ? 0.6 : demand ? 0.25 : 0.3),
+        wedding: Math.max(0, Math.round(num(raw?.wedding, 0))),
+        boostRadius: Math.max(0, Math.floor(num(raw?.boostRadius, 0))),
+        boostMult: Math.max(1, num(raw?.boostMult, 1)),
+        buzz: Math.max(0, num(raw?.buzz, 0)),
     };
 }
 
@@ -434,6 +441,8 @@ const DEFAULT_ECONOMY: EconomyConfig = {
         childMinAge: 22,
         childMaxAge: 40,
         childChancePerYear: 0.2,
+        kindergartenMood: 5,
+        kindergartenChildMult: 1.5,
         schoolMinAge: 6,
         schoolMaxAge: 17,
         workMinAge: 18,
@@ -539,6 +548,8 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         childMinAge: num(r.childMinAge, d.residents.childMinAge),
         childMaxAge: num(r.childMaxAge, d.residents.childMaxAge),
         childChancePerYear: clamp01(r.childChancePerYear, d.residents.childChancePerYear),
+        kindergartenMood: num(r.kindergartenMood, d.residents.kindergartenMood),
+        kindergartenChildMult: Math.max(0, num(r.kindergartenChildMult, d.residents.kindergartenChildMult)),
         schoolMinAge: num(r.schoolMinAge, d.residents.schoolMinAge),
         schoolMaxAge: num(r.schoolMaxAge, d.residents.schoolMaxAge),
         workMinAge: num(r.workMinAge, d.residents.workMinAge),

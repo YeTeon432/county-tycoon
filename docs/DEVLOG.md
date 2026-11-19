@@ -393,3 +393,14 @@
 - **以后出包**：关编辑器后命令行构建（退出码 36 = 成功）：`CocosCreator --project <绝对路径>/county-tycoon --build "configPath=<绝对路径>/county-tycoon/build-configs/wechatgame.json"`（配置路径必须写绝对路径）。编辑器开着时命令行构建会冲突失败。
 - **包体**：resources 分包 改 3D 前 6.1 MB → 现在 13 MB（模型 6.0 MB、atlas 3.8 MB、背面图集 atlas-1 2.0 MB）；模拟器不卡包大小，真机预览 / 上传待试。
 
+## 2026-11-19 T543 新建筑第一批（D034）
+- **起因**：用户觉得建筑太少，饭店、住宅都缺。先在对话里列了一份清单，用户删掉两条（茶馆不限老人；「老街」从特色街道改成一栋建筑），确定第一批 11 个。
+- **做了**：
+  - 配置：`buildings.json`、`economy.json` 各加 11 条；`progress.json` 加 11 条研究和特色街道「美食街」；`economy.json: tuning.residents` 加 `kindergartenMood` / `kindergartenChildMult`。
+  - 模拟层：`BuildingEcon` 加可选字段 `wedding` / `boostRadius` / `boostMult` / `buzz`（types.ts、config.ts 解析）。`holdWedding()`：结婚当月去最近的大酒楼办酒，记进酒楼的账。`streetOutsideMult()` 乘上老街的带客倍率（原来没有 progress 时直接 return，这次改成老街照样生效）。`landmarkBuzz()` 每月加口碑。幸福度加幼儿园分项，生孩子概率乘幼儿园倍率。`DEF_NAMES` 补 11 个名字。
+  - 画面：`LifeLayer` 的 FOOD / ELDER_SPOTS 加上新店，行人会去。
+  - 文档：PRD 5.3 + 第 6 节、DESIGN 27、DECISIONS D034、TASKS 第五批。
+- **问题**：婚宴第一版没过守恒测试。结婚在财政结账之后，税和利润只记进了账单，没有进资金。改成和买车一样，直接加到 `funds`。
+- **验证**：模拟测试 101/101（新增 4 条：配置齐全、婚宴守恒、幼儿园分项、老街倍率和口碑）；tsc 项目代码零错误（`tests/sim` 的 padStart 报错本来就有）。**画面没验证**：新楼是色块，底栏卡片、研究面板要开编辑器看。
+- **下一步**：T544 等 3D 方案定了出外观；T545 真机试玩调数值。
+

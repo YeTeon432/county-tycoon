@@ -93,8 +93,8 @@ export class BuildingPanel extends Panel {
             const working = people.filter((r) => r.jobId !== null).length;
             // 住户 / 能住几人（economy.json 的 housing，建造栏已经加载过，这里直接取缓存）
             const cap = BuildingPanel.housingOf(placed.def.id);
-            const full = cap > 0 && people.length >= cap;
-            tiles.push(['住户', cap > 0 ? `${people.length} / ${cap} 人` : `${people.length} 人`, full ? UI_PALETTE.coral : UI_PALETTE.blue]);
+            const full = cap > 0 && people.length >= cap;   // 住满：不再生孩子、不再迁入，标在名字上，不用红色（住满不是坏事）
+            tiles.push([full ? '住户（已满）' : '住户', cap > 0 ? `${people.length} / ${cap} 人` : `${people.length} 人`, UI_PALETTE.blue]);
             tiles.push(['平均幸福度', people.length > 0 ? `${Math.round(avgMood)}` : '—', people.length > 0 ? moodColor(avgMood) : UI_COLOR.textDim]);
             tiles.push(['有工作', `${working} 人`, UI_PALETTE.green]);
         } else {

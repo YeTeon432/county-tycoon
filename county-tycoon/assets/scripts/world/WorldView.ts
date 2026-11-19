@@ -259,6 +259,12 @@ export class WorldView extends Component {
         world.addChild(lifeNode);
         this._life = lifeNode.getComponent(LifeLayer);
         if (this._life) this._life.busy = () => this._building;
+        // 人车也进 3D（T540f）：画成纸片，被楼挡住
+        if (this._3d && this._life) {
+            const life = this._life;
+            life.use3D = true;
+            this._3d.actorSource = () => life.actors3D();
+        }
 
         // 贴图异步加载，先用色块顶着，加载完两层各重画一次
         this._art.load(() => {

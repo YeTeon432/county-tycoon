@@ -4,6 +4,7 @@ import { DayClock } from '../core/DayClock';
 import { IsoMath } from '../core/IsoMath';
 import { PlacedBuilding, TownModel } from '../core/TownModel';
 import { BuildingLayer } from './BuildingLayer';
+import type { Actor3D } from './World3D';
 import { skinOf as lookOf } from '../core/Appearance';
 
 const { ccclass } = _decorator;
@@ -90,6 +91,8 @@ interface Agent {
     residentId: number;
     /** 要去的楼 */
     to: number;
+    /** 3D 版（T540f）每帧交给 World3D 的画法；place() 里更新 */
+    view: Actor3D;
 }
 
 /** 街上的人需要的居民信息（只读，来自模拟层；Resident 结构上就满足） */
@@ -201,6 +204,25 @@ export class LifeLayer extends Component {
 
     /** 某种建筑的客单价（T219 飘字）；返回 0 = 不飘 */
     priceOf: ((defId: string) => number) | null = null;
+
+    /**
+     * 真 3D（T540f）：人车由 World3D 画成 3D 里的纸片（能被楼挡住），这里的 2D 精灵只算位置、选帧，不显示。
+     * 气泡、金币、飘字还是 2D，压在最上面。
+     */
+    use3D = false;
+    private readonly _views: Actor3D[] = [];
+
+    /** 3D 版每帧要画的人车（World3D.actorSource） */
+    actors3D(): readonly Actor3D[] {
+        const out = this._views;
+        out.length = 0;
+        for (const a of this._agents) {
+            const op = a.node.getComponent(UIOpacity);
+            a.view.alpha = op ? op.opacity / 255 : 1;
+            out.push(a.view);
+        }
+        return out;
+    }
 
     /** 正在被追踪的居民（T425）：出门不受「街上最多几人」限制，保证一直画得出来 */
     tracked: number | null = null;
@@ -602,6 +624,7 @@ export class LifeLayer extends Component {
             const ss = sn.addComponent(Sprite);
             ss.sizeMode = Sprite.SizeMode.CUSTOM;
             ss.spriteFrame = sh;
+            ss.enabled = !this.use3D;
             sn.setPosition(0, SHADOW[kind].settle, 0);
             node.addChild(sn);
         }
@@ -611,7 +634,9 @@ export class LifeLayer extends Component {
         const sprite = body.addComponent(Sprite);
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.trim = false;
+        sprite.enabled = !this.use3D;
         node.addChild(body);
+        const shSize = sh ? this._art!.worldSize(sh) : { width: 0, height: 0 };
 
         const w = this._model!.width;
         const c0 = path[0], c1 = path.length > 1 ? path[1] : path[0];
@@ -623,6 +648,10 @@ export class LifeLayer extends Component {
             anim: R(3),
             residentId: who.id,
             to,
+            view: {
+                gx: 0, gy: 0, frame: null, w: 0, h: 0, flip: false,
+                shadow: sh, sw: shSize.width, sh: shSize.height, settle: SHADOW[kind].settle, alpha: 0,
+            },
         };
         this._layer!.addActor(node, 0);
         this._agents.push(a);
@@ -709,6 +738,13 @@ export class LifeLayer extends Component {
         }
         const sx = flip ? -1 : 1;
         if (a.node.scale.x !== sx) a.node.setScale(sx, 1, 1);
+        const v = a.view;
+        v.gx = gx; v.gy = gy; v.flip = flip;
+        if (v.frame !== a.sprite.spriteFrame) {
+            v.frame = a.sprite.spriteFrame;
+            const sz = v.frame ? art.worldSize(v.frame) : { width: 0, height: 0 };
+            v.w = sz.width; v.h = sz.height;
+        }
     }
 
     // ---------------- 金币 ----------------

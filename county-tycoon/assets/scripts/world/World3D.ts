@@ -8,6 +8,23 @@ import { TownModel } from '../core/TownModel';
 const { ccclass } = _decorator;
 
 /**
+ * 街上一个人 / 一辆车在 3D 里怎么画（T540f）：LifeLayer 每帧给出，World3D 画成面向相机的纸片。
+ * 尺寸都是 2D 世界单位（同 ArtLibrary.worldSize），位置是格子坐标（格子中心 = col + 0.5）。
+ */
+export interface Actor3D {
+    gx: number; gy: number;
+    frame: SpriteFrame | null; w: number; h: number; flip: boolean;
+    /** 脚下影子：图、宽高、着地点比图底边高多少（2D 世界单位） */
+    shadow: SpriteFrame | null; sw: number; sh: number; settle: number;
+    /** 0～1（出门淡入、进门淡出） */
+    alpha: number;
+}
+
+/** 一张纹理一批：人车的纸片合成一个动态网格，一次绘制 */
+interface ActorBatch { node: Node; mesh: Mesh }
+const ACTOR_MAX = 600;   // 每批最多几块纸片（人 + 影子；街上最多 60 人，留足余量）
+
+/**
  * 真 3D 的地面、楼、山和树（D033，T540c）。
  *
  * **3D 相机跟着 2D 走**：拖动、缩放、转视角仍由 WorldView 的「世界容器平移 + 缩放」和 IsoMath（rot + spin）管，
@@ -41,6 +58,19 @@ export class World3D extends Component {
     private _hidden: ReadonlySet<number> = new Set();
     /** 模型、材质都到了 */
     onReady: (() => void) | null = null;
+    /** 街上的人车（T540f）；没设就不画 */
+    actorSource: (() => readonly Actor3D[]) | null = null;
+    private _actorMat: Material | null = null;
+    private readonly _actorBatches = new Map<Texture2D, ActorBatch>();
+    private readonly _aPos = new Float32Array(ACTOR_MAX * 12);
+    private readonly _aUv = new Float32Array(ACTOR_MAX * 8);
+    private readonly _aCol = new Float32Array(ACTOR_MAX * 16);
+    private readonly _aIdx = (() => {
+        const a = new Uint16Array(ACTOR_MAX * 6);
+        for (let i = 0; i < ACTOR_MAX; i++) a.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6);
+        return a;
+    })();
+    private readonly _aOrder: Actor3D[] = [];
     /** 地面每格用哪一帧（GridMap 按模型坐标算） */
     groundFrame: ((col: number, row: number) => SpriteFrame | null) | null = null;
 
@@ -88,6 +118,11 @@ export class World3D extends Component {
             if (err) { console.error('[World3D] 材质', err.message); return; }
             const by = (n: string) => mats.find((m) => m.name === n)!;
             this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit') };
+            // 人车纸片：同一个 unlit 着色器的半透明版（technique 1：深度测试、不写深度、按透明度混合），
+            // 顶点色带淡入淡出。被楼挡住靠深度测试，人和人之间按远近排好再画
+            const am = new Material();
+            am.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_TEXTURE: true, USE_VERTEX_COLOR: true } });
+            this._actorMat = am;
             resources.loadDir('models3d', Prefab, (e2, list) => {
                 if (e2) console.error('[World3D] 模型', e2.message);
                 for (const p of list ?? []) this._prefabs.set(p.name, p);
@@ -122,6 +157,113 @@ export class World3D extends Component {
         cam.orthoHeight = view.getVisibleSize().height / 2 / (iso.hw * Math.SQRT2 * zoom);
         // 太阳跟着相机转：光永远从屏幕左上来，四个方向亮暗面一致（同预渲染图）
         this._sun.setRotationFromEuler(-50, yaw + 60, 0);
+        this.drawActors(q, back);
+    }
+
+    // ---------------------------------------------------------------- 人车（T540f）
+    /**
+     * 人车画成面向相机的纸片：纸片和屏幕平行，整张的深度 = 脚下那一点的深度，
+     * 所以挡在前面的楼会把它遮住、身后的楼不会切到头（和 2D 按脚下排序一个效果）。
+     * 影子平铺在地上（屏幕上看是同一个椭圆）。屏幕上 1 个 2D 世界单位 = 3D 里 1 / (hw·√2)。
+     */
+    private drawActors(q: Quat, back: Vec3): void {
+        const src = this.actorSource, mat = this._actorMat;
+        const list = src && mat ? src() : null;
+        const order = this._aOrder;
+        order.length = 0;
+        if (list) for (const a of list) if (a.frame && a.alpha > 0.01) order.push(a);
+        // 远的先画：沿相机方向的距离（back 指向相机，点积越大越近）
+        const bx = back.x, bz = back.z;
+        order.sort((a, b) => (a.gx * bx + a.gy * bz) - (b.gx * bx + b.gy * bz));
+
+        const k = 1 / (this._iso.hw * Math.SQRT2);
+        const right = Vec3.transformQuat(new Vec3(), Vec3.UNIT_X, q);
+        const up = Vec3.transformQuat(new Vec3(), Vec3.UNIT_Y, q);
+        const hl = Math.hypot(bx, bz) || 1;
+        const fx = -bx / hl, fz = -bz / hl;   // 地上「离相机远去」的方向，屏幕上朝上；地面在屏幕上压扁一半
+
+        // 按纹理分批；同一批里先铺所有影子，再按远近画身体
+        const used = new Set<Texture2D>();
+        const texOf = (f: SpriteFrame) => f.texture as Texture2D;
+        const textures: Texture2D[] = [];
+        for (const a of order) {
+            for (const f of [a.shadow, a.frame]) if (f && textures.indexOf(texOf(f)) < 0) textures.push(texOf(f));
+        }
+        for (const tex of textures) {
+            const P = this._aPos, U = this._aUv, C = this._aCol;
+            let n = 0;
+            const quad = (f: SpriteFrame, flip: boolean, alpha: number,
+                x0: number, y0: number, z0: number, x1: number, y1: number, z1: number,
+                x2: number, y2: number, z2: number, x3: number, y3: number, z3: number) => {
+                if (n >= ACTOR_MAX) return;
+                // 四角顺序：左下、右下、右上、左上
+                P.set([x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3], n * 12);
+                const R = f.rect, tw = tex.width, th = tex.height;
+                let u0 = R.x / tw, u1 = (R.x + R.width) / tw;
+                if (flip) { const t = u0; u0 = u1; u1 = t; }
+                const vt = R.y / th, vb = (R.y + R.height) / th;
+                U.set([u0, vb, u1, vb, u1, vt, u0, vt], n * 8);
+                for (let i = 0; i < 4; i++) C.set([1, 1, 1, alpha], n * 16 + i * 4);
+                n++;
+            };
+            for (const a of order) {
+                const f = a.shadow;
+                if (!f || texOf(f) !== tex) continue;
+                const cx = a.gx + fx * a.settle * k * 2, cz = a.gy + fz * a.settle * k * 2;
+                const rx = right.x * a.sw * k / 2, rz = right.z * a.sw * k / 2;
+                const ux = fx * a.sh * k, uz = fz * a.sh * k;   // 屏幕上高 sh 的影子在地上长 2·sh
+                const y = 0.003;
+                quad(f, false, a.alpha,
+                    cx - rx - ux, y, cz - rz - uz, cx + rx - ux, y, cz + rz - uz,
+                    cx + rx + ux, y, cz + rz + uz, cx - rx + ux, y, cz - rz + uz);
+            }
+            for (const a of order) {
+                const f = a.frame!;
+                if (texOf(f) !== tex) continue;
+                const hw = a.w * k / 2, h = a.h * k;
+                const rx = right.x * hw, ry = right.y * hw, rz = right.z * hw;
+                const ux = up.x * h, uy = up.y * h, uz = up.z * h;
+                quad(f, a.flip, a.alpha,
+                    a.gx - rx, -ry, a.gy - rz, a.gx + rx, ry, a.gy + rz,
+                    a.gx + rx + ux, ry + uy, a.gy + rz + uz, a.gx - rx + ux, -ry + uy, a.gy - rz + uz);
+            }
+            const batch = this.actorBatch(tex);
+            if (n === 0) continue;
+            used.add(tex);
+            batch.mesh.updateSubMesh(0, this.actorGeometry(n));
+            if (!batch.node.active) batch.node.active = true;
+        }
+        this._actorBatches.forEach((b, tex) => { if (!used.has(tex) && b.node.active) b.node.active = false; });
+    }
+
+    private actorGeometry(n: number) {
+        const iso = this._iso;
+        return {
+            positions: this._aPos.subarray(0, n * 12),
+            uvs: this._aUv.subarray(0, n * 8),
+            colors: this._aCol.subarray(0, n * 16),
+            indices16: this._aIdx.subarray(0, n * 6),
+            // 包围盒给整张地图：免得被视锥剔掉
+            minPos: { x: -2, y: -2, z: -2 },
+            maxPos: { x: iso.cols + 2, y: 20, z: iso.rows + 2 },
+        };
+    }
+
+    private actorBatch(tex: Texture2D): ActorBatch {
+        let b = this._actorBatches.get(tex);
+        if (b) return b;
+        const mesh = utils.MeshUtils.createDynamicMesh(0, this.actorGeometry(1), undefined,
+            { maxSubMeshes: 1, maxSubMeshVertices: ACTOR_MAX * 4, maxSubMeshIndices: ACTOR_MAX * 6 });
+        const node = this.child(this.node, 'Actors');
+        const mr = node.addComponent(MeshRenderer);
+        mr.shadowCastingMode = 0;
+        mr.mesh = mesh;
+        mr.setMaterial(this._actorMat!, 0);
+        mr.getMaterialInstance(0)!.setProperty('mainTexture', tex);
+        node.active = false;
+        b = { node, mesh };
+        this._actorBatches.set(tex, b);
+        return b;
     }
 
     /** 施工中的楼藏起来（工地还是 2D 图） */

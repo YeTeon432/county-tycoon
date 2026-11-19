@@ -270,7 +270,7 @@ export class GameRoot extends Component {
         const h = this._homes.get(defId);
         const def = this._defs.find((d) => d.id === defId);
         if (!h || !def) return null;
-        return `${def.name}：能住 ${h.housing} 人，房租 ¥${h.rent}/人/月`;
+        return `${def.name}：能住 ${h.housing} 人，每个成年人房租 ¥${h.rent}/月`;
     }
 
     /** 放置预览的覆盖范围一句话（T538）：蓝色路 / 黄色住户的意思，不是有覆盖范围的楼返回 null */

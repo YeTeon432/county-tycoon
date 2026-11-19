@@ -433,3 +433,17 @@
 - **问题**：用户反馈店铺朝向不对。原因是门面只有左下 / 右下两种，路在楼背后时门背对路。
 - **做了**：TownModel `Facing` 加 UR / UL，`roadSides / nextFacing / fixFacings`；IsoMath.frameSuffix、World3D 转角、放置预览换朝向跟着改；读档修老朝向。
 - **验证**：web-mobile 无头截图，十字路口四面各放一家奶茶店，自动朝向 L / UR / R / UL，3D 里门和招牌都朝路口（docs/ui-acceptance/d036-facing.png）；模拟测试 106/106；tsc 零错误。
+
+## 2026-11-19 T544 新建筑 3D 模型：验收 + 重新出微信包
+- **问题**：用户反馈新增的第一个店铺（面馆）没有 3D。查下来模型本身没问题：`new_buildings.py` 已出 11 个 glb（18:25），编辑器已导入，web-mobile（18:26 构建）里都是 3D；但 `build/wechatgame` 是 18:03 构建的，比模型早，微信开发者工具里看到的还是旧包（新楼画成 2D 色块）。
+- **做了**：关编辑器命令行重新构建微信包（退出码 36），包里 resources 已含 noodle / banquet / old-street 等新模型。
+- **验证**：web-mobile 无头截图，开局路边放面馆、家常菜馆、小卖部、药店、茶馆、幼儿园、大酒楼、菜市场、老街，全部 3D 正常；底栏卡片图标正常。
+- **下一步**：微信开发者工具重新打开 build/wechatgame 看一眼；T545 真机试玩调数值。
+
+## 2026-11-19 T550 住宅写清能住几人
+- **问题**：用户反馈住宅没写能住几人。建造栏卡片只有价格，放置提示只说「点地块预览」，楼信息面板只有住户数，看不出一栋顶几栋。
+- **做了**：
+  - `BuildingBar`：读 economy.json 时多读 `housing`，住宅卡片图区右下角蓝字白描边「住 N 人」（左上是锁、右上是选中对勾，不叠）。
+  - `GameRoot.homeHint`：选中住宅时顶栏「土坯农房：能住 3 人，房租 ¥100/人/月」（rent 没写用 tuning.rentPerPerson）。
+  - `BuildingPanel`：住户格改成「3 / 3 人」，住满变红；容量从已加载的 economy.json 缓存取，没加载到只显示人数。
+- **验证**：tsc 项目代码零错误；web-mobile 无头截图 `docs/ui-acceptance/t550-home-capacity.png`（卡片角标、顶栏提示、面板 3 / 3）。

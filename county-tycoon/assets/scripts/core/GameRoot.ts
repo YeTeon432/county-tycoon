@@ -54,6 +54,8 @@ export class GameRoot extends Component {
     /** 这一局是新开的（没读到存档）：要播开场（T407） */
     private _newGame = true;
     private _saver: SaveManager | null = null;
+    /** 住宅能住几人、每个成年人每月房租（economy.json），放置提示用 */
+    private _homes = new Map<string, { housing: number; rent: number }>();
 
     /** 这一局是不是新开的（界面据此决定播不播开场） */
     get newGame(): boolean {
@@ -105,6 +107,10 @@ export class GameRoot extends Component {
         const model = new TownModel(terrain.width, terrain.height);
         model.setTerrain(terrain);
         this._model = model;
+        const rent0 = typeof economy?.tuning?.rentPerPerson === 'number' ? economy.tuning.rentPerPerson : 0;
+        for (const b of Array.isArray(economy?.buildings) ? economy.buildings : []) {
+            if (b && typeof b.id === 'string' && b.housing > 0) this._homes.set(b.id, { housing: b.housing, rent: b.rent > 0 ? b.rent : rent0 });
+        }
 
         // 有存档就读档（D022：以前存档只写不读）；读不到或坏了就新开一局
         const loaded = readSave();
@@ -253,10 +259,18 @@ export class GameRoot extends Component {
         } else if (view.selectedBuilding) {
             ui.setPlacementHint(view.selectedBuilding.flat
                 ? `修路：${view.selectedBuilding.name}，点地块直接铺`
-                : `放置：${view.selectedBuilding.name}，点地块预览，按「确定」盖下`);
+                : this.homeHint(view.selectedBuilding.id) ?? `放置：${view.selectedBuilding.name}，点地块预览，按「确定」盖下`);
         } else {
             ui.setPlacementHint('');   // 空闲：顶栏第二行显示就业率和均薪（T212）；操作说明交给开场卡片和小提示
         }
+    }
+
+    /** 选中住宅时的提示：能住几人、房租（不说清楚玩家不知道一栋顶几栋） */
+    private homeHint(defId: string): string | null {
+        const h = this._homes.get(defId);
+        const def = this._defs.find((d) => d.id === defId);
+        if (!h || !def) return null;
+        return `${def.name}：能住 ${h.housing} 人，房租 ¥${h.rent}/人/月`;
     }
 
     /** 放置预览的覆盖范围一句话（T538）：蓝色路 / 黄色住户的意思，不是有覆盖范围的楼返回 null */

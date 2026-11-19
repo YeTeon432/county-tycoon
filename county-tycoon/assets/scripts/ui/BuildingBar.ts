@@ -30,7 +30,7 @@ const LEVEL_NAME: Record<TownLevel, string> = {
 };
 
 /** economy.json 里建造栏要用的两项 */
-interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean }
+interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean; housing: number }
 
 interface Card {
     def: BuildingDef;
@@ -46,6 +46,8 @@ interface Card {
     price: Label;
     coin: Sprite;
     lock: Sprite;
+    /** 住宅能住几人（图区右下角，非住宅不显示） */
+    cap: Label;
     /** 分层合批（T212）：这张卡在 底 / 图 / 图标 / 文字 四层里的影子节点，每帧跟 node 同步位置和显隐 */
     holders: Node[];
     /** 上次画的状态，变了才重画 */
@@ -181,7 +183,7 @@ export class BuildingBar extends Component {
     private loadEconomy(): void {
         resources.load('config/economy', JsonAsset, (err, asset) => {
             if (err || !asset || !asset.json) return;
-            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean }[] }).buildings;
+            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean; housing?: number }[] }).buildings;
             if (!Array.isArray(list)) return;
             for (const b of list) {
                 if (!b || typeof b.id !== 'string') continue;
@@ -189,6 +191,7 @@ export class BuildingBar extends Component {
                     cost: typeof b.cost === 'number' ? b.cost : 0,
                     unlock: LEVEL_ORDER.indexOf(b.unlock as TownLevel) >= 0 ? b.unlock as TownLevel : 'village',
                     selfBuilt: b.selfBuilt === true,
+                    housing: typeof b.housing === 'number' ? b.housing : 0,
                 });
             }
             this.applyTab();
@@ -291,6 +294,17 @@ export class BuildingBar extends Component {
         lock.node.setPosition(-imgW / 2 + 16, imgY + imgH / 2 - 16, 0);   // 图区左上角的小锁，不挡缩略图
         lock.node.active = false;
 
+        // 住宅能住几人：图区右下角（左上是锁、右上是选中对勾），白描边压在缩略图上也看得清
+        const cap = makeLabel(textH, 'Cap', '', UI_FONT.small - 4, UI_PALETTE.blue);
+        cap.isBold = true;
+        cap.enableOutline = true;
+        cap.outlineColor = UI_PALETTE.white;
+        cap.outlineWidth = 3;
+        cap.horizontalAlign = Label.HorizontalAlign.RIGHT;
+        cap.node.getComponent(UITransform)!.setAnchorPoint(1, 0.5);
+        cap.node.setPosition(imgW / 2 - 4, imgY - imgH / 2 + 12, 0);
+        cap.node.active = false;
+
         const name = makeLabel(textH, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
         name.isBold = true;
         name.cacheMode = Label.CacheMode.BITMAP;   // 进动态合图，卡片文字能连成一批（T212）
@@ -307,7 +321,7 @@ export class BuildingBar extends Component {
             this.handleItemClick(def);
         }, this);
 
-        return { def, tab: BuildingBar.tabOf(def), node, selected: false, thumb, swatch, name, price, coin, lock, holders, state: '' };
+        return { def, tab: BuildingBar.tabOf(def), node, selected: false, thumb, swatch, name, price, coin, lock, cap, holders, state: '' };
     }
 
     /** 没有贴图时的占位：一块等距菱形色块（按占格画大小），比方块更像"一块地上的楼" */
@@ -397,7 +411,7 @@ export class BuildingBar extends Component {
     private isLocked(def: BuildingDef): Econ | null {
         const e = this._econ.get(def.id);
         const sim = this._sim;
-        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village' });
+        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village', housing: 0 });
         if (!e || !sim) return null;
         return LEVEL_ORDER.indexOf(e.unlock) > LEVEL_ORDER.indexOf(sim.state.level) ? e : null;
     }
@@ -436,6 +450,8 @@ export class BuildingBar extends Component {
         c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
         c.price.color = UI_COLOR.text;
         c.coin.node.active = !!e;
+        c.cap.node.active = !!e && e.housing > 0;
+        if (e && e.housing > 0) c.cap.string = `住${e.housing}人`;
         c.price.node.setPosition(10, -h / 2 + 22, 0);
         // 选中上浮一点
         c.node.setPosition(c.node.position.x, selected ? 6 : 0, 0);

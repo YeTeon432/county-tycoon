@@ -1,4 +1,4 @@
-import { _decorator, Color, Node } from 'cc';
+import { _decorator, Color, JsonAsset, Node, resources } from 'cc';
 import { SimApi } from '../core/sim/SimApi';
 import { BuildingSim, Resident } from '../core/sim/types';
 import { PlacedBuilding, TownModel } from '../core/TownModel';
@@ -64,6 +64,14 @@ export class BuildingPanel extends Panel {
         return panel;
     }
 
+    /** 这种住宅能住几人；配置还没加载到返回 0（只显示住户数） */
+    private static housingOf(defId: string): number {
+        const asset = resources.get('config/economy', JsonAsset);
+        const list = asset && asset.json ? (asset.json as { buildings?: { id: string; housing?: number }[] }).buildings : null;
+        const b = Array.isArray(list) ? list.find((x) => x && x.id === defId) : null;
+        return b && typeof b.housing === 'number' ? b.housing : 0;
+    }
+
     private fill(): void {
         const sim = this._sim;
         const placed = this._placed;
@@ -83,7 +91,10 @@ export class BuildingPanel extends Panel {
         if (isHome) {
             const avgMood = people.length > 0 ? people.reduce((s, r) => s + r.mood, 0) / people.length : 0;
             const working = people.filter((r) => r.jobId !== null).length;
-            tiles.push(['住户', `${people.length} 人`, UI_PALETTE.blue]);
+            // 住户 / 能住几人（economy.json 的 housing，建造栏已经加载过，这里直接取缓存）
+            const cap = BuildingPanel.housingOf(placed.def.id);
+            const full = cap > 0 && people.length >= cap;
+            tiles.push(['住户', cap > 0 ? `${people.length} / ${cap} 人` : `${people.length} 人`, full ? UI_PALETTE.coral : UI_PALETTE.blue]);
             tiles.push(['平均幸福度', people.length > 0 ? `${Math.round(avgMood)}` : '—', people.length > 0 ? moodColor(avgMood) : UI_COLOR.textDim]);
             tiles.push(['有工作', `${working} 人`, UI_PALETTE.green]);
         } else {

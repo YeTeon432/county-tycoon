@@ -1,4 +1,4 @@
-import { Color, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director } from 'cc';
+import { Color, _decorator, Component, EventTouch, EventMouse, input, Input, view, Vec2, Node, Vec3, UITransform, Camera, director, gfx } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { InputGuard } from '../core/InputGuard';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
@@ -10,6 +10,7 @@ import { GridMap } from './GridMap';
 import { LifeLayer } from './LifeLayer';
 import { Tracker, TrackWhat } from './Tracker';
 import { DayClock } from '../core/DayClock';
+import { World3D } from './World3D';
 
 const { ccclass } = _decorator;
 
@@ -61,6 +62,9 @@ export class WorldView extends Component {
     private _model: TownModel | null = null;
     private _iso: IsoMath | null = null;
     private readonly _art = new ArtLibrary();
+    /** 真 3D 的地面、楼、山树（D033）；网址带 ?flat2d 时不建，退回 2D 画法对比用 */
+    private _3d: World3D | null = null;
+    static readonly use3D = !(typeof location !== 'undefined' && location.search.indexOf('flat2d') >= 0);
 
     /** 当前缩放档位在 zoomLevels 里的下标 */
     private _zoomIndex = 0;
@@ -196,7 +200,8 @@ export class WorldView extends Component {
 
         // 地图外的底色 = 草地色（T218）：缩到最小也不露出场景相机默认的紫黑
         const cam = director.getScene()?.getComponentInChildren(Camera);
-        if (cam) cam.clearColor = new Color().fromHEX(config.palette.background);
+        const bg = new Color().fromHEX(config.palette.background);
+        if (cam) cam.clearColor = bg;
 
         // 世界容器：地图挂在它下面，平移缩放都作用在它身上
         const world = new Node('World');
@@ -225,6 +230,19 @@ export class WorldView extends Component {
         const buildingNode = BuildingLayer.create(iso, model, this._art);
         world.addChild(buildingNode);
         this._buildings = buildingNode.getComponent(BuildingLayer);
+
+        // 真 3D（D033）：3D 相机先画地面和楼，2D 相机只清深度、把行人气泡界面压在上面
+        if (WorldView.use3D) {
+            if (cam) cam.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;
+            const w3 = World3D.create(iso, model, bg);
+            this._3d = w3;
+            const map = this._map!;
+            map.render2D = false;
+            map.redraw();
+            w3.groundFrame = (c, r) => map.modelFrame(c, r);
+            this._buildings!.has3D = (id) => w3.has(id);
+            w3.onReady = () => { if (this._buildings) this._buildings.refresh3D(); };
+        }
 
         // 行人、车、金币：人和车挂进建筑层一起排序，金币飘在最上面
         const lifeNode = LifeLayer.create(iso, model, this._art, this._buildings!);
@@ -264,6 +282,7 @@ export class WorldView extends Component {
             this._buildings.syncTerrainObjects();
         }
         if (this._life) this._life.onTownChanged();
+        if (this._3d) this._3d.redraw();
     }
 
     /** 贴图仓库（底栏缩略图用） */
@@ -318,6 +337,16 @@ export class WorldView extends Component {
         input.off(Input.EventType.MOUSE_WHEEL, this.onMouseWheel, this);
         input.off(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
         InputGuard.clear();
+        if (this._3d && this._3d.isValid) this._3d.node.destroy();
+    }
+
+    /** 3D 相机每帧对齐 2D 的平移 / 缩放 / 视角（放在 lateUpdate：拖动、惯性、转视角都在 update 里改完了） */
+    protected lateUpdate(): void {
+        const w3 = this._3d, world = this._world;
+        if (!w3 || !world) return;
+        const p = world.position;
+        w3.syncCamera(p.x, p.y, this._zoom, this._viewAngle);
+        w3.setHidden(this._building);
     }
 
     /**

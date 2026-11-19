@@ -1,5 +1,6 @@
 import { DayClock } from './DayClock';
-import { Color, _decorator, Component, Node, UITransform, Layers, macro } from 'cc';
+import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx } from 'cc';
+import { Spike3D } from '../spike/Spike3D';
 import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
@@ -64,6 +65,14 @@ export class GameRoot extends Component {
     }
 
     protected start(): void {
+        // T540a 技术验证：网址带 ?spike3d 只看真 3D 楼，不进游戏
+        if (typeof location !== 'undefined' && location.search.indexOf('spike3d') >= 0) {
+            for (const c of director.getScene()!.getComponentsInChildren(Camera)) c.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;
+            const n = new Node('Spike3D');
+            director.getScene()!.addChild(n);
+            n.addComponent(Spike3D).setup();
+            return;
+        }
         // 两份配置并行读，都读到了再搭画面，避免先画出半成品
         Promise.all([loadWorldConfig(), loadBuildingConfig(), loadSimJson()])
             .then(([world, buildings, sim]) =>

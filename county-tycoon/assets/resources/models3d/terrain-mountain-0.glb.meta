@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "d2070b00-2800-451e-a02b-7b8b62a5af33",
+  "files": [],
+  "subMetas": {
+    "1830f": {
+      "importer": "gltf-mesh",
+      "uuid": "d2070b00-2800-451e-a02b-7b8b62a5af33@1830f",
+      "displayName": "",
+      "id": "1830f",
+      "name": "mtn.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 722
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "d2070b00-2800-451e-a02b-7b8b62a5af33@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "7997b": {
+      "importer": "gltf-scene",
+      "uuid": "d2070b00-2800-451e-a02b-7b8b62a5af33@7997b",
+      "displayName": "",
+      "id": "7997b",
+      "name": "terrain-mountain-0.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "d2070b00-2800-451e-a02b-7b8b62a5af33@1830f"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "d2070b00-2800-451e-a02b-7b8b62a5af33@ce988"
+      ],
+      "scenes": [
+        "d2070b00-2800-451e-a02b-7b8b62a5af33@7997b"
+      ]
+    }
+  }
+}

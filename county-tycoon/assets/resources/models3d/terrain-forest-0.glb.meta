@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "b6f5282f-fc34-4a6f-8602-5e568f78b050",
+  "files": [],
+  "subMetas": {
+    "49b7c": {
+      "importer": "gltf-mesh",
+      "uuid": "b6f5282f-fc34-4a6f-8602-5e568f78b050@49b7c",
+      "displayName": "",
+      "id": "49b7c",
+      "name": "柱体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 1258
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "b6f5282f-fc34-4a6f-8602-5e568f78b050@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "2a65a": {
+      "importer": "gltf-scene",
+      "uuid": "b6f5282f-fc34-4a6f-8602-5e568f78b050@2a65a",
+      "displayName": "",
+      "id": "2a65a",
+      "name": "terrain-forest-0.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "b6f5282f-fc34-4a6f-8602-5e568f78b050@49b7c"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "b6f5282f-fc34-4a6f-8602-5e568f78b050@ce988"
+      ],
+      "scenes": [
+        "b6f5282f-fc34-4a6f-8602-5e568f78b050@2a65a"
+      ]
+    }
+  }
+}

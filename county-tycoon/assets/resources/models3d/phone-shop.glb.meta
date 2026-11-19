@@ -1,0 +1,110 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "a910e6d9-03aa-4417-8556-0ae550b0d29b",
+  "files": [],
+  "subMetas": {
+    "53647": {
+      "importer": "gltf-material",
+      "uuid": "a910e6d9-03aa-4417-8556-0ae550b0d29b@53647",
+      "displayName": "",
+      "id": "53647",
+      "name": "emit.material",
+      "userData": {
+        "gltfIndex": 1
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "e10e4": {
+      "importer": "gltf-mesh",
+      "uuid": "a910e6d9-03aa-4417-8556-0ae550b0d29b@e10e4",
+      "displayName": "",
+      "id": "e10e4",
+      "name": "立方体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 1868
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "a910e6d9-03aa-4417-8556-0ae550b0d29b@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "8b13d": {
+      "importer": "gltf-scene",
+      "uuid": "a910e6d9-03aa-4417-8556-0ae550b0d29b@8b13d",
+      "displayName": "",
+      "id": "8b13d",
+      "name": "phone-shop.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "a910e6d9-03aa-4417-8556-0ae550b0d29b@e10e4"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "a910e6d9-03aa-4417-8556-0ae550b0d29b@ce988",
+        "a910e6d9-03aa-4417-8556-0ae550b0d29b@53647"
+      ],
+      "scenes": [
+        "a910e6d9-03aa-4417-8556-0ae550b0d29b@8b13d"
+      ]
+    }
+  }
+}

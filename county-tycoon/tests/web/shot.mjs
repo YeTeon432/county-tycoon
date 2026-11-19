@@ -49,7 +49,7 @@ const cdp = (method, params = {}) => new Promise((ok) => { const i = ++id; wait.
 await cdp('Runtime.enable');
 await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: DPR, mobile: true });
 await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
-await cdp('Page.navigate', { url: `http://localhost:${port}/index.html` });
+await cdp('Page.navigate', { url: process.env.SHOT_URL ?? `http://localhost:${port}/index.html` });   // SHOT_URL：直接看编辑器预览（7456）
 await mkdir(OUT, { recursive: true });
 
 const touch = async (type, x, y) => cdp('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });

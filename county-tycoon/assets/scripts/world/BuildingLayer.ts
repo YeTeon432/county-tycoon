@@ -39,6 +39,15 @@ export class BuildingLayer extends Component {
     private readonly _terrainNodes: Node[] = [];
     /** 山 / 树林节点在哪一格（跟手转视角时重摆用） */
     private readonly _terrainCell = new Map<Node, [number, number]>();
+    /**
+     * 这种楼 / 山树有 3D 模型吗（D033）：有就不画 2D 图（World3D 画），但图还挂着——
+     * 点楼按它的画面蒙版判定、楼顶气泡按它的高度摆，都不用改。
+     */
+    has3D: ((defId: string) => boolean) | null = null;
+    /** 山 / 树林节点 -> 模型 id */
+    private readonly _terrainId = new Map<Node, string>();
+    /** uid -> 建筑 id（藏不藏 2D 图要查） */
+    private readonly _defOf = new Map<number, string>();
     /** 尺寸不对的图只警告一次 */
     private readonly _warned = new Set<string>();
 
@@ -108,6 +117,7 @@ export class BuildingLayer extends Component {
                 this._depth.delete(node);
                 this._nodes.delete(uid);
                 this._shown.delete(uid);
+                this._defOf.delete(uid);
                 this._site.delete(uid);
                 this._barAt.delete(uid);
             }
@@ -126,21 +136,23 @@ export class BuildingLayer extends Component {
         if (!art || !model || !iso || !root) return;
         const t = model.terrain;
         for (const n of this._terrainNodes) { this._depth.delete(n); n.removeFromParent(); n.destroy(); }
+        this._terrainId.clear();
         this._terrainNodes.length = 0;
         this._terrainCell.clear();
         if (!t) return;
-        const pick = (kind: string, c: number, r: number) => {
+        const pickId = (kind: string, c: number, r: number) => {
             const h = ((c * 73856093) ^ (r * 19349663)) >>> 0;
-            if (kind === 'mountain') return art.get(`terrain-mountain-${h % 3}`);
-            if (kind === 'forest') return art.get(`terrain-forest-${h % 4}`);
-            if (kind === 'pond' && h % 3 === 0) return art.get('terrain-pond-lily');
+            if (kind === 'mountain') return `terrain-mountain-${h % 3}`;
+            if (kind === 'forest') return `terrain-forest-${h % 4}`;
+            if (kind === 'pond' && h % 3 === 0) return 'terrain-pond-lily';
             return null;
         };
         for (let r = 0; r < t.height; r++) {
             for (let c = 0; c < t.width; c++) {
                 if (model.getAt(c, r)) continue;           // 已经盖了东西的格子不再立树
-                const frame = pick(t.typeAt(c, r), c, r);
-                if (!frame) continue;
+                const tid = pickId(t.typeAt(c, r), c, r);
+                const frame = tid ? art.get(tid) : null;
+                if (!tid || !frame) continue;
                 const node = BuildingLayer.makeChild(root, `T${c}_${r}`);
                 const ui = node.getComponent(UITransform)!;
                 ui.setAnchorPoint(new Vec2(0.5, 0));
@@ -152,6 +164,8 @@ export class BuildingLayer extends Component {
                 s.sizeMode = Sprite.SizeMode.CUSTOM;
                 s.trim = false;
                 s.spriteFrame = frame;
+                s.enabled = !this.is3D(tid);
+                this._terrainId.set(node, tid);
                 this._depth.set(node, iso.depth(c, r, 1, 1));
                 this._terrainNodes.push(node);
                 this._terrainCell.set(node, [c, r]);
@@ -195,7 +209,7 @@ export class BuildingLayer extends Component {
             if (!site && !crane && !bar) return;
             if (bar) bar.destroy();
             // 楼露出来：从「矮一截」弹到原样；工地淡出收尾，别一帧硬切（网拆掉、楼落定）
-            if (sprite) sprite.enabled = true;
+            if (sprite) sprite.enabled = !this.is3D(this._defOf.get(uid));
             const op = node.getComponent(UIOpacity);
             if (op) op.opacity = 255;
             for (const f of [site, crane]) {
@@ -565,7 +579,9 @@ export class BuildingLayer extends Component {
         if (dx < -w / 2 || dx > w / 2 || dy < 0 || dy > h + 28) return false;
         if (node.getChildByName('Alert') && Math.abs(dx) <= 16 && Math.abs(dy - h - 12) <= 16) return true;
         const sp = node.getComponent(Sprite);
-        if (sp && sp.enabled && sp.spriteFrame && this.spriteHit(sp, w, h, dx, dy)) return true;
+        // 3D 楼的 2D 图不显示但还在，照样按它判定；施工中（有工地图）不算楼本身
+        const shown = sp && (sp.enabled || (!node.getChildByName('Site') && this.is3D(this._defOf.get(this.uidOf(node)))));
+        if (sp && shown && sp.spriteFrame && this.spriteHit(sp, w, h, dx, dy)) return true;
         for (const name of ['Site', 'Crane']) {
             const c = node.getChildByName(name);
             const cs = c && c.active ? c.getComponent(Sprite) : null;
@@ -690,10 +706,12 @@ export class BuildingLayer extends Component {
             sprite.type = Sprite.Type.SIMPLE;
             sprite.trim = false;
             sprite.spriteFrame = frame;
+            sprite.enabled = !this.is3D(b.def.id);
         } else {
             this.drawBlock(node.addComponent(Graphics), b.def);
         }
         this._nodes.set(b.uid, node);
+        this._defOf.set(b.uid, b.def.id);
         this._shown.set(b.uid, frame);
     }
 
@@ -774,6 +792,27 @@ export class BuildingLayer extends Component {
         const p = iso.footBottom(col, row, def.width, def.height);
         gs.node.setPosition(p.x, p.y, 0);
         gs.node.active = true;
+    }
+
+    private is3D(id: string | undefined): boolean {
+        return !!id && !!this.has3D && this.has3D(id);
+    }
+
+    private uidOf(node: Node): number {
+        const m = /^B(\d+)_/.exec(node.name);
+        return m ? Number(m[1]) : -1;
+    }
+
+    /** 3D 模型加载完：已有的楼、山树把 2D 图藏起来（施工中的楼本来就藏着，不动） */
+    refresh3D(): void {
+        this._nodes.forEach((node, uid) => {
+            const sp = node.getComponent(Sprite);
+            if (sp && !node.getChildByName('Site')) sp.enabled = !this.is3D(this._defOf.get(uid));
+        });
+        for (const n of this._terrainNodes) {
+            const sp = n.getComponent(Sprite);
+            if (sp) sp.enabled = !this.is3D(this._terrainId.get(n));
+        }
     }
 
     private static makeChild(parent: Node, name: string): Node {

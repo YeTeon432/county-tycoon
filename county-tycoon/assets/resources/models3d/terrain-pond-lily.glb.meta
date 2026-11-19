@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "e2a30f97-46b3-48d0-91ef-b15d981e6726",
+  "files": [],
+  "subMetas": {
+    "60062": {
+      "importer": "gltf-scene",
+      "uuid": "e2a30f97-46b3-48d0-91ef-b15d981e6726@60062",
+      "displayName": "",
+      "id": "60062",
+      "name": "terrain-pond-lily.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "0c3a4": {
+      "importer": "gltf-mesh",
+      "uuid": "e2a30f97-46b3-48d0-91ef-b15d981e6726@0c3a4",
+      "displayName": "",
+      "id": "0c3a4",
+      "name": "pad.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 896
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "e2a30f97-46b3-48d0-91ef-b15d981e6726@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "e2a30f97-46b3-48d0-91ef-b15d981e6726@0c3a4"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "e2a30f97-46b3-48d0-91ef-b15d981e6726@ce988"
+      ],
+      "scenes": [
+        "e2a30f97-46b3-48d0-91ef-b15d981e6726@60062"
+      ]
+    }
+  }
+}

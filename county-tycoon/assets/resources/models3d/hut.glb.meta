@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc",
+  "files": [],
+  "subMetas": {
+    "e10e4": {
+      "importer": "gltf-mesh",
+      "uuid": "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@e10e4",
+      "displayName": "",
+      "id": "e10e4",
+      "name": "立方体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 420
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "70c3e": {
+      "importer": "gltf-scene",
+      "uuid": "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@70c3e",
+      "displayName": "",
+      "id": "70c3e",
+      "name": "hut.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@e10e4"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@ce988"
+      ],
+      "scenes": [
+        "d6715319-8ccc-46c2-a82f-c4e3a12d7cbc@70c3e"
+      ]
+    }
+  }
+}

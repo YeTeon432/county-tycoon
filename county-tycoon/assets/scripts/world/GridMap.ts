@@ -64,8 +64,24 @@ export class GridMap extends Component {
         this.redraw();
     }
 
+    /** 3D 地面接管（D033）：2D 瓦片不建，只给 World3D 提供每格的帧 */
+    render2D = true;
+    /** 取帧时按模型坐标数四邻（3D 地面不跟视角换图，转视角由相机做） */
+    private _fixed = false;
+
+    /** 这一格的地面帧，四邻 mask / 桥面方向按模型坐标（3D 地面用） */
+    modelFrame(col: number, row: number): SpriteFrame | null {
+        this._fixed = true;
+        try { return this.frameFor(col, row); } finally { this._fixed = false; }
+    }
+
     /** 地块或马路有变化时调用 */
     redraw(): void {
+        if (!this.render2D) {
+            if (this._fallback) this._fallback.clear();
+            if (this._tileRoot) this._tileRoot.active = false;
+            return;
+        }
         const art = this._art;
         // 有地形时图集是 66 帧；没有地形帧的旧图集只要 36 帧就够画草地和道路
         const need = this._terrain ? GROUND_FRAME_COUNT_TERRAIN : GROUND_FRAME_COUNT;
@@ -173,7 +189,7 @@ export class GridMap extends Component {
      */
     private viewMask(test: (c: number, r: number) => boolean, col: number, row: number): number {
         const iso = this._iso;
-        if (!iso) return neighborMask(test, col, row);
+        if (!iso || this._fixed) return neighborMask(test, col, row);
         const [vc, vr] = iso.viewCell(col, row);
         return neighborMask((x, y) => { const m = iso.modelCell(x, y); return test(m[0], m[1]); }, vc, vr);
     }
@@ -182,7 +198,7 @@ export class GridMap extends Component {
     private viewBridge(col: number, row: number): string {
         const iso = this._iso;
         const same = (c: number, r: number) => this.isBridgeable(c, r);
-        if (!iso) return bridgeName(same, col, row);
+        if (!iso || this._fixed) return bridgeName(same, col, row);
         const [vc, vr] = iso.viewCell(col, row);
         return bridgeName((x, y) => { const m = iso.modelCell(x, y); return same(m[0], m[1]); }, vc, vr);
     }

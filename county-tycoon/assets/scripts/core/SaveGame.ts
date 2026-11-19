@@ -103,6 +103,7 @@ export function restoreTown(
     // 老存档里朝向还是 null 的建筑（放下时四周没路），按当前道路重新推一次；
     // 已经是 'L' / 'R' 的不动，玩家手动换过的朝向必须保留。
     model.settleFacings();
+    model.fixFacings();
     return skipped;
 }
 

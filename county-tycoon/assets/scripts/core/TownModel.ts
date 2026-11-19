@@ -11,14 +11,20 @@ export interface PlacedBuilding {
     /** 左下角所在行（0 起，从下往上） */
     row: number;
     /**
-     * 门面朝向（D015 修订）：'L' 门面在左下墙，'R' 在右下墙。
+     * 门面朝向（D015 修订、D036 补成四面）：见 Facing。
      * null = 还没定（放下时四周没有道路）；第一次挨上道路时定一次，之后锁住，
      * 只有玩家手动点它才会再变。道路本身不用这个字段。
      */
     facing: Facing | null;
 }
 
-export type Facing = 'L' | 'R';
+/**
+ * 门面朝哪一边（D036）：'L' 左下（row+h 那侧）、'R' 右下（col+w 那侧）、'UR' 右上（row−1 那侧）、'UL' 左上（col−1 那侧）。
+ * 以前只有 L / R（2D 只画了朝镜头的两面），路在楼背后时门只能背对着路；真 3D 转视角后一眼就看出来，所以补成四个。
+ */
+export type Facing = 'L' | 'R' | 'UR' | 'UL';
+/** 屏幕上顺时针一圈：左下 → 左上 → 右上 → 右下（换朝向按这个顺序轮） */
+export const FACING_ORDER: Facing[] = ['L', 'UL', 'UR', 'R'];
 
 /**
  * 城镇的地块数据。
@@ -109,8 +115,7 @@ export class TownModel {
 
     /**
      * 给还没定朝向、且已经挨着道路的建筑定朝向，定了就不再改。
-     * 规则：左下边（row+h 那一侧）有路 → 'L'；否则右下边（col+w 那一侧）有路 → 'R'；
-     * 只有背后（左上 / 右上）有路 → 'L'（门面没法对着背后的路，只能朝镜头）。
+     * 规则：按 roadSides 的优先级取第一条挨路的边（左下 → 右下 → 右上 → 左上，D036）。
      */
     settleFacings(): void {
         const list = this.allBuildings();
@@ -147,28 +152,58 @@ export class TownModel {
      * 放置预览用它给默认朝向，settleFacings 用它定朝向，两边规则一致。
      */
     facingByRoads(def: BuildingDef, col: number, row: number): Facing | null {
+        return this.roadSides(def, col, row)[0] ?? null;
+    }
+
+    /** 四条边里挨着路的边，按优先级：左下、右下、右上、左上（朝镜头的两面优先） */
+    roadSides(def: BuildingDef, col: number, row: number): Facing[] {
         const w = def.width, h = def.height;
-        let front = false, right = false, back = false;
+        const has = { L: false, R: false, UR: false, UL: false };
         for (let c = col; c < col + w; c++) {
-            if (this.isRoad(c, row + h)) front = true;
-            if (this.isRoad(c, row - 1)) back = true;
+            if (this.isRoad(c, row + h)) has.L = true;
+            if (this.isRoad(c, row - 1)) has.UR = true;
         }
         for (let r = row; r < row + h; r++) {
-            if (this.isRoad(col + w, r)) right = true;
-            if (this.isRoad(col - 1, r)) back = true;
+            if (this.isRoad(col + w, r)) has.R = true;
+            if (this.isRoad(col - 1, r)) has.UL = true;
         }
-        if (front) return 'L';
-        if (right) return 'R';
-        if (back) return 'L';
-        return null;
+        return (['L', 'R', 'UR', 'UL'] as Facing[]).filter((f) => has[f]);
+    }
+
+    /**
+     * 换朝向的下一个：按屏幕顺时针找下一条挨路的边（路口转角就在两条路之间切）；
+     * 只有一条边挨路（或都不挨）就按顺时针挨个转。
+     */
+    nextFacing(def: BuildingDef, col: number, row: number, cur: Facing | null): Facing {
+        const sides = this.roadSides(def, col, row);
+        const at = FACING_ORDER.indexOf(cur ?? 'L');
+        for (let k = 1; k <= 4; k++) {
+            const f = FACING_ORDER[(at + k) % 4];
+            if (sides.length < 2 || sides.indexOf(f) >= 0) return f;
+        }
+        return cur ?? 'L';
     }
 
     /** 玩家手动换朝向（路口转角想朝另一条路时用）。道路和空地返回 null */
     toggleFacing(col: number, row: number): PlacedBuilding | null {
         const b = this.getAt(col, row);
         if (!b || b.def.flat) return null;
-        b.facing = b.facing === 'R' ? 'L' : 'R';
+        b.facing = this.nextFacing(b.def, b.col, b.row, b.facing);
         return b;
+    }
+
+    /**
+     * 读档时修老朝向（D036）：以前门只能朝 L / R，路在背后的楼被定成了 L。
+     * 门面那一边不挨路、别的边挨路的，按现在的规则重定一次。返回改了几栋。
+     */
+    fixFacings(): number {
+        let n = 0;
+        for (const b of this.allBuildings()) {
+            if (b.def.flat || !b.facing) continue;
+            const sides = this.roadSides(b.def, b.col, b.row);
+            if (sides.length && sides.indexOf(b.facing) < 0) { b.facing = sides[0]; n++; }
+        }
+        return n;
     }
 
     /**

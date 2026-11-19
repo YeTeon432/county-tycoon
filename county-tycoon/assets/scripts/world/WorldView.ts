@@ -781,7 +781,7 @@ export class WorldView extends Component {
     rotatePending(): void {
         const p = this._pending;
         if (!p || !p.canRotate) return;
-        this.setPending(this.evalPending(p.def, p.col, p.row, p.facing === 'R' ? 'L' : 'R'));
+        this.setPending(this.evalPending(p.def, p.col, p.row, this._model ? this._model.nextFacing(p.def, p.col, p.row, p.facing) : p.facing));
     }
 
     /** 按「确定」：按预览的位置和朝向盖下。非道路建筑盖完后退出选中，免得点别处又开新预览 */

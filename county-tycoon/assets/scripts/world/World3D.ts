@@ -148,7 +148,7 @@ export class World3D extends Component {
             const cur = this._nodes.get(b.uid);
             if (cur && cur.key === key) continue;
             if (cur) cur.node.destroy();
-            const node = this.place(b.def.id, b.col, b.row, b.def.width, b.def.height, b.facing === 'R' ? 1 : 0);
+            const node = this.place(b.def.id, b.col, b.row, b.def.width, b.def.height, World3D.TURN[b.facing ?? 'L']);
             if (!node) continue;
             node.active = !this._hidden.has(b.uid);
             this._nodes.set(b.uid, { node, key });
@@ -160,6 +160,9 @@ export class World3D extends Component {
      * 摆一个模型。glb 的原点 = 占地的「左下边」角：Blender 里 x = gx、−y = gy，导到 Cocos 后 z = −y_blender，
      * 所以模型原点放在 (col, 0, row + h)。turn = 绕占地中心转几个 90°：1 = 门面从左下（+gy）转到右下（+gx）。
      */
+    /** 门面朝向 → 绕 Y 转几个 90°（模型门面朝 +gy = 左下；+90° 把 +gy 转到 +gx = 右下） */
+    private static readonly TURN: Record<string, number> = { L: 0, R: 1, UR: 2, UL: 3 };
+
     private place(id: string, col: number, row: number, w: number, h: number, turn: number): Node | null {
         const pf = this._prefabs.get(id);
         if (!pf) {

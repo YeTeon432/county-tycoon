@@ -379,6 +379,11 @@ export class UiRoot extends Component {
         if (this._topBar) this._topBar.setHint(text);
     }
 
+    /** 公告栏发一条（GameRoot 用：存档失败等） */
+    say(text: string): void {
+        this._notices?.say('info', text);
+    }
+
     get placementHint(): string {
         return this._hint;
     }

@@ -106,6 +106,75 @@ export function restoreTown(
     return skipped;
 }
 
+/**
+ * 分段存储（T548）：微信 / 抖音单个 key 最多 1MB，人口七八百时整份存档就超了，setStorageSync 抛错 = 存档丢了。
+ * 所以按 CHUNK 个字符切段，存在 `<SAVE_KEY>.<槽>.<段号>`；SAVE_KEY 本身只放一张目录 {chunked, slot, n, len}。
+ * 两个槽 a / b 轮流写：先写新槽的所有段，全部成功才改目录指向它。写到一半失败（配额满、被杀进程）
+ * 目录还指着旧槽，上一份存档完好；旧槽也顺手当备份，新槽读坏了退回它。
+ * 老存档（SAVE_KEY 里直接是整份 JSON）照样能读。
+ */
+const CHUNK = 200_000;   // 字符数；全是中文时 UTF-8 也才 600KB，留足余量
+const SLOTS = ['a', 'b'];
+
+interface SaveIndex { chunked: true; slot: string; n: number; len: number; prev?: { slot: string; n: number; len: number } }
+
+function chunkKey(slot: string, i: number): string {
+    return `${SAVE_KEY}.${slot}.${i}`;
+}
+
+function readIndex(): SaveIndex | null {
+    const text = getPlatform().getItem(SAVE_KEY);
+    if (!text || text.charCodeAt(0) !== 123 /* { */ || text.length > 1000) return null;
+    try {
+        const v = JSON.parse(text);
+        return v && v.chunked ? v as SaveIndex : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function readSlot(slot: string, n: number, len: number): string | null {
+    const p = getPlatform();
+    let text = '';
+    for (let i = 0; i < n; i++) {
+        const part = p.getItem(chunkKey(slot, i));
+        if (part === null) return null;
+        text += part;
+    }
+    return text.length === len ? text : null;
+}
+
+/** 把一整份存档文本分段写进去。返回 false 时上一份存档不受影响 */
+export function writeSaveText(text: string): boolean {
+    const p = getPlatform();
+    const old = readIndex();
+    const slot = old && old.slot === SLOTS[0] ? SLOTS[1] : SLOTS[0];
+    const n = Math.max(1, Math.ceil(text.length / CHUNK));
+    for (let i = 0; i < n; i++) {
+        if (!p.setItem(chunkKey(slot, i), text.slice(i * CHUNK, (i + 1) * CHUNK))) {
+            console.error(`[SaveGame] 存档第 ${i + 1}/${n} 段写失败，保留上一份`);
+            return false;
+        }
+    }
+    // 这个槽上次可能分得更多段，多出来的删掉
+    for (let i = n; p.getItem(chunkKey(slot, i)) !== null; i++) p.removeItem(chunkKey(slot, i));
+    const index: SaveIndex = { chunked: true, slot, n, len: text.length };
+    if (old) index.prev = { slot: old.slot, n: old.n, len: old.len };
+    return p.setItem(SAVE_KEY, JSON.stringify(index));
+}
+
+/** 读出整份存档文本：新格式按目录拼段（坏了退回备份槽），老格式直接返回 */
+export function readSaveText(): string | null {
+    const raw = getPlatform().getItem(SAVE_KEY);
+    if (!raw) return null;
+    const index = readIndex();
+    if (!index) return raw;   // 老存档：整份 JSON
+    const text = readSlot(index.slot, index.n, index.len);
+    if (text !== null) return text;
+    console.warn('[SaveGame] 最新存档段不全，读上一份');
+    return index.prev ? readSlot(index.prev.slot, index.prev.n, index.prev.len) : null;
+}
+
 /** 写存档。返回 false 表示存储写失败（配额满等），调用方据此提示玩家 */
 export function writeSave(state: SimState, model: TownModel): boolean {
     const file: SaveFile = {
@@ -121,7 +190,7 @@ export function writeSave(state: SimState, model: TownModel): boolean {
         console.error('[SaveGame] 存档序列化失败（状态里有循环引用？）', e);
         return false;
     }
-    return getPlatform().setItem(SAVE_KEY, text);
+    return writeSaveText(text);
 }
 
 /**
@@ -131,7 +200,7 @@ export function writeSave(state: SimState, model: TownModel): boolean {
  * 存档坏了只该回到新游戏，不该白屏。
  */
 export function readSave(): LoadResult {
-    const text = getPlatform().getItem(SAVE_KEY);
+    const text = readSaveText();
     if (!text) return { ok: false, reason: 'empty' };
 
     let raw: any;
@@ -163,7 +232,9 @@ export function readSave(): LoadResult {
 
 /** 删档（重开一局用） */
 export function clearSave(): void {
-    getPlatform().removeItem(SAVE_KEY);
+    const p = getPlatform();
+    for (const slot of SLOTS) for (let i = 0; p.getItem(chunkKey(slot, i)) !== null; i++) p.removeItem(chunkKey(slot, i));
+    p.removeItem(SAVE_KEY);
 }
 
 /**

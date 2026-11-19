@@ -87,6 +87,17 @@ export class GameRoot extends Component {
             });
     }
 
+    /** 存一次；写失败提示玩家（以前只在控制台警告，玩家不知道存档没存上，T548）。同一次失败只提示一次 */
+    private _saveFailShown = false;
+    private save(): void {
+        if (!this._saver) return;
+        const ok = this._saver.saveNow();
+        if (ok) { this._saveFailShown = false; return; }
+        if (this._saveFailShown || !this._ui) return;
+        this._saveFailShown = true;
+        this._ui.say('存档没存上（手机存储空间不够？），上一份存档还在');
+    }
+
     private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any, terrain: Terrain): void {
         if (terrain.width !== world.gridWidth || terrain.height !== world.gridHeight) {
             console.warn(`[GameRoot] map.json 是 ${terrain.width}×${terrain.height}，world.json 是 ${world.gridWidth}×${world.gridHeight}，以 map.json 为准`);
@@ -117,7 +128,7 @@ export class GameRoot extends Component {
         // 自动存档：切后台时 + 每个月结算后（DESIGN 1：每月自动存）
         this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
         this._saver.startAutoSave();
-        sim.onMonth = () => { if (this._saver) this._saver.saveNow(); };
+        sim.onMonth = () => this.save();
 
         this.buildWorld(world, model);
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
@@ -213,7 +224,7 @@ export class GameRoot extends Component {
             // 点地块的回调比预览挪位置早一步：等这一帧预览挪好了再读（不然提示的是上一个位置）
             view.onCellTapped = () => this.scheduleOnce(() => this.updatePlacementHint(), 0);
             // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
-            view.onTownChanged = () => { this.updatePlacementHint(); if (this._saver) this._saver.saveNow(); };
+            view.onTownChanged = () => { this.updatePlacementHint(); this.save(); };
         }
         this.updatePlacementHint();
     }

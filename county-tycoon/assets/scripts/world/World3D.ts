@@ -4,6 +4,7 @@ import {
 } from 'cc';
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
+import type { GroundQuad } from './GridMap';
 
 const { ccclass } = _decorator;
 
@@ -63,6 +64,9 @@ export class World3D extends Component {
     private _sun!: Node;
     private _root!: Node;
     private _groundNode: Node | null = null;
+    private _streetNode: Node | null = null;
+    private _streetMat: Material | null = null;
+    private readonly _groundCapacity = new WeakMap<Node, number>();
     private _mats: { lit: Material; emit: Material; ground: Material } | null = null;
     private readonly _prefabs = new Map<string, Prefab>();
     private readonly _missing = new Set<string>();
@@ -80,7 +84,7 @@ export class World3D extends Component {
     private readonly _decals = new Map<DecalLayer, Node>();
     private readonly _decalCapacity = new Map<DecalLayer, number>();
     /** 扩容后保留旧网格到场景销毁，原生渲染线程可能还在用它。 */
-    private readonly _retiredDecalMeshes: Mesh[] = [];
+    private readonly _retiredGroundMeshes: Mesh[] = [];
     /** 材质还没到时先记下，到了再画 */
     private readonly _decalPending = new Map<DecalLayer, readonly Decal[]>();
     /** 模型、材质都到了 */
@@ -101,6 +105,7 @@ export class World3D extends Component {
     private readonly _aOrder: Actor3D[] = [];
     /** 地面每格用哪一帧（GridMap 按模型坐标算） */
     groundFrame: ((col: number, row: number) => SpriteFrame | null) | null = null;
+    streetOverlays: (() => Iterable<GroundQuad>) | null = null;
 
     static create(iso: IsoMath, model: TownModel, background: Color): World3D {
         Layers.addLayer('World3D', 5);
@@ -151,6 +156,9 @@ export class World3D extends Component {
             if (err) { console.error('[World3D] 材质', err.message); return; }
             const by = (n: string) => mats.find((m) => m.name === n)!;
             this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit') };
+            const street = new Material();
+            street.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
+            this._streetMat = street;
             // 贴地色块：同一个 unlit 半透明，不要贴图，颜色全在顶点色里
             const dm = new Material();
             dm.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
@@ -320,6 +328,7 @@ export class World3D extends Component {
         mr.mesh = mesh;
         mr.setMaterial(this._actorMat!, 0);
         mr.getMaterialInstance(0)!.setProperty('mainTexture', tex);
+        if (mr.model) mr.model.priority = 1;
         node.active = false;
         b = { node, mesh, renderer: mr, quadCount: 0 };
         this._actorBatches.set(tex, b);
@@ -403,11 +412,7 @@ export class World3D extends Component {
         };
         let mr: MeshRenderer;
         if (!node || quads > capacity) {
-            if (node) {
-                node.active = false;
-                this._retiredDecalMeshes.push(node.getComponent(MeshRenderer)!.mesh!);
-                node.destroy();
-            }
+            if (node) this.retireGroundMesh(node);
             node = this.child(this.node, `Decal-${layer}`);
             mr = node.addComponent(MeshRenderer);
             mr.shadowCastingMode = 0;
@@ -421,12 +426,22 @@ export class World3D extends Component {
             mr.mesh!.updateSubMesh(0, geometry);
         }
         node.active = true;
+        if (mr.model) mr.model.priority = 1;  // 地图工具压在道路叠层上
         mr.onGeometryChanged();
+    }
+
+    private retireGroundMesh(node: Node): void {
+        node.active = false;
+        this._retiredGroundMeshes.push(node.getComponent(MeshRenderer)!.mesh!);
+        node.destroy();
     }
 
     protected onDestroy(): void {
         for (const node of this._decals.values()) node.getComponent(MeshRenderer)?.mesh?.destroy();
-        for (const mesh of this._retiredDecalMeshes) mesh.destroy();
+        for (const mesh of this._retiredGroundMeshes) mesh.destroy();
+        this._groundNode?.getComponent(MeshRenderer)?.mesh?.destroy();
+        this._streetNode?.getComponent(MeshRenderer)?.mesh?.destroy();
+        this._streetMat?.destroy();
         for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
         this._decalMat?.destroy();
     }
@@ -513,7 +528,7 @@ export class World3D extends Component {
             const mr = child.getComponent(MeshRenderer);
             if (!mr) return;
             for (let i = 0; i < mr.sharedMaterials.length; i++) mr.setSharedMaterial(mats[i === 1 ? 1 : 0], i);
-            if (mr.model) mr.model.priority = 1;   // 先画贴地的格线和占格
+            if (mr.model) mr.model.priority = 2;   // 先画贴地的格线和占格
         });
         this._preview = { node, key, ok: p.ok };
     }
@@ -620,42 +635,78 @@ export class World3D extends Component {
 
     // ---------------------------------------------------------------- 地面
     private buildGround(): void {
-        const iso = this._iso, frameOf = this.groundFrame;
+        if (!this._mats) return;
+        this._groundNode = this.buildGroundLayer(this._groundNode, 'Ground', this._mats.ground, 0, this.groundTiles());
+        if (this._streetMat && this.streetOverlays) {
+            this._streetNode = this.buildGroundLayer(this._streetNode, 'StreetOverlays', this._streetMat, 0.012, this.streetOverlays());
+        }
+    }
+
+    private *groundTiles(): Iterable<GroundQuad> {
+        const frameOf = this.groundFrame;
         if (!frameOf) return;
-        const pos: number[] = [], uvs: number[] = [], idx: number[] = [];
-        let tex: Texture2D | null = null;
-        for (let r = 0; r < iso.rows; r++) {
-            for (let c = 0; c < iso.cols; c++) {
-                const f = frameOf(c, r);
-                if (!f) continue;
-                tex = tex ?? (f.texture as Texture2D);
-                const tw = tex.width, th = tex.height, R = f.rect;
-                // 菱形四个顶点往中心收 1 像素，免得线性采样采到隔壁帧
-                const cx = R.x + R.width / 2, cy = R.y + R.height / 2, k = 1;
-                const uv = (x: number, y: number) => {
-                    const dx = Math.sign(cx - x) * k, dy = Math.sign(cy - y) * k / 2;
-                    uvs.push((x + dx) / tw, (y + dy) / th);
-                };
-                const i0 = pos.length / 3;
-                // 方块四角 → 菱形的上、右、下、左顶点
-                pos.push(c, 0, r); uv(cx, R.y);
-                pos.push(c + 1, 0, r); uv(R.x + R.width, cy);
-                pos.push(c + 1, 0, r + 1); uv(cx, R.y + R.height);
-                pos.push(c, 0, r + 1); uv(R.x, cy);
-                idx.push(i0, i0 + 2, i0 + 1, i0, i0 + 3, i0 + 2);
+        for (let r = 0; r < this._iso.rows; r++) {
+            for (let c = 0; c < this._iso.cols; c++) {
+                const frame = frameOf(c, r);
+                if (frame) yield { frame, c: c + 0.5, r: r + 0.5, width: 1, length: 1, turn: 0 };
             }
         }
-        if (!tex || !this._mats) return;
-        const mesh: Mesh = utils.MeshUtils.createMesh({ positions: pos, uvs, indices: idx });
-        if (!this._groundNode) {
-            this._groundNode = this.child(this.node, 'Ground');
-            const mr = this._groundNode.addComponent(MeshRenderer);
-            mr.setMaterial(this._mats.ground, 0);
-            mr.shadowCastingMode = 0;
+    }
+
+    private buildGroundLayer(node: Node | null, name: string, mat: Material, y: number, tiles: Iterable<GroundQuad>): Node | null {
+        const positions: number[] = [], uvs: number[] = [], indices: number[] = [];
+        let texture: Texture2D | null = null;
+        const minPos = new Vec3(Infinity, y, Infinity);
+        const maxPos = new Vec3(-Infinity, y, -Infinity);
+        const corners = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+        for (const { frame, c, r, width, length, turn } of tiles) {
+            texture ??= frame.texture as Texture2D;
+            const rect = frame.rect;
+            const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+            const hw = (turn % 2 ? length : width) / 2, hl = (turn % 2 ? width : length) / 2;
+            const first = positions.length / 3;
+            positions.push(c - hw, y, r - hl, c + hw, y, r - hl, c + hw, y, r + hl, c - hw, y, r + hl);
+            minPos.x = Math.min(minPos.x, c - hw); minPos.z = Math.min(minPos.z, r - hl);
+            maxPos.x = Math.max(maxPos.x, c + hw); maxPos.z = Math.max(maxPos.z, r + hl);
+            // 每个方块对应图集里的菱形，UV 往中心收一点避开隔壁帧。
+            for (let i = 0; i < 4; i++) {
+                const [dx, dy] = corners[(i + turn) % 4];
+                uvs.push((cx + dx * (rect.width / 2 - 1)) / texture.width,
+                    (cy + dy * (rect.height / 2 - 0.5)) / texture.height);
+            }
+            indices.push(first, first + 2, first + 1, first, first + 3, first + 2);
         }
-        const mr = this._groundNode.getComponent(MeshRenderer)!;
-        mr.mesh = mesh;
-        mr.getMaterialInstance(0)!.setProperty('mainTexture', tex);
+        if (!texture) {
+            if (node) node.active = false;
+            return node;
+        }
+        const quads = indices.length / 6;
+        const capacity = node ? this._groundCapacity.get(node)! : 0;
+        const nextCapacity = Math.max(capacity, 2 ** Math.ceil(Math.log2(quads)));
+        const geometry = {
+            positions: new Float32Array(positions),
+            uvs: new Float32Array(uvs),
+            ...(nextCapacity * 4 <= 0x10000 ? { indices16: new Uint16Array(indices) } : { indices32: new Uint32Array(indices) }),
+            minPos, maxPos,
+        };
+        let mr: MeshRenderer;
+        if (!node || quads > capacity) {
+            if (node) this.retireGroundMesh(node);
+            node = this.child(this.node, name);
+            mr = node.addComponent(MeshRenderer);
+            mr.shadowCastingMode = 0;
+            mr.setSharedMaterial(mat, 0);
+            mr.mesh = utils.MeshUtils.createDynamicMesh(0, geometry, undefined,
+                { maxSubMeshes: 1, maxSubMeshVertices: nextCapacity * 4, maxSubMeshIndices: nextCapacity * 6 });
+            mr.getMaterialInstance(0)!.setProperty('mainTexture', texture);
+            this._groundCapacity.set(node, nextCapacity);
+        } else {
+            mr = node.getComponent(MeshRenderer)!;
+            mr.mesh!.updateSubMesh(0, geometry);
+        }
+        node.active = true;
+        mr.onGeometryChanged();
+        return node;
     }
 
     private child(parent: Node, name: string): Node {

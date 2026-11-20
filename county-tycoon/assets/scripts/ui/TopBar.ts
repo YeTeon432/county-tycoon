@@ -1,7 +1,7 @@
 import { _decorator, Component, Graphics, Label, Layers, Node, Sprite, tween, Tween, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
-import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
+import { getPlatform } from '../platform/Platform';
 import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
@@ -20,16 +20,13 @@ export class TopBar extends Component {
         return TopBar.topInset() + TopBar.BODY_HEIGHT;
     }
 
-    private static _inset: number | null = null;
 
     /** 微信、抖音宿主胶囊或设备顶部安全区。 */
     static topInset(): number {
-        if (TopBar._inset !== null) return TopBar._inset;
         const info = getPlatform().systemInfo();
         const visible = view.getVisibleSize();
         const logical = info.menuButton ? info.menuButton.bottom : info.safeArea.top;
-        TopBar._inset = info.screenWidth > 0 ? Math.max(0, Math.round(logical * visible.width / info.screenWidth)) : 0;
-        return TopBar._inset;
+        return info.screenWidth > 0 ? Math.max(0, Math.round(logical * visible.width / info.screenWidth)) : 0;
     }
 
     onSpeedChange: ((speed: Speed) => void) | null = null;
@@ -57,13 +54,17 @@ export class TopBar extends Component {
 
     build(sim: SimApi): void {
         this._sim = sim;
-        const visible = view.getVisibleSize();
-        const w = (usesLandscapeWebLayout() ? Math.min(visible.width, 720) : visible.width) - 28;
+        const w = 720 - 28;
         const h = TopBar.BODY_HEIGHT - 16;
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
         trans.setContentSize(w, h);
-        this.node.setPosition(0, visible.height / 2 - TopBar.topInset() - 10 - h / 2, 0);
+        const align = () => {
+            const visible = view.getVisibleSize();
+            this.node.setPosition(0, visible.height / 2 - TopBar.topInset() - 10 - h / 2, 0);
+        };
+        align();
+        view.on('canvas-resize', align, this);
         const g = this.node.addComponent(Graphics);
         drawShadow(g, -w / 2, -h / 2, w, h, 18, 2);
         drawHudTile(g, -w / 2, -h / 2, w, h, 18, UI_HUD.base, UI_HUD.rim);
@@ -296,6 +297,7 @@ export class TopBar extends Component {
     }
 
     protected onDestroy(): void {
+        view.targetOff(this);
         InputGuard.remove(this.node);
         if (this._funds) Tween.stopAllByTarget(this._funds.node);
     }

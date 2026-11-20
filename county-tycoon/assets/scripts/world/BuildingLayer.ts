@@ -9,6 +9,7 @@ const { ccclass } = _decorator;
 
 /** 覆盖范围要画的东西：道路格 + 住宅占地 */
 export interface ReachDraw {
+    circle?: { col: number; row: number; radius: number };
     roads: [number, number][];
     homes: { col: number; row: number; width: number; height: number }[];
 }
@@ -395,6 +396,22 @@ export class BuildingLayer extends Component {
         const list: Decal[] = [];
         if (reach) {
             const road = new Color(70, 150, 240, 110), fill = new Color(255, 205, 60, 120), edge = new Color(240, 160, 20, 230);
+            if (reach.circle && this._model) {
+                const { col, row, radius } = reach.circle;
+                const map = this._model;
+                const color = new Color(42, 144, 225, 96);
+                const edges = (z: number): [number, number] => {
+                    const half = Math.sqrt(Math.max(0, radius * radius - (z - row) ** 2));
+                    return [Math.max(0, col - half), Math.min(map.width, col + half)];
+                };
+                // 用相邻的圆弦拼成贴地网格，圆落到地图外的部分裁在边界上。
+                const end = Math.min(map.height, row + radius);
+                for (let z = Math.max(0, row - radius); z < end; z += 0.25) {
+                    const next = Math.min(end, z + 0.25);
+                    const [left, right] = edges(z);
+                    list.push({ c: left, r: z, w: right - left, h: next - z, fill: color, farEdge: edges(next) });
+                }
+            }
             for (const [c, r] of reach.roads) list.push({ c, r, w: 1, h: 1, fill: road });
             for (const h of reach.homes) list.push({ c: h.col, r: h.row, w: h.width, h: h.height, fill, stroke: edge });
         }

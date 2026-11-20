@@ -9,6 +9,7 @@ import { BuildingEcon, Demand, Education, JobSlot, TownLevel, Vehicle } from './
 export interface SimConfig {
     economy: EconomyConfig;
     names: NameConfig;
+    catalog: readonly BuildingEcon[];
     /** defId → 经营数据 */
     building: (defId: string) => BuildingEcon | null;
     /** 研究 / 目标 / 心愿（progress.json，D026）。没配 = 一切都解锁、没有目标（老测试、MockSim） */
@@ -36,6 +37,7 @@ export interface GoalDef {
 }
 
 export interface WishTuning {
+    shopRadius: number;
     chance: number;
     minActive: number;
     perPeople: number;
@@ -138,6 +140,7 @@ export function parseProgress(json: any): ProgressConfig | null {
         goals,
         levelReward: reward,
         wishes: {
+            shopRadius: Math.max(1, num(w.shopRadius, 8)),
             chance: clamp01(w.chance, 0.25),
             minActive: Math.max(0, num(w.minActive, 3)),
             perPeople: Math.max(1, num(w.perPeople, 5)),
@@ -193,8 +196,7 @@ export interface EconomyConfig {
     outsideShare: Record<TownLevel, number>;
     /** 连续亏损几个月就裁一个人（至少留 1 人） */
     layoffMonths: number;
-    /** 住户自家翻盖（DESIGN 23）：每月概率、存款要够翻盖费 × 几倍、平均幸福度门槛 */
-    renovateChance: number;
+    /** 住户自家翻盖（DESIGN 23）：存款要够翻盖费 × 几倍、平均幸福度门槛 */
     renovateSavingsRatio: number;
     renovateMood: number;
     /** 搬去更好的房子：每月概率、存款要够几个月房租 */
@@ -413,7 +415,6 @@ const DEFAULT_ECONOMY: EconomyConfig = {
     unemployedLeaveMonths: 6,
     outsideShare: { village: 0.3, town: 0.2, county: 0.15, city: 0.1, top100: 0.1 },
     layoffMonths: 3,
-    renovateChance: 0.12,
     renovateSavingsRatio: 1.5,
     renovateMood: 50,
     moveChance: 0.1,
@@ -607,7 +608,6 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
             return out;
         })(),
         layoffMonths: Math.max(1, Math.floor(num(t.layoffMonths, d.layoffMonths))),
-        renovateChance: clamp01(t.renovateChance, d.renovateChance),
         renovateSavingsRatio: Math.max(0, num(t.renovateSavingsRatio, d.renovateSavingsRatio)),
         renovateMood: num(t.renovateMood, d.renovateMood),
         moveChance: clamp01(t.moveChance, d.moveChance),
@@ -668,6 +668,7 @@ export function makeSimConfig(economyJson: EconomyJson | null | undefined, names
     return {
         economy,
         names,
+        catalog: Array.from(table.values()),
         building: (defId: string) => table.get(defId) ?? null,
         progress: parseProgress(progressJson),
     };

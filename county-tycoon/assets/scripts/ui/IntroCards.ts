@@ -80,6 +80,12 @@ export class IntroCards extends Component {
             this.finish();
         }, this);
 
+        view.on('canvas-resize', () => {
+            const { width, height } = view.getVisibleSize();
+            this.node.getComponent(UITransform)!.setContentSize(width, height);
+            shade.setScale(width / W, height / H, 1);
+            skip.setPosition(width / 2 - 24 - sw / 2, height / 2 - TopBar.HEIGHT - 18 - sh / 2, 0);
+        }, this);
         InputGuard.add(this.node);
         this.next();
     }
@@ -169,6 +175,7 @@ export class IntroCards extends Component {
     }
 
     protected onDestroy(): void {
+        view.targetOff(this);
         InputGuard.remove(this.node);
         if (this._card) Tween.stopAllByTarget(this._card);
     }

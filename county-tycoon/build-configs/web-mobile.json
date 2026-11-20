@@ -1,1 +1,1 @@
-{ "platform": "web-mobile", "debug": true, "packages": { "web-mobile": { "orientation": "portrait" } } }
+{ "platform": "web-mobile", "debug": true, "packages": { "web-mobile": { "orientation": "auto" } } }

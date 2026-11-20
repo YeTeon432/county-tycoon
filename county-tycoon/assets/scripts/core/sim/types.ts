@@ -58,13 +58,15 @@ export interface Wish {
     kind: WishKind;
     /** shop 心愿：缺哪类店 */
     demand?: Demand;
+    /** 指定就业意向；没有意向时接受学历相符的任意岗位。 */
+    jobTarget?: { defId: string; title: string };
     /** 原话：「家附近没地方吃早饭」 */
     text: string;
     /** 建议：「在他家 8 格内盖一家早餐铺」 */
     hint: string;
     /** 建议盖的建筑（已解锁的）；没解锁时为 '' ，hint 里会写「先研究 X」 */
     suggest: string;
-    /** 范围（格，沿路），地图高亮用；0 = 不限 */
+    /** 范围（格），购物按住宅中心画圆，学校和卫生院沿路；0 = 不限 */
     radius: number;
     since: number;
     /** 到哪个月过期 */

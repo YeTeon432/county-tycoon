@@ -29,7 +29,6 @@ const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'co
  */
 @ccclass('CenterPanel')
 export class CenterPanel extends Panel {
-    protected cardH = 1100;
 
     private _sim: SimApi | null = null;
     private _tab: Tab = 'goals';
@@ -47,15 +46,23 @@ export class CenterPanel extends Panel {
     nameOf: (id: string) => string = (id) => id;
     private _taxBreak = false;
     /** 招商确认 / 结果卡片（盖在面板上） */
+    private _restoreModal: (() => void) | null = null;
     private _modal: Node | null = null;
 
     static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null): CenterPanel {
-        const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level]);
+        const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level], 'center');
         p._sim = sim;
         p._tab = tab;
-        p.buildTabs();
-        p.fill();
-        if (toggleFacing) p.buildFacingButton(toggleFacing);
+        p.renderPage = () => {
+            p._tabNodes = [];
+            p._body = null;
+            p._modal = null;
+            p.buildTabs();
+            p.fill();
+            if (toggleFacing) p.buildFacingButton(toggleFacing);
+            p._restoreModal?.();
+        };
+        p.renderPage();
         return p;
     }
 
@@ -67,7 +74,7 @@ export class CenterPanel extends Panel {
         const btn = makeButton(head, 'FacingBtn', '换朝向', W, H, 'secondary', () => {
             if (!toggle() && this.onHint) this.onHint('这栋楼只有一个朝向');
         }, 'rotate');
-        btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
+        btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, 0, 0);
     }
 
     private get W(): number {
@@ -127,7 +134,8 @@ export class CenterPanel extends Panel {
         const goals: GoalStatus[] = sim.goals ? sim.goals() : [];
         const next = NEXT[sim.state.level];
         let y = H / 2;
-        const head = makeLabelLeft(body, 'Head', next ? `升级到「${LEVEL_NAME[next]}」需要：` : '已经是最高等级', UI_FONT.body, UI_COLOR.text, W);
+        const done = goals.filter((g) => g.done).length;
+        const head = makeLabelLeft(body, 'Head', next ? `晋升${LEVEL_NAME[next]}　·　已达成 ${done} / ${goals.length} 项` : '已经是最高等级', UI_FONT.body, UI_COLOR.text, W);
         head.isBold = true;
         head.node.setPosition(-W / 2, y - 18, 0);
         y -= 56;
@@ -150,7 +158,17 @@ export class CenterPanel extends Panel {
                 bg.stroke();
             }
             const t = makeLabelLeft(n, 'Text', g.text, UI_FONT.body, g.done ? UI_COLOR.up : UI_COLOR.text, W - 260);
-            t.node.setPosition(-W / 2 + 64, 0, 0);
+            t.node.setPosition(-W / 2 + 64, 8, 0);
+            const track = W - 288;
+            const progress = g.target > 0 ? Math.min(1, Math.max(0, g.value / g.target)) : 0;
+            bg.fillColor = UI_COLOR.border;
+            bg.roundRect(-W / 2 + 64, -23, track, 6, 3);
+            bg.fill();
+            if (progress > 0) {
+                bg.fillColor = g.done ? UI_PALETTE.green : UI_PALETTE.blue;
+                bg.roundRect(-W / 2 + 64, -23, Math.max(6, track * progress), 6, 3);
+                bg.fill();
+            }
             const v = makeLabelRight(n, 'Val', this.goalValue(g), UI_FONT.body, g.done ? UI_COLOR.up : UI_COLOR.textDim, 180);
             v.node.setPosition(W / 2 - 20, 0, 0);
             y -= rowH;
@@ -190,7 +208,7 @@ export class CenterPanel extends Panel {
         const items = all.slice().sort((a, b) => order[a.state] - order[b.state]);
         const slots = sim.researchSlots ? sim.researchSlots() : { used: 0, total: 1, nextCost: null };
         const intro = makeLabelLeft(body, 'Intro',
-            `研究位 ${slots.used}/${slots.total}：同时可以研究 ${slots.total} 项，研究期间照常经营。加速 = 花钱立刻做完。`,
+            `研究位 ${slots.used}/${slots.total}　·　空闲 ${Math.max(0, slots.total - slots.used)} 个`,
             UI_FONT.small, UI_COLOR.textDim, W - 230);
         intro.overflow = Label.Overflow.SHRINK;
         intro.node.setPosition(-W / 2, H / 2 - 16, 0);
@@ -212,15 +230,17 @@ export class CenterPanel extends Panel {
         g.fillColor = r.state === 'active' ? new Color(232, 241, 252, 255) : r.state === 'done' ? new Color(246, 247, 249, 255) : UI_COLOR.block;
         g.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
         g.fill();
-        const name = makeLabelLeft(row, 'Name', r.name, UI_FONT.body, r.state === 'done' ? UI_COLOR.textDim : UI_COLOR.text, W - 240);
+        const imageW = this.wide && r.unlocks.length ? 108 : 0;
+        if (imageW) this.buildingImage(row, r.unlocks[0], -W / 2 + 62, 0, 94, 90);
+        const name = makeLabelLeft(row, 'Name', r.name, UI_FONT.body, r.state === 'done' ? UI_COLOR.textDim : UI_COLOR.text, W - 240 - imageW);
         name.isBold = true;
-        name.node.setPosition(-W / 2 + 20, 22, 0);
+        name.node.setPosition(-W / 2 + 20 + imageW, 22, 0);
         const sub = r.state === 'done' ? '已研究，可以盖了'
             : r.state === 'active' ? `${r.reason}（也可花钱加速）`
                 : r.state === 'locked' ? r.reason
                     : `${formatMoney(r.cost)} · ${r.days} 天`;
-        const subL = makeLabelLeft(row, 'Sub', sub, UI_FONT.small, r.state === 'locked' ? UI_COLOR.down : UI_COLOR.textDim, W - 240);
-        subL.node.setPosition(-W / 2 + 20, -20, 0);
+        const subL = makeLabelLeft(row, 'Sub', sub, UI_FONT.small, r.state === 'locked' ? UI_COLOR.down : UI_COLOR.textDim, W - 240 - imageW);
+        subL.node.setPosition(-W / 2 + 20 + imageW, -20, 0);
         if (r.state === 'active') {
             const bw = W - 420;
             g.fillColor = UI_COLOR.border;
@@ -485,6 +505,7 @@ export class CenterPanel extends Panel {
     private closeModal(): void {
         if (this._modal && this._modal.isValid) this._modal.destroy();
         this._modal = null;
+        this._restoreModal = null;
     }
 
     /** 盖在面板上的一张小卡片：遮罩吃掉点击，返回卡片节点和宽 */
@@ -535,6 +556,7 @@ export class CenterPanel extends Panel {
         const lineH = 40;
         const h = 150 + lines.length * lineH + 84 + 56 + 110;
         const { card, w } = this.makeModal(h);
+        this._restoreModal = () => this.openConfirm(o, mode);
         let y = h / 2 - 50;
         const title = makeLabelLeft(card, 'Title', `和${o.company}签约 · ${mode === 'land' ? '供地' : '补贴'}`, UI_FONT.body + 4, UI_COLOR.text, w - 64);
         title.isBold = true;
@@ -592,6 +614,7 @@ export class CenterPanel extends Panel {
     private openResult(title: string, text: string): void {
         const h = 330;
         const { card, w } = this.makeModal(h);
+        this._restoreModal = () => this.openResult(title, text);
         const t = makeLabel(card, 'Title', title, UI_FONT.body + 4, UI_COLOR.text, w - 64);
         t.isBold = true;
         t.node.setPosition(0, h / 2 - 54, 0);

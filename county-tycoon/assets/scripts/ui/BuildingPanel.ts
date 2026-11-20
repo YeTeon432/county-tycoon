@@ -16,7 +16,7 @@ const { ccclass } = _decorator;
 export type ResidentTapHandler = (residentId: number) => void;
 
 /**
- * 建筑详情（T308，T406 改成白色抽屉）。
+ * 建筑详情（T308）。
  *
  * 顶部一排数值格：
  *   住宅：住户人数 / 平均心情 / 有工作的人数
@@ -28,7 +28,6 @@ export type ResidentTapHandler = (residentId: number) => void;
  */
 @ccclass('BuildingPanel')
 export class BuildingPanel extends Panel {
-    protected cardH = 760;
 
     private _sim: SimApi | null = null;
     private _placed: PlacedBuilding | null = null;
@@ -59,8 +58,11 @@ export class BuildingPanel extends Panel {
         panel._onResidentTap = onResidentTap;
         panel._toggleFacing = toggleFacing;
         panel._onHint = onHint;
-        panel.fill();
-        panel.buildFacingButton();
+        panel.renderPage = () => {
+            panel.fill();
+            panel.buildFacingButton();
+        };
+        panel.renderPage();
         return panel;
     }
 
@@ -184,7 +186,7 @@ export class BuildingPanel extends Panel {
         const W = 148, H = 52;
         const btn = makeButton(head, 'FacingBtn', '换朝向', W, H, 'secondary', () => this.toggleFacing(), 'rotate');
         // 关闭按钮中心在 cw/2 - PAD_X - 28 + 8，半径 28
-        btn.node.setPosition(cw / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
+        btn.node.setPosition(cw / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, 0, 0);
         this._facingBtn = btn;
     }
 

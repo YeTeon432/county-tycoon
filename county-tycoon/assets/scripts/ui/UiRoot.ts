@@ -3,7 +3,10 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport, TownLevel } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
+import { ManagementPage, Panel } from './Panel';
+import { NoticeHistoryPanel } from './NoticeHistoryPanel';
 import { Portrait } from './Portrait';
+import { BuildCatalogPanel } from './BuildCatalogPanel';
 import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
 import { IntroCards } from './IntroCards';
@@ -87,6 +90,8 @@ export class UiRoot extends Component {
     private _listPanel: ResidentListPanel | null = null;
     /** 月度账单 */
     private _reportPanel: MonthReportPanel | null = null;
+    private _catalogPanel: BuildCatalogPanel | null = null;
+    private _historyPanel: NoticeHistoryPanel | null = null;
     private _settingsPanel: SettingsPanel | null = null;
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
@@ -124,9 +129,15 @@ export class UiRoot extends Component {
         this.buildTopBar();
         this.buildClock();
         this.buildTrackChip();
-        this.buildPanelLayer();
-        // 公告栏 + 大公示（D026）：压在面板上面、开场卡片下面
         this._notices = NoticeLayer.create(this.node, this.sim);
+        this._notices.onOpenHistory = () => this.openHistory();
+        this._notices.onHistoryChanged = () => {
+            if (this._historyPanel?.node.activeInHierarchy) {
+                this._historyPanel.refresh();
+                this._notices?.markRead();
+            }
+        };
+        this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
 
@@ -149,6 +160,7 @@ export class UiRoot extends Component {
     attachBuildingBar(bar: BuildingBar): void {
         this._bar = bar;
         if (this.sim) bar.bindSim(this.sim);
+        bar.onOpenCatalog = () => this.openCatalog();
         bar.onNotice = (text) => this.setPlacementHint(text);
         bar.setHint(this._hint);
     }
@@ -157,6 +169,7 @@ export class UiRoot extends Component {
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
         Portrait.setArt(art);
+        Panel.setArt(art);
     }
 
     /**
@@ -175,7 +188,7 @@ export class UiRoot extends Component {
             const view = parent.getChildByName('WorldRoot')?.getComponent('WorldView') as unknown as
                 { art?: ArtLibrary; _art?: ArtLibrary } | null;
             const art = view ? (view.art ?? view._art) : null;
-            if (art instanceof ArtLibrary) { this._bar.setArt(art); Portrait.setArt(art); }
+            if (art instanceof ArtLibrary) this.setArt(art);
         }
     }
 
@@ -297,7 +310,38 @@ export class UiRoot extends Component {
         layer.layer = Layers.Enum.UI_2D;
         layer.addComponent(UITransform);
         this.node.addChild(layer);
+        layer.on('open-management-page', (page: ManagementPage) => {
+            switch (page) {
+                case 'build': this.openCatalog(); break;
+                case 'center': this.openCenter(); break;
+                case 'residents': this.openResidentList(); break;
+                case 'report': this.openReport(); break;
+                case 'notices': this.openHistory(); break;
+                case 'settings': this.openSettings(); break;
+            }
+        });
         this._panelLayer = layer;
+    }
+
+    private openCatalog(): void {
+        const bar = this._bar;
+        if (!bar || !this._panelLayer) return;
+        this.closeTopPanel();
+        const page = BuildCatalogPanel.show(this._panelLayer, bar, (id) => {
+            this.closeTopPanel();
+            bar.selectById(id);
+        });
+        page.onClosed = () => { this._catalogPanel = null; };
+        this._catalogPanel = page;
+    }
+
+    private openHistory(): void {
+        if (!this._panelLayer || !this._notices) return;
+        this.closeTopPanel();
+        this._notices.markRead();
+        const page = NoticeHistoryPanel.show(this._panelLayer, this._notices.history);
+        page.onClosed = () => { this._historyPanel = null; };
+        this._historyPanel = page;
     }
 
     openSettings(): void {
@@ -320,15 +364,17 @@ export class UiRoot extends Component {
      */
     private onMonthStepped(report: MonthlyReport): void {
         this._lastReport = report;
+        if (this._reportPanel) this.openReport();
         if (this._notices && report.notices) this._notices.push(report.notices);
         // 研究完成：底栏多出新卡片；开着的县发展中心面板也刷新
         if (report.notices && report.notices.some((n) => n.kind === 'research')) {
             if (this._bar) this._bar.refreshUnlocks();
         }
+        this._catalogPanel?.refresh();
         this.refreshOpenPanels();
         if (this._topBar) {
             this._topBar.refresh();
-            this._topBar.setReportFresh(true);
+            this._topBar.setReportFresh(!this._reportPanel);
         }
     }
 
@@ -337,12 +383,13 @@ export class UiRoot extends Component {
         if (this._centerPanel?.node?.isValid) this._centerPanel.fill();
     }
 
-    /** 打开上月账单；还没有结算过就什么都不做 */
+    /** 打开最近一次结算，首月展示当前县库 */
     private openReport(): void {
         const layer = this._panelLayer;
-        if (!this.sim || !layer || !this._lastReport) return;
+        if (!this.sim || !layer) return;
         this.closeTopPanel();
-        const panel = MonthReportPanel.show(layer, this.sim, this._lastReport);
+        const panel = MonthReportPanel.show(layer, this.sim, this._lastReport ?? this.sim.state.finance.lastMonth);
+        this._topBar?.setReportFresh(false);
         panel.onClosed = () => {
             if (this._reportPanel === panel) this._reportPanel = null;
         };
@@ -382,9 +429,12 @@ export class UiRoot extends Component {
             layer, this.sim, this.model, uid,
             (residentId) => this.openResident(residentId),
             this.requestToggleFacing,
-            (text) => this.setPlacementHint(text),
+            (text) => this._topPanel?.showFeedback(text),
         );
-        if (panel) this._topPanel = panel;
+        if (panel) {
+            panel.onClosed = () => { this._topPanel = null; };
+            this._topPanel = panel;
+        }
     }
 
     /**
@@ -411,6 +461,7 @@ export class UiRoot extends Component {
         if (!this.sim || !this.model || !layer) return;
         this.closeTopPanel();
         const panel = ResidentListPanel.show(layer, this.sim, this.model, (id) => this.openResident(id));
+        panel.onClosed = () => { this._listPanel = null; };
         this._listPanel = panel;
     }
 
@@ -431,13 +482,17 @@ export class UiRoot extends Component {
         const onTrack = this.requestTrack ? (id: number, focusHome?: boolean) => this.startTrack(id, focusHome) : undefined;
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
+            const previous = this._listPanel ?? this._topPanel;
+            if (previous) previous.node.active = false;
             panel.onJobChanged = (message) => {
+                panel.showFeedback(message);
                 this._notices?.say('info', message);
                 this._topBar?.refresh();
                 this._centerPanel?.fill();
                 this.onResidentChanged?.();
             };
             panel.onClosed = () => {
+                if (previous?.node.isValid) previous.node.active = true;
                 if (this._residentPanel === panel) this._residentPanel = null;
             };
             this._residentPanel = panel;
@@ -531,7 +586,10 @@ export class UiRoot extends Component {
         const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
-        p.onHint = (t) => { if (this._notices) this._notices.say('info', t); };
+        p.onHint = (text) => {
+            p.showFeedback(text);
+            this._notices?.say('info', text);
+        };
         p.onChanged = () => { if (this._topBar) this._topBar.refresh(); this.refreshCenterStatus(); };
         p.onUpgraded = (lv) => this.onLevelUp(lv);
         if (this._bar) { const defs = this._bar.defs; p.nameOf = (id) => defs.find((d) => d.id === id)?.name ?? id; p.fill(); }
@@ -554,25 +612,17 @@ export class UiRoot extends Component {
     }
 
     private closeTopPanel(): void {
-        if (this._settingsPanel?.node.isValid) this._settingsPanel.node.destroy();
+        for (const node of this._panelLayer?.children.slice() ?? []) {
+            node.active = false;
+            node.destroy();
+        }
+        this._catalogPanel = null;
+        this._historyPanel = null;
         this._settingsPanel = null;
-        if (this._centerPanel && this._centerPanel.node?.isValid) this._centerPanel.node.destroy();
         this._centerPanel = null;
-        if (this._reportPanel && this._reportPanel.node?.isValid) {
-            this._reportPanel.node.destroy();
-        }
         this._reportPanel = null;
-        if (this._listPanel && this._listPanel.node?.isValid) {
-            this._listPanel.node.destroy();
-        }
         this._listPanel = null;
-        if (this._residentPanel && this._residentPanel.node?.isValid) {
-            this._residentPanel.node.destroy();
-        }
         this._residentPanel = null;
-        if (this._topPanel && this._topPanel.node?.isValid) {
-            this._topPanel.node.destroy();
-        }
         this._topPanel = null;
     }
 

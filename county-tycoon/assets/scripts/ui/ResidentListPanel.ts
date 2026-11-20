@@ -46,7 +46,6 @@ export class ResidentListPanel extends Panel {
     private _onResidentTap: ((id: number) => void) | null = null;
 
     /** 总览比建筑详情高一些：名单长，要一屏看到更多人 */
-    protected cardH = 1140;
 
     private _sortPills: { key: SortKey; setActive: (on: boolean) => void }[] = [];
     private _filterPills: { key: FilterKey; setActive: (on: boolean) => void }[] = [];
@@ -59,11 +58,16 @@ export class ResidentListPanel extends Panel {
         model: TownModel,
         onResidentTap: (id: number) => void,
     ): ResidentListPanel {
-        const panel = Panel.open(ResidentListPanel, parent, '居民总览', '');
+        const panel = Panel.open(ResidentListPanel, parent, '居民总览', '', 'residents');
         panel._sim = sim;
         panel._model = model;
         panel._onResidentTap = onResidentTap;
-        panel.fill();
+        panel.renderPage = () => {
+            panel._sortPills = [];
+            panel._filterPills = [];
+            panel.fill();
+        };
+        panel.renderPage();
         return panel;
     }
 

@@ -1,5 +1,5 @@
 import { DayClock } from './DayClock';
-import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx } from 'cc';
+import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx, screen, view as gameView, ResolutionPolicy } from 'cc';
 import { Spike3D } from '../spike/Spike3D';
 import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
@@ -63,11 +63,28 @@ export class GameRoot extends Component {
         return this._newGame;
     }
 
+    private landscape: boolean | null = null;
+
+    private fitViewport(): void {
+        const size = screen.windowSize;
+        const wide = size.width > size.height;
+        if (wide === this.landscape) return;
+        this.landscape = wide;
+        if (wide) gameView.setDesignResolutionSize(1600, 960, ResolutionPolicy.FIXED_HEIGHT);
+        else gameView.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
+    }
+
     protected onDestroy(): void {
+        gameView.off('canvas-resize', this.fitViewport, this);
         if (this._saver) this._saver.stopAutoSave();
     }
 
     protected start(): void {
+        const platform = getPlatform().name;
+        if (platform === 'web' || platform === 'native') {
+            this.fitViewport();
+            gameView.on('canvas-resize', this.fitViewport, this);
+        }
         // 微信小游戏的 location 没有 search。浏览器带 ?spike3d 时进入 3D 技术验证场景。
         if (typeof location !== 'undefined' && typeof location.search === 'string' && location.search.includes('spike3d')) {
             for (const c of director.getScene()!.getComponentsInChildren(Camera)) c.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;

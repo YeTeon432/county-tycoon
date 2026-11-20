@@ -1,5 +1,5 @@
 import {
-    _decorator, Color, Component, Graphics, ImageAsset, Label, Layers, Node, resources, Sprite, SpriteFrame, UITransform,
+    _decorator, Color, Component, EventTouch, Graphics, ImageAsset, Label, Layers, Node, resources, Sprite, SpriteFrame, UITransform,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 
@@ -429,9 +429,11 @@ export function makeButton(
 
     node.on(Node.EventType.TOUCH_START, () => node.setScale(0.95, 0.95, 1));
     node.on(Node.EventType.TOUCH_CANCEL, () => node.setScale(1, 1, 1));
-    node.on(Node.EventType.TOUCH_END, () => {
+    node.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
         node.setScale(1, 1, 1);
-        if (enabled) onTap();
+        const start = event.getUIStartLocation();
+        const end = event.getUILocation();
+        if (enabled && Math.hypot(end.x - start.x, end.y - start.y) <= 12) onTap();
     });
     return {
         node, label, icon: sprite,

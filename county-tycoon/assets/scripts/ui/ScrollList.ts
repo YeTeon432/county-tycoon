@@ -67,7 +67,7 @@ export class ScrollList extends Component {
             const dy = y - this._lastY;
             this._lastY = y;
             this._dragDist += Math.abs(dy);
-            this.scrollTo(this._scrollY + dy);
+            this.scrollTo(this._scrollY + dy / this.node.worldScale.y);
         }, this);
 
         this.node.on(Node.EventType.MOUSE_WHEEL, (e: EventMouse) => {

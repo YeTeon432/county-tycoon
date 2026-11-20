@@ -62,11 +62,15 @@ export class TrackChip extends Component {
             else chip.onFocusPerson?.();
         });
         chip.layout();
+        view.on('canvas-resize', () => chip.layout(chip.showToolHint), chip);
         return chip;
     }
 
     /** 底栏上面、居中 */
+    private showToolHint = false;
+
     layout(showToolHint = false): void {
+        this.showToolHint = showToolHint;
         const vis = view.getVisibleSize();
         const toolReserve = showToolHint ? BuildingBar.HINT_RESERVE : 0;
         this.node.setPosition(0, -vis.height / 2 + BuildingBar.BAR_HEIGHT + toolReserve + 24 + TrackChip.H / 2, 0);
@@ -94,6 +98,7 @@ export class TrackChip extends Component {
     }
 
     protected onDestroy(): void {
+        view.targetOff(this);
         InputGuard.remove(this.node);
     }
 }

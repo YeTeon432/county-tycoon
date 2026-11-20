@@ -16,7 +16,7 @@ const { ccclass } = _decorator;
 const VEHICLE_NAME: Record<string, string> = { walk: '步行', ebike: '电动车', moto: '摩托车', car: '汽车' };
 
 /**
- * 居民档案（T308 下半段，T406 改成白色抽屉）。
+ * 居民档案（T308 下半段）。
  *
  * 顶部三个数值格：月薪 / 储蓄 / 心情；
  * 中间一块浅灰信息卡：年龄学历、住处、工作、家庭、出行、来县时间；
@@ -24,7 +24,6 @@ const VEHICLE_NAME: Record<string, string> = { walk: '步行', ebike: '电动车
  */
 @ccclass('ResidentPanel')
 export class ResidentPanel extends Panel {
-    protected cardH = 980;
 
     private _sim: SimApi | null = null;
     private _residentId = 0;
@@ -40,13 +39,16 @@ export class ResidentPanel extends Panel {
     static show(parent: Node, sim: SimApi, model: TownModel, residentId: number, onTrack?: (id: number, focusHome?: boolean) => void): ResidentPanel | null {
         const r = sim.resident(residentId);
         if (!r) return null;
-        const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`);
+        const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`, 'residents');
         panel._sim = sim;
         panel._model = model;
         panel._onTrack = onTrack ?? null;
         panel._residentId = r.id;
-        panel.refresh();
-        if (onTrack) panel.buildTrackButton(() => onTrack(r.id));
+        panel.renderPage = () => {
+            panel.refresh();
+            if (onTrack) panel.buildTrackButton(() => onTrack(r.id));
+        };
+        panel.renderPage();
         return panel;
     }
 
@@ -56,7 +58,7 @@ export class ResidentPanel extends Panel {
         if (!head) return;
         const W = 148, H = 52;
         const btn = makeButton(head, 'TrackBtn', '追踪', W, H, 'primary', onTap, 'arrow-down');
-        btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
+        btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, 0, 0);
     }
 
     refresh(): void {

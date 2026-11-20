@@ -512,7 +512,7 @@ export class Simulation implements SimApi {
 
     private wishImpact(r: Resident, kind: WishKind): number {
         const penalty = (r.moodParts ?? []).reduce((sum, part) =>
-            sum + (WISH_MOOD_KEYS[kind].includes(part.key) ? Math.max(0, -part.value) : 0), 0);
+            sum + (WISH_MOOD_KEYS[kind].indexOf(part.key) >= 0 ? Math.max(0, -part.value) : 0), 0);
         // 开局还没有第一份月度幸福度明细，按同一失业扣分口径排序。
         return kind === 'job' && !penalty ? Math.min(25, 8 + r.monthsUnemployed * 2) : penalty;
     }

@@ -113,7 +113,7 @@ export class ResidentPanel extends Panel {
             const job = wish?.kind === 'job';
             const target = wish?.jobTarget;
             const referral = job && this._findingJob ? sim.jobReferral?.(r.id) : null;
-            const ranged = wish && ['shop', 'school', 'clinic'].includes(wish.kind) && !!this._onTrack;
+            const ranged = wish && ['shop', 'school', 'clinic'].indexOf(wish.kind) >= 0 && !!this._onTrack;
             const h = 154 + (r.leaving ? 38 : 0);
             const card = makePanelNode(content, 'Guidance', W, h);
             card.setPosition(0, y - h / 2, 0);

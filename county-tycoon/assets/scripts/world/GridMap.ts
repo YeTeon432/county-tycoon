@@ -57,15 +57,24 @@ export class GridMap extends Component {
         return this.frameFor(col, row);
     }
 
-    /** 混铺接头和沿街门前的小径，在实际建好的地块上生成。 */
+    /** 按实际占地铺建筑阴影，再叠混铺接头和沿街小径。 */
     *roadOverlays(): Iterable<GroundQuad> {
         const model = this._model;
         const art = this._art;
         if (!model || !art) return;
+        const buildings = model.allBuildings();
+        const shadow = art.groundByName('lot-shadow');
+        if (shadow) for (const b of buildings) {
+            if (b.def.flat || b.def.terrain || b.def.id === 'farm') continue;
+            const { width, height } = b.def;
+            const tree = b.def.id === 'tree';
+            yield { frame: shadow, c: b.col + width / 2, r: b.row + height / 2,
+                width: tree ? 0.56 : width + 0.34, length: tree ? 0.56 : height + 0.34, turn: 0 };
+        }
         const apron = art.groundByName('asphalt-apron');
         const earth = art.groundByName('entrance-earth');
         const paving = art.groundByName('entrance-paving');
-        for (const b of model.allBuildings()) {
+        for (const b of buildings) {
             if (b.def.road === 'dirt' && apron) {
                 for (const { dc, dr, turn } of ROAD_EDGES) {
                     if (this.roadKind(b.col + dc, b.row + dr) === 'city') {

@@ -50,7 +50,7 @@ const ACTOR_MAX = 600;   // 每批最多几块纸片（人 + 影子；街上最�
  * 投影：俯角 30°（等距 2:1），水平 1 单位 = hw·√2 个 2D 单位（菱形半宽 16 → 22.6）。
  *
  * 地面：一整张网格，每格一个方块，贴图坐标对到地面图集里那一格菱形的四个顶点（等距投影对平地是线性的，
- * 所以 2D 的菱形图贴回方块上正好还原），不受光，颜色和 2D 完全一样。四邻 mask 按模型坐标数（不再按视角换图）。
+ * 所以 2D 的菱形图贴回方块上正好还原）。草色、水面和岸线由 landscape.effect 按地图坐标绘制。
  * 楼 / 山 / 树：Blender 导出的 glb（docs/art/3d/export_glb.py），顶点色 + 实时光照，参数见 D033。
  */
 @ccclass('World3D')
@@ -64,6 +64,7 @@ export class World3D extends Component {
     private _sun!: Node;
     private _root!: Node;
     private _groundNode: Node | null = null;
+    private _edgeMesh: Mesh | null = null;
     private _streetNode: Node | null = null;
     private _streetMat: Material | null = null;
     private readonly _groundCapacity = new WeakMap<Node, number>();
@@ -157,11 +158,11 @@ export class World3D extends Component {
             const by = (n: string) => mats.find((m) => m.name === n)!;
             this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit') };
             const street = new Material();
-            street.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
+            street.initialize({ effectAsset: this._mats.emit.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
             this._streetMat = street;
             // 贴地色块：同一个 unlit 半透明，不要贴图，颜色全在顶点色里
             const dm = new Material();
-            dm.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
+            dm.initialize({ effectAsset: this._mats.emit.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
             this._decalMat = dm;
             this._decalPending.forEach((list, layer) => this.setDecals(layer, list));
             this._decalPending.clear();
@@ -440,6 +441,7 @@ export class World3D extends Component {
         for (const node of this._decals.values()) node.getComponent(MeshRenderer)?.mesh?.destroy();
         for (const mesh of this._retiredGroundMeshes) mesh.destroy();
         this._groundNode?.getComponent(MeshRenderer)?.mesh?.destroy();
+        this._edgeMesh?.destroy();
         this._streetNode?.getComponent(MeshRenderer)?.mesh?.destroy();
         this._streetMat?.destroy();
         for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
@@ -623,7 +625,10 @@ export class World3D extends Component {
                 if (this._model.getAt(c, r)) continue;
                 const kind = t.typeAt(c, r);
                 const hsh = ((c * 73856093) ^ (r * 19349663)) >>> 0;
-                const id = kind === 'mountain' ? `terrain-mountain-${hsh % 3}`
+                // 在池塘朝村子的岸角摆木埠头，木板贴着 +row 岸，仅占用水面。
+                const landing = kind === 'pond' && t.typeAt(c - 1, r) === 'pond'
+                    && t.typeAt(c + 1, r) === 'grass' && t.typeAt(c, r + 1) === 'grass';
+                const id = landing ? 'terrain-pond-landing' : kind === 'mountain' ? `terrain-mountain-${hsh % 3}`
                     : kind === 'forest' ? `terrain-forest-${hsh % 4}`
                         : kind === 'pond' && hsh % 3 === 0 ? 'terrain-pond-lily' : null;
                 if (!id) continue;
@@ -636,10 +641,57 @@ export class World3D extends Component {
     // ---------------------------------------------------------------- 地面
     private buildGround(): void {
         if (!this._mats) return;
+        if (!this._edgeMesh) this.buildMapEdge();
         this._groundNode = this.buildGroundLayer(this._groundNode, 'Ground', this._mats.ground, 0, this.groundTiles());
         if (this._streetMat && this.streetOverlays) {
             this._streetNode = this.buildGroundLayer(this._streetNode, 'StreetOverlays', this._streetMat, 0.012, this.streetOverlays());
         }
+    }
+
+    /** 地图侧面只建一次，草皮下露出夯土和岩层，拖到边界时能直接看见。 */
+    private buildMapEdge(): void {
+        const { cols, rows } = this._iso;
+        const outline = [[0, 0], [cols, 0], [cols, rows], [0, rows]];
+        const strata = [
+            { y: -0.07, color: [0.48, 0.57, 0.33] },
+            { y: -0.37, color: [0.73, 0.59, 0.43] },
+            { y: -0.52, color: [0.62, 0.51, 0.40] },
+        ];
+        const positions: number[] = [], colors: number[] = [], indices: number[] = [];
+        for (let side = 0; side < outline.length; side++) {
+            const [x, z] = outline[side], [nx, nz] = outline[(side + 1) % outline.length];
+            const shade = x === nx ? 0.90 : 1;
+            let top = 0;
+            for (const { y, color } of strata) {
+                const i = positions.length / 3;
+                positions.push(x, top, z, nx, top, nz, nx, y, nz, x, y, z);
+                for (let k = 0; k < 4; k++) colors.push(color[0] * shade, color[1] * shade, color[2] * shade, 1);
+                indices.push(i, i + 1, i + 2, i, i + 2, i + 3);
+                top = y;
+            }
+        }
+        const mr = this.child(this.node, 'MapEdge').addComponent(MeshRenderer);
+        this._edgeMesh = utils.MeshUtils.createMesh({ positions, colors, indices });
+        mr.mesh = this._edgeMesh;
+        mr.setSharedMaterial(this._mats!.emit, 0);
+        mr.shadowCastingMode = 0;
+    }
+
+    /** 地面顶点色的 zw 通道：八邻岸线按字节归一化；表面类型区分平地、林下、河、塘与桥。 */
+    private terrainChannels(c: number, r: number): [number, number] {
+        const t = this._model.terrain;
+        const kind = t?.typeAt(c, r);
+        if (kind === 'forest' && !this._model.getAt(c, r)) return [0, 0.1];
+        if (kind !== 'river' && kind !== 'pond' && kind !== 'bridge') return [0, 0];
+        const b = this._model.getAt(c, r);
+        if (b?.def.flat && b.def.id !== 'bridge') return [0, 0];
+        const land = (x: number, z: number) => !t.isWater(x, z) && t.typeAt(x, z) !== 'bridge';
+        const mask = Number(land(c - 1, r)) | Number(land(c, r - 1)) << 1
+            | Number(land(c + 1, r)) << 2 | Number(land(c, r + 1)) << 3
+            | Number(land(c - 1, r - 1)) << 4 | Number(land(c + 1, r - 1)) << 5
+            | Number(land(c + 1, r + 1)) << 6 | Number(land(c - 1, r + 1)) << 7;
+        const bridge = kind === 'bridge' || b?.def.id === 'bridge';
+        return [mask / 255, bridge ? 1 : kind === 'pond' ? 2 / 3 : 1 / 3];
     }
 
     private *groundTiles(): Iterable<GroundQuad> {
@@ -655,6 +707,7 @@ export class World3D extends Component {
 
     private buildGroundLayer(node: Node | null, name: string, mat: Material, y: number, tiles: Iterable<GroundQuad>): Node | null {
         const positions: number[] = [], uvs: number[] = [], indices: number[] = [];
+        const surfaceData: number[] | null = mat === this._mats?.ground ? [] : null;
         let texture: Texture2D | null = null;
         const minPos = new Vec3(Infinity, y, Infinity);
         const maxPos = new Vec3(-Infinity, y, -Infinity);
@@ -665,6 +718,10 @@ export class World3D extends Component {
             const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
             const hw = (turn % 2 ? length : width) / 2, hl = (turn % 2 ? width : length) / 2;
             const first = positions.length / 3;
+            if (surfaceData) {
+                const [mask, kind] = this.terrainChannels(Math.floor(c), Math.floor(r));
+                surfaceData.push(0, 0, mask, kind, 1, 0, mask, kind, 1, 1, mask, kind, 0, 1, mask, kind);
+            }
             positions.push(c - hw, y, r - hl, c + hw, y, r - hl, c + hw, y, r + hl, c - hw, y, r + hl);
             minPos.x = Math.min(minPos.x, c - hw); minPos.z = Math.min(minPos.z, r - hl);
             maxPos.x = Math.max(maxPos.x, c + hw); maxPos.z = Math.max(maxPos.z, r + hl);
@@ -686,6 +743,7 @@ export class World3D extends Component {
         const geometry = {
             positions: new Float32Array(positions),
             uvs: new Float32Array(uvs),
+            ...(surfaceData ? { colors: new Float32Array(surfaceData) } : {}),
             ...(nextCapacity * 4 <= 0x10000 ? { indices16: new Uint16Array(indices) } : { indices32: new Uint32Array(indices) }),
             minPos, maxPos,
         };

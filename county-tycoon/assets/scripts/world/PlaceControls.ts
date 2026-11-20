@@ -1,5 +1,6 @@
-import { _decorator, Color, Component, Graphics, Label, Layers, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Layers, Node, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
+import { usesLandscapeWebLayout } from '../platform/Platform';
 import { drawHudTile, makeLabel, makePanelNode, UI_COLOR, UI_HUD, UI_PALETTE } from '../ui/UiTheme';
 import { WorldView } from './WorldView';
 
@@ -119,13 +120,14 @@ export class PlaceControls extends Component {
 
     /** 放到预览上方 24 像素；超出屏幕就夹回来（上面放不下就放到预览下方也看不见，干脆贴着顶栏） */
     private follow(): void {
-        const view = this._view, parent = this.node.parent;
-        if (!view || !parent) return;
-        const a = view.pendingAnchorUI(this._tmp);
+        const worldView = this._view, parent = this.node.parent;
+        if (!worldView || !parent) return;
+        const a = worldView.pendingAnchorUI(this._tmp);
         if (!a) return;
         const pui = parent.getComponent(UITransform)!;
         pui.convertToNodeSpaceAR(a, a);
-        const halfW = pui.width / 2, halfH = pui.height / 2;
+        const { width, height } = usesLandscapeWebLayout() ? view.getVisibleSize() : pui;
+        const halfW = width / 2, halfH = height / 2;
         const w = this.node.getComponent(UITransform)!.width / 2 + 12, h = (PlaceControls.H + 44) / 2;
         const x = Math.max(-halfW + w, Math.min(halfW - w, a.x));
         const y = Math.max(-halfH + this._bottom() + h, Math.min(halfH - this._top - h, a.y + 24 + h));

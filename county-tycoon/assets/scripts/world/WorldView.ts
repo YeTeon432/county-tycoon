@@ -249,6 +249,7 @@ export class WorldView extends Component {
         this._art.load(() => {
             if (!this.isValid) return;
             this.redrawTown();
+            director.emit('town-art-ready');
         });
 
         this._world.setPosition(0, 0, 0);

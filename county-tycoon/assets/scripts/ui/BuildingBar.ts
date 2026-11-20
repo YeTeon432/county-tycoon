@@ -1,5 +1,5 @@
 import {
-    _decorator, Color, Component, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
+    _decorator, Color, Component, director, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
     tween, Tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
@@ -8,7 +8,7 @@ import { hexToColor } from '../core/ColorUtil';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
 import { TownLevel } from '../core/sim/types';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 import {
     drawGraphicsOnEnable, drawHudTile, drawShadow, formatNumber, IconName, makeIcon, makeLabel, makeLabelLeft, makePanelNode,
     UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE,
@@ -127,7 +127,7 @@ export class BuildingBar extends Component {
 
     build(defs: BuildingDef[]): void {
         this._defs = defs;
-        const W = 720;
+        const W = usesLandscapeWebLayout() ? Math.min(1280, view.getVisibleSize().width) : 720;
         const H = BuildingBar.BAR_HEIGHT;
 
         this.node.layer = Layers.Enum.UI_2D;
@@ -142,7 +142,7 @@ export class BuildingBar extends Component {
 
         this.buildSheet(W, H);
         this.buildTabs(W, H);
-        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H);
+        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H + (usesLandscapeWebLayout() ? 24 : 0));
         this._cardLayer.addComponent(Mask).type = Mask.Type.GRAPHICS_RECT;
         this._cardLayer.setPosition(0, -H / 2 + BuildingBar.bottomInset() + 14 + BuildingBar.ITEM_H / 2, 0);
         // 金币和小锁是两张图：分两层，不然一张卡里交替出现就断批
@@ -426,6 +426,7 @@ export class BuildingBar extends Component {
             c.swatch.node.active = false;
         }
         this.refreshCards(true);
+        director.emit('town-thumbnails-ready');
     }
 
     /** 盖不了的原因（放置预览用）：没解锁 → 「镇上解锁」；钱不够 → 「预算不够」；能盖 → null */

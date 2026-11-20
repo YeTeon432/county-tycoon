@@ -16,7 +16,7 @@ import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
 import { PlaceControls } from '../world/PlaceControls';
 import { TopBar } from '../ui/TopBar';
 import { TrackChip } from '../ui/TrackChip';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 
 const { ccclass } = _decorator;
 const MAP_GRID_PREFERENCE_KEY = 'county-map-grid';
@@ -81,7 +81,7 @@ export class GameRoot extends Component {
 
     protected start(): void {
         const platform = getPlatform().name;
-        if (platform === 'web' || platform === 'native') {
+        if ((platform === 'web' && !usesLandscapeWebLayout()) || platform === 'native') {
             this.fitViewport();
             gameView.on('canvas-resize', this.fitViewport, this);
         }

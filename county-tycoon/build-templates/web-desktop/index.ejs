@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我在县城当县长</title>
+  <link rel="stylesheet" href="<%= cssUrl %>">
+  <style>
+    body {
+      display: grid;
+      place-items: center;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      background: #26362d;
+    }
+
+    #startup {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      isolation: isolate;
+      display: grid;
+      align-items: end;
+      justify-items: center;
+      box-sizing: border-box;
+      padding: 16px 16px max(15vh, env(safe-area-inset-bottom));
+      background: linear-gradient(#9bd8f1, #46888b 58%, #294d49);
+      color: #fff;
+      font-family: system-ui, sans-serif;
+    }
+    .town-panorama, #startup::after {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .town-panorama { z-index: -2; object-fit: cover; object-position: 50% 52%; }
+    #startup::after {
+      content: "";
+      z-index: -1;
+      background: linear-gradient(to bottom, transparent 40%, #12384312 58%, #11333370);
+    }
+    .loading-town { width: 100%; text-align: center; }
+    .loading-town h1 {
+      margin: 0 0 clamp(12px, 2.8vh, 30px);
+      color: #ffe292;
+      font: 1000 clamp(36px, min(7.3vw, 13vh), 122px)/1.18 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      letter-spacing: .025em;
+      -webkit-text-stroke: .065em #864521;
+      paint-order: stroke fill;
+      text-shadow: 0 .045em #b0632e, 0 .085em #8c4728, 0 .115em #5f3926, 0 .15em .12em #1833309c;
+    }
+    .load-details { position: relative; width: min(80vw, 43vh + 16vw, 640px); margin: 0 auto; }
+    .load-meter {
+      position: relative;
+      height: clamp(28px, 4.6vh, 46px);
+      overflow: hidden;
+      border: 2px solid #48331f;
+      border-radius: 11px;
+      background: linear-gradient(#242b38, #434857);
+      box-shadow: inset 0 1px 3px #191f2f, 0 2px 0 #f3ce8d9c, 0 3px 8px #17302855;
+    }
+    #load-track { position: absolute; inset: 0; }
+    #load-fill {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(#ffdd79, #f5ad3b 53%, #df861f);
+      border-radius: 8px;
+      box-shadow: inset 0 1px #fff2b6;
+    }
+    .load-caption {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .5em;
+      color: white;
+      font-size: clamp(14px, 2.4vh, 22px);
+      font-weight: 750;
+      line-height: 1;
+      text-shadow: 0 1px 2px #29262c;
+      -webkit-text-stroke: 2.5px #332c2b;
+      paint-order: stroke fill;
+    }
+    #load-count { font-variant-numeric: tabular-nums; }
+    #load-count:empty { display: none; }
+    #startup button {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 16px;
+      border: 1px solid #704521;
+      border-radius: 6px;
+      background: #fff2cd;
+      color: #58341e;
+      font: 650 14px system-ui, sans-serif;
+      cursor: pointer;
+    }
+    #startup [hidden] { display: none; }
+    #GameDiv[inert] { visibility: hidden; }
+
+    #GameDiv {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    #GameCanvas {
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="startup">
+    <img class="town-panorama" src="./cover-town.webp" alt="" fetchpriority="high">
+    <section class="loading-town" aria-labelledby="game-title">
+      <h1 id="game-title">我在县城当县长</h1>
+      <div class="load-details">
+        <div class="load-meter">
+          <div id="load-track" role="progressbar" aria-label="城镇加载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="load-fill"></div></div>
+          <div class="load-caption">
+            <span id="startup-status" role="status">正在启动游戏引擎…</span>
+            <span id="load-count" aria-hidden="true">0%</span>
+          </div>
+        </div>
+        <button type="button" hidden onclick="location.reload()">重新加载</button>
+      </div>
+    </section>
+  </div>
+  <div id="GameDiv" inert cc_exact_fit_screen="false">
+    <div id="Cocos3dGameContainer">
+      <canvas id="GameCanvas" tabindex="0" aria-label="我在县城当县长"></canvas>
+    </div>
+  </div>
+  <script>
+    const startup = document.getElementById('startup');
+    const statusText = document.getElementById('startup-status');
+    const retry = startup.querySelector('button');
+    const track = document.getElementById('load-track');
+    const fill = document.getElementById('load-fill');
+    const count = document.getElementById('load-count');
+    let failed = false;
+    let slowTimer;
+    function markActivity() {
+      retry.hidden = true;
+      clearTimeout(slowTimer);
+      slowTimer = setTimeout(() => { retry.hidden = false; }, 20000);
+    }
+    markActivity();
+
+    function startupFailed(error) {
+      if (failed) return;
+      failed = true;
+      clearTimeout(slowTimer);
+      console.error('[城镇加载]', error);
+      statusText.textContent = '加载失败，请重新加载。';
+      // 保留失败时的位置，重试才开始新的加载。
+      retry.hidden = false;
+    }
+
+    // 资源解码、地图、图集、建造栏和绘制首帧均完成后才到 100%。
+    let totalSteps = 0;
+    let completedSteps = 0;
+    function showProgress(percent) {
+      if (failed || percent < Number(track.getAttribute('aria-valuenow'))) return;
+      markActivity();
+      track.setAttribute('aria-valuenow', percent);
+      count.textContent = percent + '%';
+      fill.style.width = percent + '%';
+    }
+    function advanceProgress() {
+      completedSteps++;
+      showProgress(10 + Math.floor(90 * completedSteps / totalSteps));
+    }
+    async function loadTownResources(cc) {
+      const { resources, JsonAsset, ImageAsset, Prefab, Material } = cc;
+      const assets = [];
+      function include(directory, type, accept = () => true) {
+        const infos = resources.getDirWithPath(directory, type).filter(info => accept(info.path));
+        if (!infos.length) throw new Error('缺少城镇资源：' + directory);
+        for (const info of infos) assets.push({ path: info.path, type });
+      }
+      include('config', JsonAsset);
+      include('art', JsonAsset);
+      include('art', ImageAsset);
+      include('ui/icons', ImageAsset);
+      include('models3d', Prefab);
+      include('models3d', Material, path => /^models3d\/[^/]+$/.test(path));
+
+      totalSteps = assets.length + readyEvents.length + 1;
+      statusText.textContent = '正在加载城镇资源';
+      showProgress(10);
+      // 使用游戏本身的资源缓存。每项在解码及其依赖就绪后计入进度。
+      await Promise.all(assets.map(({ path, type }) => new Promise((resolve, reject) => {
+        resources.load(path, type, (error, asset) => {
+          if (error || !asset) { reject(error || new Error(path)); return; }
+          advanceProgress();
+          resolve();
+        });
+      })));
+      if (!failed) statusText.textContent = '正在绘制城镇…';
+    }
+    const frame = document.getElementById('GameDiv');
+    const designWidth = <%= previewWidth %>;
+    const designHeight = <%= previewHeight %>;
+
+    // 先更新容器，再由 Cocos 的 resize 监听器更新画布。
+    function fitGameFrame() {
+      const scale = Math.min(window.innerWidth / designWidth, document.body.clientHeight / designHeight);
+      frame.style.width = Math.round(designWidth * scale) + 'px';
+      frame.style.height = Math.round(designHeight * scale) + 'px';
+    }
+
+    fitGameFrame();
+    window.addEventListener('resize', fitGameFrame);
+    frame.addEventListener('contextmenu', (event) => event.preventDefault());
+  </script>
+  <% if (polyfillsBundleFile) { %>
+  <script src="<%= polyfillsBundleFile %>" onerror="startupFailed()"></script>
+  <% } %>
+  <script src="<%= systemJsBundleFile %>" onerror="startupFailed()"></script>
+  <script src="<%= importMapFile %>" type="systemjs-importmap"></script>
+  <script>
+    const readyEvents = ['town-ready', 'town-art-ready', 'town-thumbnails-ready'];
+    Promise.resolve().then(() => System.import('cc')).then(cc => {
+      const { director, Director, game, settings, ResolutionPolicy } = cc;
+      showProgress(2);
+      statusText.textContent = '正在读取游戏配置…';
+      director.once('town-load-error', startupFailed);
+      const ready = name => new Promise(resolve => director.once(name, resolve));
+      Promise.all(readyEvents.map(name => ready(name).then(() => advanceProgress()))).then(() => {
+        director.once(Director.EVENT_AFTER_DRAW, () => {
+          if (failed) return;
+          advanceProgress();
+          clearTimeout(slowTimer);
+          requestAnimationFrame(() => {
+            frame.removeAttribute('inert');
+            startup.remove();
+          });
+        });
+      });
+      game.onPostInfrastructureInitDelegate.add(() => showProgress(6));
+      game.onPostSubsystemInitDelegate.add(() => showProgress(8));
+      game.onPostProjectInitDelegate.add(async () => {
+        try {
+          await loadTownResources(cc);
+        } catch (error) {
+          startupFailed(error);
+          throw error;
+        }
+      });
+      game.onPostBaseInitDelegate.add(() => {
+        showProgress(4);
+        settings.overrideSettings('screen', 'landscapeWebLayout', true);
+        settings.overrideSettings('screen', 'designResolution', {
+          width: designWidth,
+          height: designHeight,
+          policy: ResolutionPolicy.FIXED_WIDTH,
+        });
+      });
+      return System.import('<%= indexJsName.startsWith("./") ? indexJsName : "./" + indexJsName %>');
+    }).catch(startupFailed);
+  </script>
+</body>
+</html>

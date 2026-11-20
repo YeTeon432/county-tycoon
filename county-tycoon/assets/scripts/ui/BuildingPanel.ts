@@ -28,6 +28,7 @@ export type ResidentTapHandler = (residentId: number) => void;
  */
 @ccclass('BuildingPanel')
 export class BuildingPanel extends Panel {
+    protected cardH = 760;
 
     private _sim: SimApi | null = null;
     private _placed: PlacedBuilding | null = null;

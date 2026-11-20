@@ -25,7 +25,7 @@ export class ZoomButtons extends Component {
         const align = () => {
             const visible = view.getVisibleSize();
             const info = getPlatform().systemInfo();
-            const right = info.screenWidth > 0 ? (info.screenWidth - info.safeArea.right) * visible.width / info.screenWidth : 0;
+            const right = info.screenWidth > 0 && info.safeArea.right > 0 ? (info.screenWidth - info.safeArea.right) * visible.width / info.screenWidth : 0;
             this.node.setPosition(visible.width / 2 - Math.max(0, right) - w / 2 - 14, -visible.height / 2 + bottomReserve + h / 2 + 8, 0);
         };
         align();

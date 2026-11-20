@@ -3,10 +3,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport, TownLevel } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
-import { ManagementPage, Panel } from './Panel';
-import { NoticeHistoryPanel } from './NoticeHistoryPanel';
 import { Portrait } from './Portrait';
-import { BuildCatalogPanel } from './BuildCatalogPanel';
 import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
 import { IntroCards } from './IntroCards';
@@ -91,8 +88,6 @@ export class UiRoot extends Component {
     private _listPanel: ResidentListPanel | null = null;
     /** 月度账单 */
     private _reportPanel: MonthReportPanel | null = null;
-    private _catalogPanel: BuildCatalogPanel | null = null;
-    private _historyPanel: NoticeHistoryPanel | null = null;
     private _settingsPanel: SettingsPanel | null = null;
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
@@ -131,13 +126,6 @@ export class UiRoot extends Component {
         this.buildClock();
         this.buildTrackChip();
         this._notices = NoticeLayer.create(this.node, this.sim);
-        this._notices.onOpenHistory = () => this.openHistory();
-        this._notices.onHistoryChanged = () => {
-            if (this._historyPanel?.node.activeInHierarchy) {
-                this._historyPanel.refresh();
-                this._notices?.markRead();
-            }
-        };
         this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
@@ -161,7 +149,6 @@ export class UiRoot extends Component {
     attachBuildingBar(bar: BuildingBar): void {
         this._bar = bar;
         if (this.sim) bar.bindSim(this.sim);
-        bar.onOpenCatalog = () => this.openCatalog();
         bar.onNotice = (text) => this.setPlacementHint(text);
         bar.setHint(this._hint);
     }
@@ -170,7 +157,7 @@ export class UiRoot extends Component {
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
         Portrait.setArt(art);
-        Panel.setArt(art);
+        CenterPanel.setArt(art);
     }
 
     /**
@@ -311,38 +298,7 @@ export class UiRoot extends Component {
         layer.layer = Layers.Enum.UI_2D;
         layer.addComponent(UITransform);
         this.node.addChild(layer);
-        layer.on('open-management-page', (page: ManagementPage) => {
-            switch (page) {
-                case 'build': this.openCatalog(); break;
-                case 'center': this.openCenter(); break;
-                case 'residents': this.openResidentList(); break;
-                case 'report': this.openReport(); break;
-                case 'notices': this.openHistory(); break;
-                case 'settings': this.openSettings(); break;
-            }
-        });
         this._panelLayer = layer;
-    }
-
-    private openCatalog(): void {
-        const bar = this._bar;
-        if (!bar || !this._panelLayer) return;
-        this.closeTopPanel();
-        const page = BuildCatalogPanel.show(this._panelLayer, bar, (id) => {
-            this.closeTopPanel();
-            bar.selectById(id);
-        });
-        page.onClosed = () => { this._catalogPanel = null; };
-        this._catalogPanel = page;
-    }
-
-    private openHistory(): void {
-        if (!this._panelLayer || !this._notices) return;
-        this.closeTopPanel();
-        this._notices.markRead();
-        const page = NoticeHistoryPanel.show(this._panelLayer, this._notices.history);
-        page.onClosed = () => { this._historyPanel = null; };
-        this._historyPanel = page;
     }
 
     openSettings(): void {
@@ -371,7 +327,6 @@ export class UiRoot extends Component {
         if (report.notices && report.notices.some((n) => n.kind === 'research')) {
             if (this._bar) this._bar.refreshUnlocks();
         }
-        this._catalogPanel?.refresh();
         this.refreshOpenPanels();
         if (this._topBar) {
             this._topBar.refresh();
@@ -622,8 +577,6 @@ export class UiRoot extends Component {
             node.active = false;
             node.destroy();
         }
-        this._catalogPanel = null;
-        this._historyPanel = null;
         this._settingsPanel = null;
         this._centerPanel = null;
         this._reportPanel = null;

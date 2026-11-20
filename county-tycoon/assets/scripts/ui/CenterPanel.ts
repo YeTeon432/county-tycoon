@@ -1,22 +1,23 @@
-import { _decorator, Color, Graphics, Label, Node } from 'cc';
+import { _decorator, Color, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
 import { Education, Offer, TownLevel } from '../core/sim/types';
+import { ArtLibrary } from '../core/ArtLibrary';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
 import {
-    formatMoney, makeButton, makeLabel, makeLabelLeft, makeLabelRight, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE, UI_RADIUS,
+    drawShadow, formatMoney, makeButton, makeIcon, makeRoundButton, makeTag, IconName, makeLabel, makeLabelLeft, makeLabelRight, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE, UI_RADIUS,
 } from './UiTheme';
 
 const { ccclass } = _decorator;
 
 type Tab = 'goals' | 'research' | 'talent' | 'market' | 'invest' | 'streets';
-const TABS: { key: Tab; label: string }[] = [
-    { key: 'goals', label: '发展目标' },
-    { key: 'research', label: '产业研究' },
-    { key: 'talent', label: '人才引进' },
-    { key: 'market', label: '人才市场' },
-    { key: 'invest', label: '招商引资' },
-    { key: 'streets', label: '特色街道' },
+const TABS: { key: Tab; label: string; icon: IconName }[] = [
+    { key: 'goals', label: '发展目标', icon: 'center' },
+    { key: 'research', label: '产业研究', icon: 'calendar' },
+    { key: 'talent', label: '人才引进', icon: 'people' },
+    { key: 'market', label: '人才市场', icon: 'bill' },
+    { key: 'invest', label: '招商引资', icon: 'coin' },
+    { key: 'streets', label: '特色街道', icon: 'shop' },
 ];
 const LEVEL_NAME: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
 const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'county', county: 'city', city: 'top100' };
@@ -29,6 +30,89 @@ const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'co
  */
 @ccclass('CenterPanel')
 export class CenterPanel extends Panel {
+
+    private static art: ArtLibrary | null = null;
+    private wide = false;
+    private rail: Node | null = null;
+
+    static setArt(art: ArtLibrary): void { CenterPanel.art = art; }
+
+    protected buildShell(title: string, subtitle: string): void {
+        const { width, height } = view.getVisibleSize();
+        this.wide = width > height;
+        this.cardW = this.wide ? 1020 : 690;
+        this.cardH = this.wide ? 846 : 1116;
+        const railW = this.wide ? 262 : 0;
+        const w = this.cardW + railW, h = this.cardH;
+        const shade = makePanelNode(this.node, 'Shade', width, height);
+        const dim = shade.addComponent(Graphics);
+        dim.fillColor = new Color(27, 35, 29, 158);
+        dim.rect(-width / 2, -height / 2, width, height);
+        dim.fill();
+        shade.on(Node.EventType.TOUCH_END, () => this.close());
+        const sheet = makePanelNode(this.node, 'Window', w, h);
+        const scale = Math.min(width * (this.wide ? 0.91 : 0.965) / w, height * 0.92 / h);
+        sheet.setScale(scale, scale, 1);
+        const g = sheet.addComponent(Graphics);
+        drawShadow(g, -w / 2, -h / 2, w, h, 21, 5);
+        g.fillColor = UI_HUD.accentRim;
+        g.roundRect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6, 23);
+        g.fill();
+        g.fillColor = UI_COLOR.panel;
+        g.roundRect(-w / 2, -h / 2, w, h, 21);
+        g.fill();
+        sheet.on(Node.EventType.TOUCH_END, () => {});
+        this.rail = this.wide ? makePanelNode(sheet, 'Navigation', railW, h) : null;
+        if (this.rail) {
+            this.rail.setPosition(-w / 2 + railW / 2, 0, 0);
+            const bg = this.rail.addComponent(Graphics);
+            bg.fillColor = UI_HUD.base;
+            bg.roundRect(-railW / 2, -h / 2, railW, h, 18);
+            bg.fill();
+            bg.fillColor = new Color(211, 230, 207);
+            bg.roundRect(-railW / 2 + 12, h / 2 - 221, railW - 24, 204, 13);
+            bg.fill();
+            this.buildingImage(this.rail, 'center', 0, h / 2 - 115, railW - 72, 166);
+        }
+        const card = makePanelNode(sheet, 'Card', this.cardW, h);
+        this.card = card;
+        card.setPosition(railW / 2, 0, 0);
+        const head = makePanelNode(card, 'Header', this.cardW, 100);
+        head.setPosition(0, h / 2 - 50, 0);
+        const x = -this.cardW / 2 + Panel.PAD_X;
+        const label = makeLabelLeft(head, 'Title', title, UI_FONT.title, UI_COLOR.text, this.cardW - 286);
+        label.isBold = true;
+        label.node.setPosition(x, 0, 0);
+        const tag = makeTag(head, subtitle, UI_PALETTE.blue);
+        tag.setPosition(x + title.length * UI_FONT.title + 18 + tag.getComponent(UITransform)!.width / 2, 0, 0);
+        const close = makeRoundButton(head, 'Close', 'close', 54, () => this.close(), UI_HUD.onAccent, UI_HUD.accent);
+        close.setActive(true);
+        close.node.setPosition(-x - 21, 0, 0);
+        const line = head.addComponent(Graphics);
+        line.fillColor = UI_COLOR.border;
+        line.rect(x, -42, -2 * x, 2);
+        line.fill();
+        this.content = makePanelNode(card, 'Content', -2 * x, h - 128);
+        this.content.setPosition(0, -36, 0);
+    }
+
+    close(): void {
+        this.onClosed?.();
+        this.node.active = false;
+        this.node.destroy();
+    }
+
+    private buildingImage(parent: Node, id: string, x: number, y: number, w: number, h: number): void {
+        const frame = CenterPanel.art?.get(id);
+        if (!frame) return;
+        const rect = frame.rect;
+        const scale = Math.min(w / rect.width, h / rect.height);
+        const node = makePanelNode(parent, id, rect.width * scale, rect.height * scale);
+        const sprite = node.addComponent(Sprite);
+        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+        sprite.spriteFrame = frame;
+        node.setPosition(x, y, 0);
+    }
 
     private _sim: SimApi | null = null;
     private _tab: Tab = 'goals';
@@ -50,7 +134,7 @@ export class CenterPanel extends Panel {
     private _modal: Node | null = null;
 
     static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null): CenterPanel {
-        const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level], 'center');
+        const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level]);
         p._sim = sim;
         p._tab = tab;
         p.renderPage = () => {
@@ -82,29 +166,43 @@ export class CenterPanel extends Panel {
     }
 
     private buildTabs(): void {
-        const content = this.content!;
-        const W = this.W, h = 56, gap = 10;
-        const w = (W - gap * (TABS.length - 1)) / TABS.length;
-        TABS.forEach((t, i) => {
-            const n = makePanelNode(content, `Tab_${t.key}`, w, h);
-            n.setPosition(-W / 2 + w / 2 + i * (w + gap), this.contentTop - h / 2, 0);
-            const g = n.addComponent(Graphics);
-            const label = makeLabel(n, 'Txt', t.label, UI_FONT.small, UI_COLOR.textDim, w - 8);
-            n.on(Node.EventType.TOUCH_END, () => { this._tab = t.key; this.fill(); }, this);
-            this._tabNodes.push({ key: t.key, g, label, w });
+        const host = this.rail ?? this.content!;
+        const { width, height } = host.getComponent(UITransform)!;
+        const gap = 8;
+        const w = this.wide ? width - 24 : (width - gap * (TABS.length - 1)) / TABS.length;
+        const h = this.wide ? 76 : 56;
+        TABS.forEach((tab, i) => {
+            const node = makePanelNode(host, 'Tab_' + tab.key, w, h);
+            const x = this.wide ? 0 : -width / 2 + w / 2 + i * (w + gap);
+            const y = height / 2 - h / 2 - (this.wide ? 247 + i * (h + gap) : 0);
+            node.setPosition(x, y, 0);
+            const g = node.addComponent(Graphics);
+            const label = this.wide ? makeLabelLeft(node, 'Txt', tab.label, 25, UI_HUD.text, w - 74)
+                : makeLabel(node, 'Txt', tab.label, UI_FONT.small, UI_COLOR.textDim, w - 8);
+            if (this.wide) {
+                makeIcon(node, tab.icon, 35).node.setPosition(-w / 2 + 32, 0, 0);
+                label.node.setPosition(-w / 2 + 65, 0, 0);
+            }
+            node.on(Node.EventType.TOUCH_END, () => {
+                if (this._tab === tab.key) return;
+                this.closeModal();
+                this._tab = tab.key;
+                this.fill();
+            });
+            this._tabNodes.push({ key: tab.key, g, label, w });
         });
     }
 
     private drawTabs(): void {
-        const h = 56;
-        for (const t of this._tabNodes) {
-            const on = t.key === this._tab;
-            t.g.clear();
-            t.g.fillColor = on ? UI_PALETTE.blue : UI_COLOR.button;
-            t.g.roundRect(-t.w / 2, -h / 2, t.w, h, h / 2);
-            t.g.fill();
-            t.label.color = on ? UI_PALETTE.white : UI_COLOR.textDim;
-            t.label.isBold = on;
+        const h = this.wide ? 76 : 56;
+        for (const tab of this._tabNodes) {
+            const active = tab.key === this._tab;
+            tab.g.clear();
+            tab.g.fillColor = this.wide ? (active ? UI_HUD.accent : UI_HUD.base) : (active ? UI_PALETTE.blue : UI_COLOR.button);
+            tab.g.roundRect(-tab.w / 2, -h / 2, tab.w, h, this.wide ? 12 : h / 2);
+            tab.g.fill();
+            tab.label.color = active ? UI_PALETTE.white : UI_HUD.text;
+            tab.label.isBold = active;
         }
     }
 
@@ -113,7 +211,7 @@ export class CenterPanel extends Panel {
         if (!this.content || !this._sim) return;
         this.drawTabs();
         if (this._body) this._body.destroy();
-        const top = this.contentTop - 56 - 24;
+        const top = this.contentTop - (this.wide ? 0 : 80);
         const H = top + this.contentH / 2;
         const body = makePanelNode(this.content, 'Body', this.W, H);
         body.setPosition(0, top - H / 2, 0);

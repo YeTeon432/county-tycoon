@@ -6,9 +6,10 @@ const { ccclass } = _decorator;
 
 @ccclass('SettingsPanel')
 export class SettingsPanel extends Panel {
+    protected cardH = 292;
 
     static show(parent: Node, gridOn: boolean, onGridChange: (on: boolean) => void): SettingsPanel {
-        const panel = Panel.open(SettingsPanel, parent, '地图设置', '', 'settings');
+        const panel = Panel.open(SettingsPanel, parent, '地图设置', '');
         panel.renderPage = () => panel.buildGridRow(gridOn, (on) => {
             gridOn = on;
             onGridChange(on);

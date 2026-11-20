@@ -86,7 +86,6 @@ export class BuildingBar extends Component {
     static readonly PADDING = 16;
     private static readonly THUMB_H = 84;
 
-    onOpenCatalog: (() => void) | null = null;
     onSelect: ((def: BuildingDef | null) => void) | null = null;
     onDemolishToggle: ((on: boolean) => void) | null = null;
     /** 点了未解锁 / 买不起的卡片：给一句提示（UiRoot 接到顶栏提示条） */
@@ -249,7 +248,6 @@ export class BuildingBar extends Component {
             node.on(Node.EventType.TOUCH_END, () => {
                 if (this._dragging) return;
                 this.selectTab(t.key);
-                this.onOpenCatalog?.();
             }, this);
             this._tabs.push({ key: t.key, node, g, label, w });
             x += w + gap;
@@ -288,10 +286,6 @@ export class BuildingBar extends Component {
         this._tab = key;
         this._scrollX = 0;
         this.applyTab();
-    }
-
-    catalogEntries(): { def: BuildingDef; econ?: Econ }[] {
-        return this.visibleCards().map(({ def }) => ({ def, econ: this._econ.get(def.id) }));
     }
 
     get tab(): string {

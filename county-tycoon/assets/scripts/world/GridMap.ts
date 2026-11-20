@@ -82,8 +82,8 @@ export class GridMap extends Component {
                     }
                 }
             }
-            if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || b.def.terrain || !b.facing) continue;
-            const frame = b.def.id === 'hut' ? earth : paving;
+            if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || (b.def.terrain && b.def.id !== 'mine') || !b.facing) continue;
+            const frame = b.def.id === 'hut' || b.def.id === 'mine' ? earth : paving;
             const entrance = frame && this.entranceOverlay(b, b.facing, frame);
             if (entrance) yield entrance;
         }
@@ -180,6 +180,8 @@ export class GridMap extends Component {
             return art.groundByName(this.viewBridge(col, row))
                 ?? art.groundByName('water-0');
         }
+        // 山体网格在山脚收回草地，避免低处露出方形石板。
+        if (t === 'mountain') return art.groundByName(grassName(col, row));
         return art.groundByName(terrainName(t, col, row));
     }
 

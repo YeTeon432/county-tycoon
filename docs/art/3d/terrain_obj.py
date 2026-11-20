@@ -208,6 +208,53 @@ def pond_lily():
     ball(0.66, 0.42, 0.075, 0.022, pink, 2, scale=(1, 1, 1.5))
 
 
+@sprite('terrain-ore-outcrop', 1, 1, facing=False)
+def ore_outcrop():
+    """深色层岩里露出斜向的赭金色矿脉。每层共用环上的点，细看也能对上断面。"""
+    for cx, cy, rx, ry, height, seed in [(0.53, 0.53, 0.34, 0.27, 0.50, 8),
+                                          (0.25, 0.36, 0.17, 0.12, 0.20, 19),
+                                          (0.73, 0.24, 0.12, 0.08, 0.13, 30)]:
+        rnd = random.Random(seed)
+        sides = 7
+        rim = []
+        for k in range(sides):
+            a = k * 2 * math.pi / sides + rnd.uniform(-0.12, 0.12)
+            rim.append((math.cos(a) * rnd.uniform(0.83, 1), math.sin(a)))
+        verts = []
+        # 矿脉沿同一方向切过石身，在迎坡的一角尖灭。顶面另起破碎的棱线。
+        for layer, radius in enumerate((1.0, 0.98, 0.95, 0.92, 0.63)):
+            for k, (dx, dy) in enumerate(rim):
+                top = 0.99 + 0.22 * dx + 0.08 * math.cos(k * 2.5)
+                thickness = 0.05 + 0.08 * (1 - dy)
+                seam = min(0.47 - 0.37 * dx + 0.12 * dy, top - thickness - 0.08)
+                levels = (0, seam, seam + thickness, seam + thickness + 0.035, top)
+                level = levels[layer]
+                verts.append((cx + rx * (radius * dx + 0.25 * level),
+                              cy + ry * (radius * dy - 0.12 * level), 0.004 + height * level))
+        crown = len(verts)
+        verts.append((cx + rx * 0.34, cy - ry * 0.23, height * 1.23))
+        faces = []
+        materials = []
+        for layer in range(4):
+            for k in range(sides):
+                left = layer * sides + k
+                right = layer * sides + (k + 1) % sides
+                faces.append((left, right, right + sides, left + sides))
+                ore_face = seed == 8 and k not in (1, 2)
+                materials.append((0, 1 if ore_face else 0, 2 if ore_face else 3, 3)[layer])
+        for k in range(sides):
+            faces.append((4 * sides + k, 4 * sides + (k + 1) % sides, crown))
+            materials.append(4 if k % 3 else 3)
+        mesh = bpy.data.meshes.new('ore-seam')
+        mesh.from_pydata(verts, [], faces)
+        obj = bpy.data.objects.new('ore-seam', mesh)
+        bpy.context.collection.objects.link(obj)
+        for color in ('#696861', '#c5904f', '#e3bd76', '#83837b', '#9d9b8e'):
+            mesh.materials.append(M(color))
+        for poly, material in zip(mesh.polygons, materials):
+            poly.material_index = material
+
+
 @sprite('terrain-pond-landing', 1, 1, facing=False)
 def pond_landing():
     """从 +row 岸边伸出的洗衣埠头。芦苇和石头都留在池塘格内。"""

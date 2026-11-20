@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "9fbf96ce-051e-418a-83c9-e8e6c4dd1850",
+  "files": [],
+  "subMetas": {
+    "310bf": {
+      "importer": "gltf-mesh",
+      "uuid": "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@310bf",
+      "displayName": "",
+      "id": "310bf",
+      "name": "ore-seam.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 189
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "681d4": {
+      "importer": "gltf-scene",
+      "uuid": "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@681d4",
+      "displayName": "",
+      "id": "681d4",
+      "name": "terrain-ore-outcrop.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@310bf"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@ce988"
+      ],
+      "scenes": [
+        "9fbf96ce-051e-418a-83c9-e8e6c4dd1850@681d4"
+      ]
+    }
+  }
+}

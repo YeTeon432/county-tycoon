@@ -5,6 +5,8 @@ import {
 import { IsoMath } from '../core/IsoMath';
 import { TownModel } from '../core/TownModel';
 import type { GroundQuad } from './GridMap';
+import { highlandGeometry } from './Highlands';
+import type { Terrain } from '../core/Terrain';
 
 const { ccclass } = _decorator;
 
@@ -51,7 +53,7 @@ const ACTOR_MAX = 600;   // 每批最多几块纸片（人 + 影子；街上最�
  *
  * 地面：一整张网格，每格一个方块，贴图坐标对到地面图集里那一格菱形的四个顶点（等距投影对平地是线性的，
  * 所以 2D 的菱形图贴回方块上正好还原）。草色、水面和岸线由 landscape.effect 按地图坐标绘制。
- * 楼 / 山 / 树：Blender 导出的 glb（docs/art/3d/export_glb.py），顶点色 + 实时光照，参数见 D033。
+ * 楼 / 树：Blender 导出的 glb（docs/art/3d/export_glb.py），顶点色 + 实时光照，参数见 D033。
  */
 @ccclass('World3D')
 export class World3D extends Component {
@@ -68,12 +70,17 @@ export class World3D extends Component {
     private _streetNode: Node | null = null;
     private _streetMat: Material | null = null;
     private readonly _groundCapacity = new WeakMap<Node, number>();
-    private _mats: { lit: Material; emit: Material; ground: Material } | null = null;
+    private _mats: { lit: Material; emit: Material; ground: Material; relief: Material } | null = null;
     private readonly _prefabs = new Map<string, Prefab>();
     private readonly _missing = new Set<string>();
     /** uid → 楼的节点 */
     private readonly _nodes = new Map<number, { node: Node; key: string }>();
     private readonly _terrain: Node[] = [];
+    private _highlands: MeshRenderer | null = null;
+    private _highlandTerrain: Terrain | null = null;
+    private _highlandRevision = -1;
+    private readonly _outcrops: { col: number; row: number; node: Node }[] = [];
+    private _minePreview: Preview3D | null = null;
     private _hidden: ReadonlySet<number> = new Set();
     /** uid → 工地模型（三个阶段各一个、塔吊四帧各一个，换阶段 / 换帧只切 active） */
     private readonly _sites = new Map<number, { root: Node; stages: (Node | null)[]; cranes: (Node | null)[]; key: string }>();
@@ -153,10 +160,10 @@ export class World3D extends Component {
             if (err) { console.error('[World3D] 人车材质', err.message); return; }
             this._actorMat = mat;
         });
-        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit'], Material, (err, mats) => {
+        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands'], Material, (err, mats) => {
             if (err) { console.error('[World3D] 材质', err.message); return; }
             const by = (n: string) => mats.find((m) => m.name === n)!;
-            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit') };
+            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands') };
             const street = new Material();
             street.initialize({ effectAsset: this._mats.emit.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
             this._streetMat = street;
@@ -442,6 +449,7 @@ export class World3D extends Component {
         for (const mesh of this._retiredGroundMeshes) mesh.destroy();
         this._groundNode?.getComponent(MeshRenderer)?.mesh?.destroy();
         this._edgeMesh?.destroy();
+        this._highlands?.mesh?.destroy();
         this._streetNode?.getComponent(MeshRenderer)?.mesh?.destroy();
         this._streetMat?.destroy();
         for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
@@ -499,6 +507,11 @@ export class World3D extends Component {
     /** 半透明模型保留格线和冲突格的可见性，放不下时染红。null = 收起 */
     setPreview(p: Preview3D | null): void {
         const cur = this._preview;
+        const mine = p?.id === 'mine' && p.ok ? p : null;
+        if (mine?.col !== this._minePreview?.col || mine?.row !== this._minePreview?.row) {
+            this._minePreview = mine;
+            this.updateOutcrops();
+        }
         if (!p || !this._mats || !this._prefabs.has(p.id)) {
             if (cur) { cur.node.destroy(); this._preview = null; }
             return;
@@ -615,10 +628,38 @@ export class World3D extends Component {
     }
 
     // ---------------------------------------------------------------- 山、树林（地形上立起来的）
+    private syncHighlands(t: Terrain | null): void {
+        if (this._highlandTerrain === t && this._highlandRevision === (t?.revision ?? -1)) return;
+        this._highlandTerrain = t;
+        this._highlandRevision = t?.revision ?? -1;
+        const geometry = t && highlandGeometry(t);
+        const mesh = geometry?.positions.length
+            ? utils.MeshUtils.createMesh(geometry, undefined, { calculateBounds: true }) : null;
+        if (mesh && !this._highlands) {
+            this._highlands = this.child(this._root, 'Highlands').addComponent(MeshRenderer);
+            this._highlands.setSharedMaterial(this._mats!.relief, 0);
+            this._highlands.shadowCastingMode = 0;
+        }
+        if (this._highlands) {
+            const previous = this._highlands.mesh;
+            this._highlands.mesh = mesh;
+            previous?.destroy();
+        }
+    }
+
+    private updateOutcrops(): void {
+        const p = this._minePreview;
+        for (const { col, row, node } of this._outcrops) {
+            node.active = !p || col < p.col || col >= p.col + p.w || row < p.row || row >= p.row + p.h;
+        }
+    }
+
     private syncTerrain(): void {
         for (const n of this._terrain) n.destroy();
         this._terrain.length = 0;
+        this._outcrops.length = 0;
         const t = this._model.terrain;
+        this.syncHighlands(t);
         if (!t) return;
         for (let r = 0; r < t.height; r++) {
             for (let c = 0; c < t.width; c++) {
@@ -628,14 +669,25 @@ export class World3D extends Component {
                 // 在池塘朝村子的岸角摆木埠头，木板贴着 +row 岸，仅占用水面。
                 const landing = kind === 'pond' && t.typeAt(c - 1, r) === 'pond'
                     && t.typeAt(c + 1, r) === 'grass' && t.typeAt(c, r + 1) === 'grass';
-                const id = landing ? 'terrain-pond-landing' : kind === 'mountain' ? `terrain-mountain-${hsh % 3}`
+                const id = landing ? 'terrain-pond-landing' : kind === 'ore' ? 'terrain-ore-outcrop'
                     : kind === 'forest' ? `terrain-forest-${hsh % 4}`
                         : kind === 'pond' && hsh % 3 === 0 ? 'terrain-pond-lily' : null;
                 if (!id) continue;
-                const n = this.place(id, c, r, 1, 1, 0);
-                if (n) this._terrain.push(n);
+                const n = this.place(id, c, r, 1, 1, kind === 'ore' ? (hsh >>> 7) % 4 : 0);
+                if (!n) continue;
+                this._terrain.push(n);
+                if (kind === 'ore') {
+                    // 同一片矿脉向相邻矿格靠拢，岩块长短错落。
+                    const towardX = Number(t.typeAt(c + 1, r) === 'ore') - Number(t.typeAt(c - 1, r) === 'ore');
+                    const towardZ = Number(t.typeAt(c, r + 1) === 'ore') - Number(t.typeAt(c, r - 1) === 'ore');
+                    const size = 0.68 + 0.44 * ((hsh >>> 9) % 17) / 16;
+                    n.setPosition(c + 0.5 + towardX * 0.21, 0, r + 0.5 + towardZ * 0.18);
+                    n.setScale(size, size * (0.64 + 0.11 * (hsh % 5)), size * 0.90);
+                    this._outcrops.push({ col: c, row: r, node: n });
+                }
             }
         }
+        this.updateOutcrops();
     }
 
     // ---------------------------------------------------------------- 地面
@@ -682,14 +734,15 @@ export class World3D extends Component {
         const t = this._model.terrain;
         const kind = t?.typeAt(c, r);
         if (kind === 'forest' && !this._model.getAt(c, r)) return [0, 0.1];
-        if (kind !== 'river' && kind !== 'pond' && kind !== 'bridge') return [0, 0];
+        if (kind !== 'river' && kind !== 'pond' && kind !== 'bridge' && kind !== 'ore') return [0, 0];
         const b = this._model.getAt(c, r);
         if (b?.def.flat && b.def.id !== 'bridge') return [0, 0];
-        const land = (x: number, z: number) => !t.isWater(x, z) && t.typeAt(x, z) !== 'bridge';
+        const land = (x: number, z: number) => kind === 'ore' ? t.typeAt(x, z) !== 'ore' : !t.isWater(x, z) && t.typeAt(x, z) !== 'bridge';
         const mask = Number(land(c - 1, r)) | Number(land(c, r - 1)) << 1
             | Number(land(c + 1, r)) << 2 | Number(land(c, r + 1)) << 3
             | Number(land(c - 1, r - 1)) << 4 | Number(land(c + 1, r - 1)) << 5
             | Number(land(c + 1, r + 1)) << 6 | Number(land(c - 1, r + 1)) << 7;
+        if (kind === 'ore') return [mask / 255, 0.2];
         const bridge = kind === 'bridge' || b?.def.id === 'bridge';
         return [mask / 255, bridge ? 1 : kind === 'pond' ? 2 / 3 : 1 / 3];
     }

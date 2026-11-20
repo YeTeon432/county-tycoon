@@ -14,6 +14,7 @@ import { TrackChip } from './TrackChip';
 import { TimeController } from './TimeController';
 import { NoticeLayer } from './NoticeLayer';
 import { CenterPanel } from './CenterPanel';
+import { SettingsPanel } from './SettingsPanel';
 import { Speed, TopBar } from './TopBar';
 
 const { ccclass } = _decorator;
@@ -54,6 +55,8 @@ export class UiRoot extends Component {
     requestPlace: ((defId: string) => boolean) | null = null;
     /** 环境视图开关（GameRoot 接到 WorldView），返回开着没 */
     toggleEnvView: (() => boolean) | null = null;
+    getGridPreference: (() => boolean) | null = null;
+    setGridPreference: ((on: boolean) => void) | null = null;
     /** 居民追踪（T425，GameRoot 接到 WorldView）：开始 / 结束（null） */
     requestTrack: ((id: number | null) => void) | null = null;
     /** 镜头移到追踪的人 / 他家 */
@@ -84,6 +87,7 @@ export class UiRoot extends Component {
     private _listPanel: ResidentListPanel | null = null;
     /** 月度账单 */
     private _reportPanel: MonthReportPanel | null = null;
+    private _settingsPanel: SettingsPanel | null = null;
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
 
@@ -296,6 +300,17 @@ export class UiRoot extends Component {
         layer.addComponent(UITransform);
         this.node.addChild(layer);
         this._panelLayer = layer;
+    }
+
+    openSettings(): void {
+        const layer = this._panelLayer, read = this.getGridPreference, write = this.setGridPreference;
+        if (!layer || !read || !write) return;
+        this.closeTopPanel();
+        const panel = SettingsPanel.show(layer, read(), write);
+        panel.onClosed = () => {
+            if (this._settingsPanel === panel) this._settingsPanel = null;
+        };
+        this._settingsPanel = panel;
     }
 
     /**
@@ -526,6 +541,8 @@ export class UiRoot extends Component {
     }
 
     private closeTopPanel(): void {
+        if (this._settingsPanel?.node.isValid) this._settingsPanel.node.destroy();
+        this._settingsPanel = null;
         if (this._centerPanel && this._centerPanel.node?.isValid) this._centerPanel.node.destroy();
         this._centerPanel = null;
         if (this._reportPanel && this._reportPanel.node?.isValid) {

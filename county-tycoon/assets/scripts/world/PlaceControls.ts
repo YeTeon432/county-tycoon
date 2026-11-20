@@ -1,11 +1,11 @@
 import { _decorator, Color, Component, Graphics, Label, Layers, Node, UITransform, Vec3 } from 'cc';
 import { InputGuard } from '../core/InputGuard';
-import { PendingPlace, WorldView } from './WorldView';
+import { WorldView } from './WorldView';
 
 const { ccclass } = _decorator;
 
 /**
- * 放置确认条（D022，DESIGN 12）：预览上方浮出「换朝向 / 确定 / ✕」。
+ * 放置和拆除确认条，浮在选中目标上方。
  *
  * - 每帧问 WorldView 预览在屏幕上的位置，跟着走（拖地图、缩放都跟得上）；靠边时夹回屏幕内。
  * - 放不下时「确定」变灰，下面一行红字说原因。
@@ -47,7 +47,10 @@ export class PlaceControls extends Component {
         row.setPosition(0, 22, 0);
 
         this._rotate = makeBtn(row, '↻ 换朝向', 156, C.white, C.text, -122, () => view.rotatePending());
-        this._ok = makeBtn(row, '✓ 确定', 156, C.green, C.white, 44, () => view.confirmPending());
+        this._ok = makeBtn(row, '✓ 确定', 156, C.green, C.white, 44, () => {
+            if (view.pendingDemolition) view.confirmDemolition();
+            else view.confirmPending();
+        });
         this._cancel = makeBtn(row, '✕', 64, C.white, C.red, 170, () => view.cancelPending());
 
         const rn = new Node('Reason');
@@ -71,21 +74,27 @@ export class PlaceControls extends Component {
 
         InputGuard.add(this.node);
         this.node.active = false;
-        view.onPendingChanged = (p) => this.refresh(p);
+        view.onPendingChanged = () => this.refresh();
     }
 
     protected onDestroy(): void {
         InputGuard.remove(this.node);
     }
 
-    private refresh(p: PendingPlace | null): void {
-        this.node.active = !!p;
-        if (!p) return;
+    private refresh(): void {
+        const p = this._view?.pending;
+        const demolishing = !!this._view?.pendingDemolition;
+        this.node.active = !!p || demolishing;
+        if (!this.node.active) return;
+        this.node.getComponent(UITransform)!.setContentSize(demolishing ? 232 : PlaceControls.W, PlaceControls.H + 44);
+        this._rotate!.node.active = !demolishing;
+        this._ok!.node.setPosition(demolishing ? -36 : 44, 0);
+        this._cancel!.node.setPosition(demolishing ? 82 : 170, 0);
         // 原生渲染需要在确认条显示后绘制按钮底色，初始绘制后立即隐藏可能丢失图形。
-        this._rotate!.setEnabled(p.canRotate);
-        this._ok!.setEnabled(p.ok);
+        if (p) this._rotate!.setEnabled(p.canRotate);
+        this._ok!.setEnabled(demolishing || !!p?.ok, demolishing ? C.red : C.green, demolishing ? '拆除' : '✓ 确定');
         this._cancel!.setEnabled(true);
-        const show = !p.ok && !!p.reason;
+        const show = !!p && !p.ok && !!p.reason;
         this._reason!.node.parent!.active = show;
         if (show) {
             this._reason!.string = p.reason;
@@ -115,7 +124,7 @@ export class PlaceControls extends Component {
         const pui = parent.getComponent(UITransform)!;
         pui.convertToNodeSpaceAR(a, a);
         const halfW = pui.width / 2, halfH = pui.height / 2;
-        const w = PlaceControls.W / 2 + 12, h = (PlaceControls.H + 44) / 2;
+        const w = this.node.getComponent(UITransform)!.width / 2 + 12, h = (PlaceControls.H + 44) / 2;
         const x = Math.max(-halfW + w, Math.min(halfW - w, a.x));
         const y = Math.max(-halfH + this._bottom + h, Math.min(halfH - this._top - h, a.y + 24 + h));
         this.node.setPosition(x, y, 0);
@@ -133,7 +142,8 @@ const C = {
 };
 
 interface Btn {
-    setEnabled: (on: boolean) => void;
+    node: Node;
+    setEnabled: (on: boolean, color?: Color, title?: string) => void;
 }
 
 function makeBtn(parent: Node, text: string, w: number, fill: Color, fg: Color, x: number, onTap: () => void): Btn {
@@ -158,17 +168,18 @@ function makeBtn(parent: Node, text: string, w: number, fill: Color, fg: Color, 
     label.overflow = Label.Overflow.SHRINK;
 
     let enabled = true;
-    const setEnabled = (on: boolean) => {
+    const setEnabled = (on: boolean, color = fill, title = text) => {
         enabled = on;
+        label.string = title;
         g.clear();
         g.fillColor = C.shadow;
         g.roundRect(-w / 2, -h / 2 - 4, w, h, h / 2);
         g.fill();
-        g.fillColor = enabled ? fill : C.grey;
+        g.fillColor = enabled ? color : C.grey;
         g.roundRect(-w / 2, -h / 2, w, h, h / 2);
         g.fill();
         label.color = enabled ? fg : C.white;
     };
     node.on(Node.EventType.TOUCH_END, () => { if (enabled) onTap(); });
-    return { setEnabled };
+    return { node, setEnabled };
 }

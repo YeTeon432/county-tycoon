@@ -169,6 +169,17 @@ export class Terrain {
             || this.typeAt(col, row - 1) === 'river' || this.typeAt(col, row + 1) === 'river';
     }
 
+    /** 单格地形是否适合该建筑。港口的临河要求由整块占地另外判断。 */
+    canBuildCell(def: BuildingDef, col: number, row: number): boolean {
+        if (!this.inBounds(col, row)) return false;
+        const type = this.typeAt(col, row);
+        switch (terrainRequirementOf(def)) {
+            case 'river': return type === 'river';
+            case 'ore': return type === 'ore';
+            default: return type === 'grass' || type === 'forest' || type === 'bridge';
+        }
+    }
+
     /** 某格属于哪个可建区域，不在任何区域里返回 null */
     zoneAt(col: number, row: number): ZoneRect | null {
         for (const z of this.zones) {
@@ -183,38 +194,14 @@ export class Terrain {
      * 完整判定要连 TownModel.canPlace 一起看，见 canBuildAt()。
      */
     canBuild(def: BuildingDef, col: number, row: number): boolean {
-        const req = terrainRequirementOf(def);
-
-        // 桥：整个占格都要在河上（池塘上不行 —— 池塘是景观，桥没意义）
-        if (req === 'river') {
-            return this.footprint(def, col, row, (c, r) => this.typeAt(c, r) === 'river');
-        }
-        // 矿场：整个占格都要是矿点
-        if (req === 'ore') {
-            return this.footprint(def, col, row, (c, r) => this.typeAt(c, r) === 'ore');
-        }
-        // 港口：占格本身要能盖（不能在水上、山上），并且至少贴着一格水
-        if (req === 'riverbank') {
-            const land = this.footprint(def, col, row, (c, r) => {
-                const t = this.typeAt(c, r);
-                return t !== 'river' && t !== 'pond' && t !== 'mountain' && t !== 'ore';
-            });
-            if (!land) return false;
-            // 河道必须贴着**占格本身**的某一格，而不是隔着一条边再往外一格。
-            // 早先按"外圈一格是否挨着河"判，会让离河两格的港口也算靠河，已经改掉。
-            for (let r = 0; r < def.height; r++) {
-                for (let c = 0; c < def.width; c++) {
-                    if (this.touchesRiver(col + c, row + r)) return true;
-                }
+        let meetsRiverRequirement = terrainRequirementOf(def) !== 'riverbank';
+        for (let r = row; r < row + def.height; r++) {
+            for (let c = col; c < col + def.width; c++) {
+                if (!this.canBuildCell(def, c, r)) return false;
+                if (!meetsRiverRequirement) meetsRiverRequirement = this.touchesRiver(c, r);
             }
-            return false;
         }
-
-        // 其他建筑：不能在水上、山上、矿点上。树林可以（砍掉）
-        return this.footprint(def, col, row, (c, r) => {
-            const t = this.typeAt(c, r);
-            return t === 'grass' || t === 'forest' || t === 'bridge';
-        });
+        return meetsRiverRequirement;
     }
 
     /**
@@ -227,19 +214,6 @@ export class Terrain {
         for (let r = 0; r < def.height; r++) {
             for (let c = 0; c < def.width; c++) {
                 if (occupied(col + c, row + r)) return false;
-            }
-        }
-        return true;
-    }
-
-    /** 占格内每格都要满足条件 */
-    private footprint(def: BuildingDef, col: number, row: number,
-        ok: (c: number, r: number) => boolean): boolean {
-        for (let r = 0; r < def.height; r++) {
-            for (let c = 0; c < def.width; c++) {
-                const cc = col + c, rr = row + r;
-                if (!this.inBounds(cc, rr)) return false;
-                if (!ok(cc, rr)) return false;
             }
         }
         return true;

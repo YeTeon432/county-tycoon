@@ -5,7 +5,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
 import {
-    drawShadow, formatMoney, makeButton, makeIcon, makeRoundButton, makeTag, IconName, makeLabel, makeLabelLeft, makeLabelRight, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE, UI_RADIUS,
+    drawShadow, formatMoney, makeButton, makeIcon, makeRoundButton, makeStatTile, makeTag, IconName, makeLabel, makeLabelLeft, makeLabelRight, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE, UI_RADIUS,
 } from './UiTheme';
 
 const { ccclass } = _decorator;
@@ -22,12 +22,28 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
 const LEVEL_NAME: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
 const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'county', county: 'city', city: 'top100' };
 
-/**
- * 县发展中心面板（D026，DESIGN 18 / 19 / 26）：点开局那栋县发展中心打开。
- *   发展目标：当前等级的几个目标 + 进度，全完成后「申请升级」
- *   产业研究：每项的费用、天数、前置条件；一次研究一项
- *   招商引资 / 特色街道：第三、四批再做，先占位
- */
+const INK = new Color(37, 72, 66);
+const TEAL = new Color(44, 101, 89);
+const MINT = new Color(228, 241, 226);
+const PAPER = new Color(255, 253, 245);
+const RULE = new Color(220, 211, 188);
+const GOLD = new Color(249, 203, 112);
+const GOAL_ICONS: Record<GoalStatus['kind'], IconName> = {
+    pop: 'people', research: 'calendar', wishes: 'bill', mood: 'smile', roads: 'home',
+    building: 'center', employment: 'people', streets: 'shop', deals: 'coin',
+};
+
+function cardSurface(row: Node, w: number, h: number, fill = PAPER): Graphics {
+    const g = row.addComponent(Graphics);
+    g.fillColor = RULE;
+    g.roundRect(-w / 2, -h / 2 - 2, w, h + 2, 14);
+    g.fill();
+    g.fillColor = fill;
+    g.roundRect(-w / 2 + 1, -h / 2 + 1, w - 2, h - 2, 13);
+    g.fill();
+    return g;
+}
+
 @ccclass('CenterPanel')
 export class CenterPanel extends Panel {
 
@@ -66,13 +82,24 @@ export class CenterPanel extends Panel {
         if (this.rail) {
             this.rail.setPosition(-w / 2 + railW / 2, 0, 0);
             const bg = this.rail.addComponent(Graphics);
-            bg.fillColor = UI_HUD.base;
+            bg.fillColor = new Color(237, 224, 195);
             bg.roundRect(-railW / 2, -h / 2, railW, h, 18);
             bg.fill();
-            bg.fillColor = new Color(211, 230, 207);
-            bg.roundRect(-railW / 2 + 12, h / 2 - 221, railW - 24, 204, 13);
-            bg.fill();
-            this.buildingImage(this.rail, 'center', 0, h / 2 - 115, railW - 72, 166);
+            const sky = makePanelNode(this.rail, 'Townscape', railW - 24, 206);
+            sky.setPosition(0, h / 2 - 116, 0);
+            const art = cardSurface(sky, railW - 24, 206, new Color(205, 229, 217));
+            art.fillColor = new Color(255, 222, 152);
+            art.circle(68, 58, 22);
+            art.fill();
+            art.fillColor = new Color(160, 195, 157);
+            art.ellipse(0, -38, 98, 21);
+            art.fill();
+            this.buildingImage(sky, 'tree', -80, -14, 40, 73);
+            this.buildingImage(sky, 'center', -12, 12, 145, 139);
+            this.buildingImage(sky, 'hut', 63, -28, 68, 57);
+            const masthead = makeLabel(sky, 'CenterName', title, 30, INK, railW - 38);
+            masthead.isBold = true;
+            masthead.node.setPosition(0, -78, 0);
         }
         const card = makePanelNode(sheet, 'Card', this.cardW, h);
         this.card = card;
@@ -81,9 +108,10 @@ export class CenterPanel extends Panel {
         head.setPosition(0, h / 2 - 50, 0);
         const x = -this.cardW / 2 + Panel.PAD_X;
         const label = makeLabelLeft(head, 'Title', title, UI_FONT.title, UI_COLOR.text, this.cardW - 286);
+        this.titleLabel = label;
         label.isBold = true;
         label.node.setPosition(x, 0, 0);
-        const tag = makeTag(head, subtitle, UI_PALETTE.blue);
+        const tag = makeTag(head, subtitle, TEAL);
         tag.setPosition(x + title.length * UI_FONT.title + 18 + tag.getComponent(UITransform)!.width / 2, 0, 0);
         const close = makeRoundButton(head, 'Close', 'close', 54, () => this.close(), UI_HUD.onAccent, UI_HUD.accent);
         close.setActive(true);
@@ -134,7 +162,7 @@ export class CenterPanel extends Panel {
     private _modal: Node | null = null;
 
     static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null): CenterPanel {
-        const p = Panel.open(CenterPanel, parent, '县发展中心', LEVEL_NAME[sim.state.level]);
+        const p = Panel.open(CenterPanel, parent, '发展中心', LEVEL_NAME[sim.state.level]);
         p._sim = sim;
         p._tab = tab;
         p.renderPage = () => {
@@ -198,7 +226,7 @@ export class CenterPanel extends Panel {
         for (const tab of this._tabNodes) {
             const active = tab.key === this._tab;
             tab.g.clear();
-            tab.g.fillColor = this.wide ? (active ? UI_HUD.accent : UI_HUD.base) : (active ? UI_PALETTE.blue : UI_COLOR.button);
+            tab.g.fillColor = active ? TEAL : this.wide ? new Color(237, 224, 195) : UI_COLOR.button;
             tab.g.roundRect(-tab.w / 2, -h / 2, tab.w, h, this.wide ? 12 : h / 2);
             tab.g.fill();
             tab.label.color = active ? UI_PALETTE.white : UI_HUD.text;
@@ -209,6 +237,7 @@ export class CenterPanel extends Panel {
     /** 重画当前页签（研究开始、升级之后也调） */
     fill(): void {
         if (!this.content || !this._sim) return;
+        if (this.wide && this.titleLabel) this.titleLabel.string = TABS.find(t => t.key === this._tab)!.label;
         this.drawTabs();
         if (this._body) this._body.destroy();
         const top = this.contentTop - (this.wide ? 0 : 80);
@@ -231,63 +260,76 @@ export class CenterPanel extends Panel {
         const W = this.W;
         const goals: GoalStatus[] = sim.goals ? sim.goals() : [];
         const next = NEXT[sim.state.level];
-        let y = H / 2;
-        const done = goals.filter((g) => g.done).length;
-        const head = makeLabelLeft(body, 'Head', next ? `晋升${LEVEL_NAME[next]}　·　已达成 ${done} / ${goals.length} 项` : '已经是最高等级', UI_FONT.body, UI_COLOR.text, W);
-        head.isBold = true;
-        head.node.setPosition(-W / 2, y - 18, 0);
-        y -= 56;
-        const rowH = 84;
-        for (const g of goals) {
-            const n = makePanelNode(body, 'Goal', W, rowH - 12);
-            n.setPosition(0, y - (rowH - 12) / 2, 0);
-            const bg = n.addComponent(Graphics);
-            bg.fillColor = g.done ? new Color(232, 246, 232, 255) : UI_COLOR.block;
-            bg.roundRect(-W / 2, -(rowH - 12) / 2, W, rowH - 12, UI_RADIUS);
+        const done = goals.filter(g => g.done).length;
+        const heroH = 134;
+        const banner = makePanelNode(body, 'Milestone', W, heroH);
+        banner.setPosition(0, H / 2 - heroH / 2, 0);
+        const g = cardSurface(banner, W, heroH, INK);
+        const left = -W / 2 + 26;
+        const heading = makeLabelLeft(banner, 'Head', next ? `晋升${LEVEL_NAME[next]}` : '已达百强县', 36, PAPER, W - 210);
+        heading.isBold = true;
+        heading.node.setPosition(left, 26, 0);
+        if (!next) {
+            makeIcon(banner, 'center', 74).node.setPosition(W / 2 - 64, 0, 0);
+            return;
+        }
+        const summary = makeLabelLeft(banner, 'Completion', `已达成 ${done} / ${goals.length} 项`, 22, GOLD, 200);
+        summary.node.setPosition(left, -28, 0);
+        const segW = Math.min(52, (W - 395) / Math.max(1, goals.length) - 6);
+        goals.forEach((_, i) => {
+            g.fillColor = i < done ? GOLD : new Color(94, 126, 112);
+            g.roundRect(left + 176 + i * (segW + 6), -32, segW, 9, 4);
+            g.fill();
+        });
+        this.buildingImage(banner, 'tree', W / 2 - 137, -2, 48, 72);
+        this.buildingImage(banner, 'apartment', W / 2 - 83, 6, 94, 106);
+        this.buildingImage(banner, 'breakfast', W / 2 - 41, -24, 62, 62);
+
+        const footerH = 80;
+        const listH = H - heroH - footerH - 26;
+        const list = ScrollList.mount(body, 'Goals', W, listH);
+        list.node.setPosition(0, H / 2 - heroH - 14 - listH / 2, 0);
+        const rowH = Math.min(this.wide ? 100 : 138, Math.max(72, Math.floor(listH / Math.max(1, goals.length))));
+        list.setRows(goals.map(goal => ({ height: rowH, build: (row: Node) => {
+            const bg = cardSurface(row, W, rowH - 8, goal.done ? MINT : PAPER);
+            const cx = -W / 2 + 42;
+            bg.fillColor = goal.done ? TEAL : UI_COLOR.block;
+            bg.circle(cx, 0, 23);
             bg.fill();
-            // 勾 / 圈
-            bg.fillColor = g.done ? UI_PALETTE.green : UI_COLOR.border;
-            bg.circle(-W / 2 + 34, 0, 16);
+            makeIcon(row, goal.done ? 'check' : GOAL_ICONS[goal.kind], goal.done ? 25 : 32).node.setPosition(cx, 0, 0);
+            const x = cx + 40, track = W - 110;
+            const t = makeLabelLeft(row, 'Text', goal.text, UI_FONT.body, INK, track - 165);
+            t.node.setPosition(x, 8, 0);
+            const value = makeLabelRight(row, 'Val', this.goalValue(goal), UI_FONT.body, goal.done ? TEAL : UI_COLOR.text, 165);
+            value.isBold = true;
+            value.node.setPosition(W / 2 - 26, 8, 0);
+            const ratio = goal.target > 0 ? Math.min(1, Math.max(0, goal.value / goal.target)) : 0;
+            bg.fillColor = UI_COLOR.borderDim;
+            bg.roundRect(x, -21, track, 7, 3);
             bg.fill();
-            if (g.done) {
-                bg.strokeColor = UI_PALETTE.white;
-                bg.lineWidth = 4;
-                bg.moveTo(-W / 2 + 26, 0); bg.lineTo(-W / 2 + 32, -7); bg.lineTo(-W / 2 + 43, 7);
-                bg.stroke();
-            }
-            const t = makeLabelLeft(n, 'Text', g.text, UI_FONT.body, g.done ? UI_COLOR.up : UI_COLOR.text, W - 260);
-            t.node.setPosition(-W / 2 + 64, 8, 0);
-            const track = W - 288;
-            const progress = g.target > 0 ? Math.min(1, Math.max(0, g.value / g.target)) : 0;
-            bg.fillColor = UI_COLOR.border;
-            bg.roundRect(-W / 2 + 64, -23, track, 6, 3);
-            bg.fill();
-            if (progress > 0) {
-                bg.fillColor = g.done ? UI_PALETTE.green : UI_PALETTE.blue;
-                bg.roundRect(-W / 2 + 64, -23, Math.max(6, track * progress), 6, 3);
+            if (ratio > 0) {
+                bg.fillColor = goal.done ? TEAL : UI_COLOR.gold;
+                bg.roundRect(x, -21, Math.max(7, track * ratio), 7, 3);
                 bg.fill();
             }
-            const v = makeLabelRight(n, 'Val', this.goalValue(g), UI_FONT.body, g.done ? UI_COLOR.up : UI_COLOR.textDim, 180);
-            v.node.setPosition(W / 2 - 20, 0, 0);
-            y -= rowH;
-        }
-        if (!next) return;
-        const all = goals.length > 0 && goals.every((g) => g.done);
-        y -= 12;
-        const btn = makeButton(body, 'Upgrade', all ? `申请升级为「${LEVEL_NAME[next]}」` : `还差 ${goals.filter((g) => !g.done).length} 项`, W, 88,
+        } })));
+
+        const y = -H / 2 + footerH / 2;
+        makeIcon(body, 'coin', 38).node.setPosition(-W / 2 + 24, y, 0);
+        const reward = makeLabelLeft(body, 'Reward', '发展奖励', UI_FONT.body, INK, W - 310);
+        reward.isBold = true;
+        reward.node.setPosition(-W / 2 + 56, y + 15, 0);
+        const tip = makeLabelLeft(body, 'Tip', '解锁产业研究，获得建设资金', UI_FONT.small, UI_COLOR.textDim, W - 310);
+        tip.node.setPosition(-W / 2 + 56, y - 16, 0);
+        const all = goals.length > 0 && done === goals.length;
+        const btn = makeButton(body, 'Upgrade', all ? '申请升级' : `还差 ${goals.length - done} 项`, 198, 62,
             all ? 'primary' : 'secondary', () => {
                 if (!all || !sim.upgradeLevel) return;
                 const lv = sim.upgradeLevel();
-                if (lv) {
-                    if (this.onUpgraded) this.onUpgraded(lv);
-                    this.close();
-                }
-            });
+                if (lv) { this.onUpgraded?.(lv); this.close(); }
+            }, all ? 'check' : 'lock');
         btn.setEnabled(all);
-        btn.node.setPosition(0, y - 44, 0);
-        y -= 120;
-        const tip = makeLabel(body, 'Tip', '升级后解锁更多产业研究，上级还会拨一笔发展奖励', UI_FONT.small, UI_COLOR.textDim, W);
-        tip.node.setPosition(0, y, 0);
+        btn.node.setPosition(W / 2 - 99, y, 0);
     }
 
     private goalValue(g: GoalStatus): string {
@@ -297,6 +339,19 @@ export class CenterPanel extends Panel {
 
     // ───────────────────────── 产业研究 ─────────────────────────
 
+    private sectionBand(body: Node, H: number, title: string, detail: string, actionW = 0): Node {
+        const W = this.W;
+        const band = makePanelNode(body, 'SectionBand', W, 88);
+        band.setPosition(0, H / 2 - 44, 0);
+        cardSurface(band, W, 88, MINT);
+        const x = -W / 2 + 22, textW = W - 44 - actionW;
+        const head = makeLabelLeft(band, 'SectionTitle', title, UI_FONT.body, INK, textW);
+        head.isBold = true;
+        head.node.setPosition(x, 17, 0);
+        makeLabelLeft(band, 'SectionDetail', detail, UI_FONT.small, UI_COLOR.textDim, textW).node.setPosition(x, -17, 0);
+        return band;
+    }
+
     private fillResearch(body: Node, H: number): void {
         const sim = this._sim!;
         const W = this.W;
@@ -305,47 +360,47 @@ export class CenterPanel extends Panel {
         const order = { active: 0, ready: 1, locked: 2, done: 3 };
         const items = all.slice().sort((a, b) => order[a.state] - order[b.state]);
         const slots = sim.researchSlots ? sim.researchSlots() : { used: 0, total: 1, nextCost: null };
-        const intro = makeLabelLeft(body, 'Intro',
-            `研究位 ${slots.used}/${slots.total}　·　空闲 ${Math.max(0, slots.total - slots.used)} 个`,
-            UI_FONT.small, UI_COLOR.textDim, W - 230);
-        intro.overflow = Label.Overflow.SHRINK;
-        intro.node.setPosition(-W / 2, H / 2 - 16, 0);
-        if (slots.nextCost !== null && sim.openResearchSlot) {
-            const btn = makeButton(body, 'AddSlot', `再开一个位 ${formatMoney(slots.nextCost)}`, 220, 52, 'secondary',
-                () => this.openSlot());
-            btn.node.setPosition(W / 2 - 10 - 110, H / 2 - 16, 0);
+        const canExpand = slots.nextCost !== null && !!sim.openResearchSlot;
+        const band = this.sectionBand(body, H, `研究位　${slots.used} / ${slots.total}`,
+            `空闲 ${Math.max(0, slots.total - slots.used)} 个　·　可选课题 ${items.filter(r => r.state === 'ready').length} 项`, canExpand ? 240 : 0);
+        if (canExpand) {
+            const btn = makeButton(band, 'AddSlot', `扩建 ${formatMoney(slots.nextCost!)}`, 220, 52, 'secondary', () => this.openSlot());
+            btn.node.setPosition(W / 2 - 128, 0, 0);
         }
-        const listH = H - 52;
+        const listH = H - 104;
         const list = ScrollList.mount(body, 'List', W, listH);
-        list.node.setPosition(0, H / 2 - 52 - listH / 2, 0);
+        list.node.setPosition(0, H / 2 - 104 - listH / 2, 0);
         const rows: ListRow[] = items.map((r) => ({ height: 118, build: (row) => this.researchRow(row, W, r) }));
         list.setRows(rows);
     }
 
     private researchRow(row: Node, W: number, r: ResearchStatus): void {
         const h = 106;
-        const g = row.addComponent(Graphics);
-        g.fillColor = r.state === 'active' ? new Color(232, 241, 252, 255) : r.state === 'done' ? new Color(246, 247, 249, 255) : UI_COLOR.block;
-        g.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
-        g.fill();
-        const imageW = this.wide && r.unlocks.length ? 108 : 0;
-        if (imageW) this.buildingImage(row, r.unlocks[0], -W / 2 + 62, 0, 94, 90);
+        const g = cardSurface(row, W, h, r.state === 'active' ? MINT : PAPER);
+        const imageW = r.unlocks.length ? (this.wide ? 110 : 78) : 0;
+        if (imageW) {
+            const size = this.wide ? 84 : 62;
+            g.fillColor = UI_COLOR.block;
+            g.roundRect(-W / 2 + 14, -size / 2, size, size, 12);
+            g.fill();
+            this.buildingImage(row, r.unlocks[0], -W / 2 + 14 + size / 2, 0, size - 6, size - 6);
+        }
         const name = makeLabelLeft(row, 'Name', r.name, UI_FONT.body, r.state === 'done' ? UI_COLOR.textDim : UI_COLOR.text, W - 240 - imageW);
         name.isBold = true;
         name.node.setPosition(-W / 2 + 20 + imageW, 22, 0);
-        const sub = r.state === 'done' ? '已研究，可以盖了'
+        const sub = r.state === 'done' ? '已完成研究'
             : r.state === 'active' ? `${r.reason}（也可花钱加速）`
                 : r.state === 'locked' ? r.reason
-                    : `${formatMoney(r.cost)} · ${r.days} 天`;
+                    : `研究周期　${r.days} 天`;
         const subL = makeLabelLeft(row, 'Sub', sub, UI_FONT.small, r.state === 'locked' ? UI_COLOR.down : UI_COLOR.textDim, W - 240 - imageW);
         subL.node.setPosition(-W / 2 + 20 + imageW, -20, 0);
         if (r.state === 'active') {
-            const bw = W - 420;
+            const bw = W - imageW - 252;
             g.fillColor = UI_COLOR.border;
-            g.roundRect(-W / 2 + 20, -h / 2 + 12, bw, 8, 4);
+            g.roundRect(-W / 2 + 20 + imageW, -h / 2 + 8, bw, 8, 4);
             g.fill();
             g.fillColor = UI_PALETTE.blue;
-            g.roundRect(-W / 2 + 20, -h / 2 + 12, Math.max(8, bw * r.progress), 8, 4);
+            g.roundRect(-W / 2 + 20 + imageW, -h / 2 + 8, Math.max(8, bw * r.progress), 8, 4);
             g.fill();
             const left = Math.max(1, Math.round(r.days * (1 - r.progress)));
             const btn = makeButton(row, 'Rush', `加速 ¥${Math.max(500, Math.ceil(r.cost / Math.max(1, r.days) * left))}`, 170, 60,
@@ -396,21 +451,25 @@ export class CenterPanel extends Panel {
         const employers = this._sim?.employers?.() ?? [];
         const hired = employers.reduce((sum, b) => sum + b.staff, 0);
         const required = employers.reduce((sum, b) => sum + b.required, 0);
-        const summary = makeLabelLeft(body, 'Summary', `全县已招 ${hired} 人　所需 ${required} 人　空缺 ${required - hired} 人`,
-            UI_FONT.body, UI_COLOR.text, this.W);
-        summary.node.setPosition(-this.W / 2, H / 2 - 24, 0);
+        const stats: [string, number, Color][] = [['岗位总数', required, INK], ['在岗人数', hired, TEAL], ['空缺岗位', required - hired, UI_COLOR.gold]];
+        const tileW = (this.W - 24) / 3;
+        stats.forEach(([label, value, color], i) => {
+            const tile = makeStatTile(body, tileW, 94, label, String(value), color);
+            tile.node.setPosition(-this.W / 2 + tileW / 2 + i * (tileW + 12), H / 2 - 47, 0);
+        });
         if (!employers.length) {
             makeLabel(body, 'Empty', '县里还没有提供岗位的单位', UI_FONT.small, UI_COLOR.textDim, this.W);
             return;
         }
-        const list = ScrollList.mount(body, 'Employers', this.W, H - 72);
-        list.node.setPosition(0, -36, 0);
-        list.setRows(employers.map((b) => ({ height: 62, build: (row: Node) => {
+        const list = ScrollList.mount(body, 'Employers', this.W, H - 112);
+        list.node.setPosition(0, -56, 0);
+        list.setRows(employers.map((b) => ({ height: 77, build: (row: Node) => {
+            cardSurface(row, this.W, 67);
             const name = makeLabelLeft(row, 'Name', b.name, UI_FONT.body, UI_COLOR.text, this.W - 180);
-            name.node.setPosition(-this.W / 2 + 12, 0, 0);
+            name.node.setPosition(-this.W / 2 + 24, 0, 0);
             const count = makeLabelRight(row, 'Staff', `${b.staff} / ${b.required}`, UI_FONT.body,
                 b.staff < b.required ? UI_PALETTE.blue : UI_COLOR.textDim, 150);
-            count.node.setPosition(this.W / 2 - 12, 0, 0);
+            count.node.setPosition(this.W / 2 - 24, 0, 0);
         } })));
     }
 
@@ -418,28 +477,21 @@ export class CenterPanel extends Panel {
         const sim = this._sim!;
         const W = this.W;
         const st = sim.talentStatus ? sim.talentStatus() : { ready: true, reason: '', nextCost: [] };
-        const intro = makeLabelLeft(body, 'Intro',
-            '县里出钱，从外县招一批年轻人。当场到，只要有空房就行；来了自己去找工作。招一批要等 5 天。',
-            UI_FONT.small, UI_COLOR.textDim, W);
-        intro.overflow = Label.Overflow.SHRINK;
-        intro.node.setPosition(-W / 2, H / 2 - 16, 0);
+        this.sectionBand(body, H, '外县人才引进', '每批 6 人，间隔 5 天；需预留空房，到县后自行求职。');
 
         const TIERS: { edu: Education; label: string; desc: string }[] = [
             { edu: 0, label: '初中', desc: '进工厂、当店员、干体力活' },
             { edu: 1, label: '高中', desc: '技术员、收银、老师助理' },
             { edu: 2, label: '大专', desc: '老师、工程师、银行柜员' },
         ];
-        let y = H / 2 - 62;
+        let y = H / 2 - 106;
         const rowH = 150;
         for (let i = 0; i < TIERS.length; i++) {
             const t = TIERS[i];
             const price = st.nextCost[i] ?? 0;
             const row = makePanelNode(body, `Tier${t.edu}`, W, rowH - 12);
             row.setPosition(0, y - (rowH - 12) / 2, 0);
-            const g = row.addComponent(Graphics);
-            g.fillColor = UI_COLOR.block;
-            g.roundRect(-W / 2, -(rowH - 12) / 2, W, rowH - 12, UI_RADIUS);
-            g.fill();
+            cardSurface(row, W, rowH - 12);
             const name = makeLabelLeft(row, 'Name', `${t.label}学历 · 一次来 6 人`, UI_FONT.body, UI_COLOR.text, W - 260);
             name.isBold = true;
             name.node.setPosition(-W / 2 + 20, 26, 0);
@@ -454,7 +506,7 @@ export class CenterPanel extends Panel {
         }
         if (!st.ready) {
             const why = makeLabelLeft(body, 'Why', st.reason, UI_FONT.small, UI_COLOR.down, W);
-            why.node.setPosition(-W / 2, y + 24, 0);
+            why.node.setPosition(-W / 2, y - 18, 0);
         }
     }
 
@@ -474,31 +526,28 @@ export class CenterPanel extends Panel {
         const sim = this._sim!;
         const W = this.W;
         const book = sim.streetBook ? sim.streetBook() : [];
-        const intro = makeLabelLeft(body, 'Intro', '同一条路边、沿路 4 格内凑齐下面这几家，就成了特色街道。放店时能凑成，顶上会提示。', UI_FONT.small, UI_COLOR.textDim, W);
-        intro.overflow = Label.Overflow.SHRINK;
-        intro.node.setPosition(-W / 2, H / 2 - 16, 0);
-        const listH = H - 48;
+        this.sectionBand(body, H, `已形成 ${book.reduce((sum, b) => sum + b.count, 0)} 条特色街道`, '同条道路沿线 4 格内，集齐组合中的建筑即可形成。');
+        const listH = H - 104;
         const list = ScrollList.mount(body, 'List', W, listH);
-        list.node.setPosition(0, H / 2 - 48 - listH / 2, 0);
+        list.node.setPosition(0, H / 2 - 104 - listH / 2, 0);
         list.setRows(book.map((b) => ({ height: 158, build: (row: Node) => {
             const h = 146;
             const done = b.count > 0;
-            const g = row.addComponent(Graphics);
-            g.fillColor = done ? new Color(232, 246, 232, 255) : UI_COLOR.block;
-            g.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
-            g.fill();
-            const name = makeLabelLeft(row, 'Name', b.name, UI_FONT.body, done ? UI_COLOR.up : UI_COLOR.text, W - 200);
+            cardSurface(row, W, h, done ? MINT : PAPER);
+            const offset = this.wide && b.members.length ? 112 : 0;
+            if (offset) this.buildingImage(row, b.members[0], -W / 2 + 66, 0, 92, 100);
+            const name = makeLabelLeft(row, 'Name', b.name, UI_FONT.body, done ? TEAL : INK, W - 200 - offset);
             name.isBold = true;
-            name.node.setPosition(-W / 2 + 20, 46, 0);
+            name.node.setPosition(-W / 2 + 20 + offset, 46, 0);
             const st = makeLabelRight(row, 'St', done ? `已凑成 ${b.count} 条` : '还没凑成', UI_FONT.small, done ? UI_COLOR.up : UI_COLOR.textDim, 180);
             st.node.setPosition(W / 2 - 20, 46, 0);
             const members = b.members.map((m) => this.nameOf(m) + (b.lockedMembers.indexOf(m) >= 0 ? '（未研究）' : '')).join(' + ');
-            const ml = makeLabelLeft(row, 'Mem', `组合：${members}`, UI_FONT.small, b.lockedMembers.length ? UI_COLOR.down : UI_COLOR.text, W - 40);
+            const ml = makeLabelLeft(row, 'Mem', `组合：${members}`, UI_FONT.small, b.lockedMembers.length ? UI_COLOR.down : UI_COLOR.text, W - 40 - offset);
             ml.overflow = Label.Overflow.SHRINK;
-            ml.node.setPosition(-W / 2 + 20, 4, 0);
-            const ef = makeLabelLeft(row, 'Eff', `效果：${b.effect}`, UI_FONT.small, UI_COLOR.textDim, W - 40);
+            ml.node.setPosition(-W / 2 + 20 + offset, 4, 0);
+            const ef = makeLabelLeft(row, 'Eff', `效果：${b.effect}`, UI_FONT.small, UI_COLOR.textDim, W - 40 - offset);
             ef.overflow = Label.Overflow.SHRINK;
-            ef.node.setPosition(-W / 2 + 20, -38, 0);
+            ef.node.setPosition(-W / 2 + 20 + offset, -38, 0);
         } })));
     }
 
@@ -510,12 +559,8 @@ export class CenterPanel extends Panel {
         let y = H / 2;
         // 营商环境
         const env = sim.businessEnv ? sim.businessEnv() : { total: 0, parts: [] };
-        const head = makeLabelLeft(body, 'Env', `营商环境 ${env.total} / 100`, UI_FONT.body, UI_COLOR.text, W / 2);
-        head.isBold = true;
-        head.node.setPosition(-W / 2, y - 16, 0);
-        const tip = makeLabelRight(body, 'EnvTip', '越高越容易谈成', UI_FONT.small, UI_COLOR.textDim, W / 2);
-        tip.node.setPosition(W / 2, y - 16, 0);
-        y -= 44;
+        this.sectionBand(body, H, `营商环境　${env.total} / 100`, '环境评分越高，签约机会越大。');
+        y -= 116;
         const colW = (W - 16) / 2;
         env.parts.forEach((p, i) => {
             const x = -W / 2 + (i % 2) * (colW + 16);
@@ -561,9 +606,15 @@ export class CenterPanel extends Panel {
 
         const offers = sim.state.offers ?? [];
         if (!offers.length) {
-            const l = makeLabel(body, 'None', '现在没有企业来谈。每 3 天会有新的投资意向，公告栏会提醒你。', UI_FONT.small, UI_COLOR.textDim, W - 40);
-            l.overflow = Label.Overflow.RESIZE_HEIGHT;
-            l.node.setPosition(0, y - 40, 0);
+            const empty = makePanelNode(body, 'AwaitingOffers', W, 138);
+            empty.setPosition(0, y - 80, 0);
+            cardSurface(empty, W, 138);
+            this.buildingImage(empty, 'bank', -W / 2 + 72, 0, 100, 98);
+            const x = -W / 2 + 140, textW = W - 160;
+            const title = makeLabelLeft(empty, 'None', '暂无投资意向', UI_FONT.body, INK, textW);
+            title.isBold = true;
+            title.node.setPosition(x, 18, 0);
+            makeLabelLeft(empty, 'When', '每 3 天更新，有新意向时会收到公告。', UI_FONT.small, UI_COLOR.textDim, textW).node.setPosition(x, -20, 0);
             return;
         }
         const listH = y + H / 2;
@@ -571,10 +622,7 @@ export class CenterPanel extends Panel {
         list.node.setPosition(0, y - listH / 2, 0);
         list.setRows(offers.map((o) => ({ height: 228, build: (row: Node) => {
             const h = 216;
-            const g = row.addComponent(Graphics);
-            g.fillColor = UI_COLOR.block;
-            g.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
-            g.fill();
+            cardSurface(row, W, h);
             const left = Math.max(0, o.until - sim.state.month);
             const t = makeLabelLeft(row, 'T', `${o.company}：想建${this.nameOf(o.defId)}`, UI_FONT.body, UI_COLOR.text, W - 200);
             t.isBold = true;

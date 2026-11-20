@@ -432,7 +432,7 @@ export class Simulation implements SimApi {
                     break;
                 }
             }
-            return { text: g.text, value, target: g.target, done: value >= g.target };
+            return { kind: g.kind, text: g.text, value, target: g.target, done: value >= g.target };
         });
     }
 
@@ -977,7 +977,7 @@ export class Simulation implements SimApi {
                 until: s.month + iv.valid,
             });
         }
-        if (s.offers.length > before) this.notice('offer', `有外地企业想来投资，去县发展中心「招商引资」看看`, []);
+        if (s.offers.length > before) this.notice('offer', `有外地企业想来投资，去发展中心「招商引资」看看`, []);
     }
 
     offerChance(offerId: number, taxBreak: boolean, mode: 'land' | 'subsidy' = 'land'): number {
@@ -1126,16 +1126,16 @@ export class Simulation implements SimApi {
         const curLvIdx = LEVEL_ORDER.indexOf(this.state.level);
         const needLvIdx = LEVEL_ORDER.indexOf(r.level);
         if (needLvIdx > curLvIdx) {
-            // 需要先升级：「先把县城升到「镇上」，在县发展中心研究「连锁商超」，再盖超市」
+            // 需要先升级：「先把县城升到「镇上」，在发展中心研究「连锁商超」，再盖超市」
             const needLvName = LEVEL_NAME[r.level];
             return {
-                hint: `先把县城升到「${needLvName}」，在县发展中心研究「${r.name}」，再${where}${targetName}`,
+                hint: `先把县城升到「${needLvName}」，在发展中心研究「${r.name}」，再${where}${targetName}`,
                 suggest: '',   // 现在盖不了，底栏不预选
             };
         }
-        // 当前等级能研究：「先在县发展中心研究「奶茶店」」
+        // 当前等级能研究：「先在发展中心研究「奶茶店」」
         return {
-            hint: `先在县发展中心研究「${r.name}」，再${where}${targetName}`.replace('盖一家盖', '盖'),
+            hint: `先在发展中心研究「${r.name}」，再${where}${targetName}`.replace('盖一家盖', '盖'),
             suggest: '',
         };
     }
@@ -2468,7 +2468,7 @@ export const DEF_NAMES: Record<string, string> = {
     noodle: '面馆', restaurant: '家常菜馆', banquet: '大酒楼', store: '小卖部', market: '菜市场', pharmacy: '药店',
     teahouse: '茶馆', 'old-street': '老街', dorm: '工人宿舍', kindergarten: '幼儿园', farm: '农田',
     workshop: '小作坊', textile: '纺织厂', 'food-factory': '食品厂', electronics: '电子厂',
-    center: '县发展中心', school: '学校', clinic: '卫生院', police: '派出所', bank: '银行',
+    center: '发展中心', school: '学校', clinic: '卫生院', police: '派出所', bank: '银行',
     bridge: '桥', port: '港口', mine: '矿场', plaza: '广场', tree: '行道树',
     'moto-factory': '摩托车厂', 'car-factory': '汽车厂',
     'dirt-road': '土路', road: '城市道路', 'dirt-tile': '泥土地', flagstone: '石板路', 'flower-bed': '花坛',
@@ -2523,6 +2523,9 @@ export function normalizeSimState(state: SimState, cfg?: SimConfig): SimState {
     if (!Array.isArray(state.buildings)) state.buildings = [];
     for (const r of state.residents) {
         if (VEHICLES.indexOf(r.vehicle) < 0) r.vehicle = 'walk';
+        if (r.wish && typeof r.wish.hint === 'string') {
+            r.wish.hint = r.wish.hint.replace(/县城?发展中心/g, '发展中心');
+        }
         if (!Array.isArray(r.log)) r.log = [];
         if (!Array.isArray(r.parentIds)) r.parentIds = [];
         if (!Array.isArray(r.childIds)) r.childIds = [];

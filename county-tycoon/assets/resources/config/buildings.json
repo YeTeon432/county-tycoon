@@ -39,7 +39,7 @@
     { "id": "electronics",  "name": "电子厂",     "category": "工业", "width": 2, "height": 2, "color": "#4d9be6" },
     { "id": "moto-factory", "name": "摩托车厂",   "category": "工业", "width": 2, "height": 2, "color": "#3a86d6" },
     { "id": "car-factory",  "name": "汽车厂",     "category": "工业", "width": 2, "height": 2, "color": "#c8483c" },
-    { "id": "center",       "name": "县发展中心",   "category": "公共", "width": 2, "height": 2, "color": "#e04a4a" },
+    { "id": "center",       "name": "发展中心",   "category": "公共", "width": 2, "height": 2, "color": "#e04a4a" },
     { "id": "school",       "name": "学校",       "category": "公共", "width": 2, "height": 2, "color": "#f0d1b0" },
     { "id": "clinic",       "name": "卫生院",     "category": "公共", "width": 1, "height": 1, "color": "#e8e4f0" },
     { "id": "police",       "name": "派出所",     "category": "公共", "width": 1, "height": 1, "color": "#2f5fa8" },

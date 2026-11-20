@@ -1,3 +1,4 @@
+import type { GoalDef } from './config';
 import { BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
 
 /**
@@ -130,6 +131,7 @@ export interface StreetStatus {
 }
 
 export interface GoalStatus {
+    kind: GoalDef['kind'];
     text: string;
     value: number;
     target: number;

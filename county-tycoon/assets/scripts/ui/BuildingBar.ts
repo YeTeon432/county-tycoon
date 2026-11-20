@@ -429,7 +429,7 @@ export class BuildingBar extends Component {
         if (sim0 && sim0.isUnlocked && !sim0.isUnlocked(def.id)) {
             // D026：没研究过
             const r = sim0.researchList ? sim0.researchList().find((x) => x.unlocks.indexOf(def.id) >= 0) : null;
-            return r ? `先在县发展中心研究「${r.name}」` : '还不能盖';
+            return r ? `先在发展中心研究「${r.name}」` : '还不能盖';
         }
         const locked = this.isLocked(def);
         if (locked) return `${LEVEL_NAME[locked.unlock]}解锁`;
@@ -440,7 +440,7 @@ export class BuildingBar extends Component {
         return null;
     }
 
-    /** 既没解锁、也没有研究能解锁它（县发展中心这种开局自带的）：不在底栏出现 */
+    /** 既没解锁、也没有研究能解锁它（发展中心这种开局自带的）：不在底栏出现 */
     private isHidden(def: BuildingDef): boolean {
         if (this._econ.get(def.id)?.selfBuilt) return true;   // 砖瓦房、自建小楼：只能住户自己翻盖（D026）
         const sim = this._sim;

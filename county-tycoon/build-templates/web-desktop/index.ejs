@@ -117,18 +117,7 @@
 </head>
 <body>
   <div id="startup">
-    <template id="covers">
-      <img class="town-panorama" data-cover="town" src="./cover-town.webp" alt="" fetchpriority="high">
-      <img class="town-panorama" data-cover="city" src="./cover-city.webp" alt="" fetchpriority="high">
-      <img class="town-panorama" data-cover="pixel" src="./cover-pixel.webp" alt="" fetchpriority="high">
-    </template>
-    <script>
-      const covers = document.getElementById('covers');
-      const requestedCover = new URLSearchParams(location.search).get('cover');
-      const selectedCover = Array.from(covers.content.querySelectorAll('img'))
-        .find(image => image.dataset.cover === requestedCover);
-      covers.replaceWith(selectedCover || covers.content.firstElementChild);
-    </script>
+    <img class="town-panorama" src="./cover-town.webp" alt="" fetchpriority="high">
     <section class="loading-town" aria-labelledby="game-title">
       <h1 id="game-title">我在县城当县长</h1>
       <div class="load-details">

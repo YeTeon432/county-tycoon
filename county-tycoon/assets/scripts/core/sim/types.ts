@@ -89,6 +89,12 @@ export interface PendingDeal {
     workerEdu?: Education;
 }
 
+/** 开工时确定的原厂与产权，施工途中拆掉原厂也能正常投产。 */
+export interface FactoryBranch {
+    sourceUid: number;
+    owner: 'county' | 'private';
+}
+
 /** 招商的厂施工期间记着：建成后是私营、让不让税、带不带工人（D032） */
 export interface DealOwner {
     company: string;
@@ -144,6 +150,7 @@ export interface LifeEvent {
 export interface BuildingSim {
     uid: number;
     defId: string;
+    branchOf?: number;           // 开分厂时的原厂 uid
     residentIds: number[];       // 住户
     workerIds: number[];         // 员工
     lastRevenue: number;         // 上月营业额 / 产值
@@ -182,6 +189,7 @@ export interface BuildingEcon {
     publicJob: boolean;          // 岗位工资由财政发（学校、卫生院、发展中心）
     /** 工期（天 = 月），0 = 立刻建成（道路、树）。D026 */
     buildDays: number;
+    canOpenBranch?: boolean;
     /** 住房（D026，DESIGN 23）：每个成年住户每月房租（0 = 用 rentPerPerson）、等级 1～5、幸福度加成 */
     rent: number;
     homeLevel: number;
@@ -272,7 +280,7 @@ export interface SimState {
      * 施工中的楼（D026，DESIGN 24）：完工前不进 buildings，不住人、不招工。旧存档没有。
      * startAt = 开工那一刻本月的进度（0..1）：进度条和工期都从这一刻算，不从月初算。
      */
-    construction?: { uid: number; defId: string; left: number; total: number; startAt?: number; deal?: DealOwner }[];
+    construction?: { uid: number; defId: string; left: number; total: number; startAt?: number; branch?: FactoryBranch; deal?: DealOwner }[];
     /** 口碑（D026，DESIGN 16.2）：满足心愿 +，有人走 −，每月衰减；加在迁入吸引力上。旧存档没有 = 0 */
     buzz?: number;
 }

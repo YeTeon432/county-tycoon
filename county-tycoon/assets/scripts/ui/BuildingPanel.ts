@@ -37,6 +37,7 @@ export class BuildingPanel extends Panel {
     /** 往顶栏第二行打一句提示（UiRoot 给） */
     private _onHint: ((text: string) => void) | null = null;
     private _facingBtn: ReturnType<typeof makeButton> | null = null;
+    private _onBranch: ((uid: number) => void) | null = null;
     private _list: ScrollList | null = null;
 
     /** 打开某栋建筑；找不到返回 null（比如 uid 已过期） */
@@ -48,11 +49,15 @@ export class BuildingPanel extends Panel {
         onResidentTap: ResidentTapHandler,
         toggleFacing: ((uid: number) => boolean) | null,
         onHint: ((text: string) => void) | null = null,
+        onBranch: ((uid: number) => void) | null = null,
     ): BuildingPanel | null {
         const placed = model.allBuildings().find((b) => b.uid === uid) ?? null;
         if (!placed) return null;
 
-        const panel = Panel.open(BuildingPanel, parent, placed.def.name, placed.def.category);
+        const branchOf = sim.building(uid)?.branchOf ?? sim.state.construction?.find(c => c.uid === uid)?.branch?.sourceUid;
+        const name = placed.def.name + (branchOf === undefined ? '' : '分厂');
+        const panel = Panel.open(BuildingPanel, parent, name, placed.def.category);
+        panel._onBranch = onBranch;
         panel._sim = sim;
         panel._placed = placed;
         panel._onResidentTap = onResidentTap;
@@ -110,6 +115,16 @@ export class BuildingPanel extends Panel {
             t.node.setPosition(-W / 2 + tileW / 2 + i * (tileW + gap), y - tileH / 2, 0);
         }
         y -= tileH + 36;
+
+        const offer = sim.branchOffer?.(placed.uid);
+        if (offer && this._onBranch) {
+            const label = makeLabelLeft(content, 'BranchTerms', `建设费 ${formatMoney(offer.cost)} · 新增 ${offer.jobs} 个岗位`,
+                UI_FONT.small, UI_COLOR.text, W - 180);
+            label.node.setPosition(-W / 2, y - 16, 0);
+            const btn = makeButton(content, 'OpenBranch', '开分厂', 146, 50, 'primary', () => this._onBranch?.(placed.uid));
+            btn.node.setPosition(W / 2 - 73, y - 16, 0);
+            y -= 68;
+        }
 
         // ── 上月账目（D026 真实账目）：营业额 − 工资 − 成本 − 税 − 维护 = 利润 ──
         if (!isHome && b && (b.lastRevenue || b.lastWages || b.lastUpkeep)) {

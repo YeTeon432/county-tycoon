@@ -218,6 +218,6 @@ export class ResidentPanel extends Panel {
     private buildingName(uid: number | null): string | null {
         if (uid === null) return null;
         const placed = this._model?.allBuildings().find((b) => b.uid === uid);
-        return placed ? placed.def.name : null;
+        return placed ? placed.def.name + (this._sim?.building(uid)?.branchOf === undefined ? '' : '分厂') : null;
     }
 }

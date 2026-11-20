@@ -1615,4 +1615,89 @@ suite('居民引导与用工', () => {
     });
 });
 
+suite('开分厂', () => {
+    function county() {
+        const cfg = loadFullConfig();
+        const map = new MapBuilder();
+        map.hRoad(1, 16, 5);
+        const oldHome = map.build('house', 2, 4);
+        const newHome = map.build('house', 15, 4);
+        const source = map.build('workshop', 2, 6);
+        const sim = new Simulation(cfg, map.view(), { seed: 421 });
+        const people = sim.state.residents.slice(0, 2);
+        for (const b of sim.state.buildings) { b.workerIds = []; b.residentIds = []; }
+        sim.state.residents = people;
+        people.forEach((r, i) => {
+            r.age = 30;
+            r.homeId = i === 0 ? oldHome : newHome;
+            sim.building(r.homeId)!.residentIds.push(r.id);
+            r.jobId = source;
+            r.jobTitle = '工人';
+            r.salary = 2600;
+            sim.building(source)!.workerIds.push(r.id);
+        });
+        sim.state.finance.funds = 80000;
+        return { cfg, map, source, sim, people };
+    }
+
+    test('选址、施工读档、原职原薪调岗与两处独立招工', () => {
+        const { cfg, map, source, sim, people } = county();
+        sim.building(source)!.owner = 'private';
+        eq(sim.branchOffer(source)!.jobs, 3);
+        eq(sim.branchTransferCount(source, 16, 6, 1, 1), 1);
+        eq(sim.branchTransferCount(source, 15, 10, 1, 1), 0, '没有路可到达');
+        const uid = map.build('workshop', 16, 6);
+        const funds = sim.state.finance.funds;
+        ok(sim.onBuilt(uid, 'workshop', 0, source));
+        ok(sim.onBuilt(uid, 'workshop', 0, source));
+        eq(sim.state.finance.funds, funds - cfg.building('workshop')!.cost, '只付一次');
+        eq(people[1].jobId, source, '施工期间原职照常');
+        const loaded = new Simulation(cfg, map.view(), { state: JSON.parse(JSON.stringify(sim.state)) });
+        loaded.stepMonth();
+        const branch = loaded.building(uid)!;
+        eq(branch.branchOf, source);
+        eq(branch.owner, 'private');
+        eq(loaded.branchOffer(uid), null);
+        const worker = loaded.resident(people[1].id)!;
+        eq(worker.jobId, uid);
+        eq(worker.jobTitle, people[1].jobTitle);
+        eq(worker.salary, people[1].salary);
+        ok(branch.workerIds.includes(worker.id));
+        ok(!loaded.building(source)!.workerIds.includes(worker.id));
+        eq(loaded.resident(people[0].id)!.jobId, source);
+        eq(loaded.employers().find(e => e.uid === uid)!.required, 3);
+    });
+
+    test('选址后搬家的员工按完工时的通勤重新判断', () => {
+        const { map, source, sim, people } = county();
+        eq(sim.branchTransferCount(source, 16, 6, 1, 1), 1);
+        const uid = map.build('workshop', 16, 6);
+        ok(sim.onBuilt(uid, 'workshop', 0, source));
+        const [local, mover] = people;
+        sim.building(mover.homeId!)!.residentIds = [];
+        mover.homeId = local.homeId;
+        sim.building(local.homeId!)!.residentIds.push(mover.id);
+        sim.stepMonth();
+        eq(mover.jobId, source);
+        ok(!sim.building(uid)!.workerIds.includes(mover.id));
+    });
+
+    test('开工失败保留资金，拆掉原厂后分厂仍能完工', () => {
+        const { cfg, map, source, sim } = county();
+        const uid = map.build('workshop', 16, 6);
+        const funds = sim.state.finance.funds;
+        eq(sim.onBuilt(uid, 'textile', 0, source), false);
+        eq(sim.state.finance.funds, funds);
+        sim.state.finance.funds = 0;
+        eq(sim.onBuilt(uid, 'workshop', 0, source), false);
+        eq(sim.state.construction?.length ?? 0, 0);
+        sim.state.finance.funds = cfg.building('workshop')!.cost;
+        ok(sim.onBuilt(uid, 'workshop', 0, source));
+        sim.onDemolished(source);
+        sim.stepMonth();
+        ok(sim.building(uid));
+        eq(sim.building(source), null);
+    });
+});
+
 report();

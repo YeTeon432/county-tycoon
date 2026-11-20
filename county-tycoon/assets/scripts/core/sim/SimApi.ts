@@ -15,7 +15,9 @@ export interface SimApi {
      * 玩家盖了一栋（TownModel.place 成功后调）。资金不够返回 false，调用方应撤销放置。
      * dayProgress = 盖下的这一刻本月走到了哪儿（0..1，DayClock.progress）：工期从这里算起，不从月初算。
      */
-    onBuilt(uid: number, defId: string, dayProgress?: number): boolean;
+    onBuilt(uid: number, defId: string, dayProgress?: number, branchOf?: number): boolean;
+    branchOffer?(uid: number): { cost: number; jobs: number } | null;
+    branchTransferCount?(uid: number, col: number, row: number, w: number, h: number): number;
     /** 玩家拆了一栋 */
     onDemolished(uid: number): void;
     /**

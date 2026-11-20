@@ -56,6 +56,7 @@ export class UiRoot extends Component {
     requestToggleFacing: ((uid: number) => boolean) | null = null;
     /** 招商供地：让玩家去地图上选址（GameRoot 接到底栏 + WorldView） */
     requestPlace: ((defId: string) => boolean) | null = null;
+    requestBranch: ((uid: number) => string | null) | null = null;
     getGridPreference: (() => boolean) | null = null;
     setGridPreference: ((on: boolean) => void) | null = null;
     /** 居民追踪（T425，GameRoot 接到 WorldView）：开始 / 结束（null） */
@@ -430,6 +431,11 @@ export class UiRoot extends Component {
             (residentId) => this.openResident(residentId),
             this.requestToggleFacing,
             (text) => this._topPanel?.showFeedback(text),
+            this.requestBranch ? (source) => {
+                const reason = this.requestBranch!(source);
+                if (reason) this._topPanel?.showFeedback(reason);
+                else this.closeTopPanel();
+            } : null,
         );
         if (panel) {
             panel.onClosed = () => { this._topPanel = null; };

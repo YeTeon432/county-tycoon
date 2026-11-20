@@ -47,6 +47,7 @@ export class GameRoot extends Component {
     private _bar: BuildingBar | null = null;
     /** 模拟层。支线 A 做好 Simulation 后把 MockSim 换掉（只改这一处） */
     private _sim: SimApi | null = null;
+    private _branchSource?: number;
     private _progressJson: any = null;
     private _defs: BuildingDef[] = [];
     private _ui: UiRoot | null = null;
@@ -152,7 +153,10 @@ export class GameRoot extends Component {
         // 自动存档：切后台时 + 每个月结算后（DESIGN 1：每月自动存）
         this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
         this._saver.startAutoSave();
-        sim.onMonth = () => this.save();
+        sim.onMonth = () => {
+            this.save();
+            if (this._branchSource !== undefined) this.updatePlacementHint();
+        };
 
         this.buildWorld(world, model);
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
@@ -217,7 +221,27 @@ export class GameRoot extends Component {
                     return m;
                 };
                 // 招商签约后（D032）：选中那栋楼，自动挑一块挨路、离住宅近的空地放好预览
+                ui.requestBranch = (uid) => {
+                    const source = sim.building(uid);
+                    const def = this._defs.find(d => d.id === source?.defId);
+                    if (!def || !sim.branchOffer?.(uid)) return '这家厂暂时无法扩建';
+                    if (sim.state.pendingDeal?.defId === def.id) return '请先完成同类工厂的招商选址';
+                    this._bar?.clearSelection();
+                    this._bar?.clearDemolish();
+                    this._branchSource = uid;
+                    view.selectBuilding(def);
+                    view.suggestPlacement();
+                    this.updatePlacementHint();
+                    return null;
+                };
+                view.onPlacementCancelled = () => {
+                    if (this._branchSource === undefined) return;
+                    this._branchSource = undefined;
+                    view.selectBuilding(null);
+                    this.updatePlacementHint();
+                };
                 ui.requestPlace = (defId) => {
+                    this._branchSource = undefined;
                     if (!this._bar || !this._bar.selectById(defId)) return false;
                     const ok = view.suggestPlacement();
                     this.updatePlacementHint();
@@ -268,6 +292,13 @@ export class GameRoot extends Component {
         if (!ui || !view) return;
         // 预览中：能凑特色街道就提示（D026，DESIGN 21）
         const p = view.pending, sim = this._sim;
+        if (this._branchSource !== undefined && view.selectedBuilding) {
+            const offer = sim?.branchOffer?.(this._branchSource);
+            const count = p?.ok ? sim?.branchTransferCount?.(this._branchSource, p.col, p.row, p.def.width, p.def.height) : undefined;
+            const impact = count === undefined ? '点空地选址' : `预计 ${count} 人可就近调岗`;
+            if (offer) ui.setPlacementHint(`${view.selectedBuilding.name}分厂 · ¥${offer.cost.toLocaleString()} · 新增 ${offer.jobs} 岗 · ${impact}`);
+            return;
+        }
         const street = p && p.ok && sim && sim.streetHint ? sim.streetHint(p.def.id, p.col, p.row, p.def.width, p.def.height) : null;
         const reach = p && p.ok ? this.reachHint(p.def.id, p.col, p.row, p.def.width, p.def.height) : null;
         const deal = sim && sim.state.pendingDeal;
@@ -377,7 +408,7 @@ export class GameRoot extends Component {
             const sim = this._sim;
             const dealBefore = !!(sim && sim.state.pendingDeal);
             // 把开工时刻（本月走到哪儿）传给模拟层：工期从这一刻算，进度条才不会一出现就半满
-            const ok = sim ? sim.onBuilt(b.uid, b.def.id, DayClock.progress()) : true;
+            const ok = sim ? sim.onBuilt(b.uid, b.def.id, DayClock.progress(), this._branchSource) : true;
             if (ok && this._ui) this._ui.notifyBuilt();
             // 招商供地选址完成（D026）：退出放置，免得接着盖第二栋要自己掏钱
             if (ok && dealBefore && sim && !sim.state.pendingDeal) {
@@ -393,6 +424,7 @@ export class GameRoot extends Component {
         worldView.onPlaceRejected = (d, why) => console.log(`[GameRoot] ${d.name} 没盖成：${why}`);
         // 非道路建筑确认放置后退出选中：底栏取消高亮，玩家点别处不会再开新预览
         worldView.onBuildingConfirmed = () => {
+            this._branchSource = undefined;
             if (this._bar) this._bar.clearSelection();
             this.updatePlacementHint();
         };
@@ -425,10 +457,12 @@ export class GameRoot extends Component {
         bar.build(defs);
 
         bar.onSelect = (def) => {
+            this._branchSource = undefined;
             if (this._view) this._view.selectBuilding(def);
             this.updatePlacementHint();
         };
         bar.onDemolishToggle = (on) => {
+            if (on) this._branchSource = undefined;
             if (this._view) this._view.setDemolishMode(on);
             this.updatePlacementHint();
         };

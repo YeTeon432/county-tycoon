@@ -69,17 +69,6 @@
       background: linear-gradient(#ffdd79, #f5ad3b 53%, #df861f);
       border-radius: 8px;
       box-shadow: inset 0 1px #fff2b6;
-      transition: width .15s ease-out;
-    }
-    #load-track:not([aria-valuenow]) #load-fill {
-      width: 100%;
-      background: linear-gradient(105deg, transparent 25%, #f4b94b55 48%, transparent 70%) 100% 0 / 240% 100%;
-      animation: shimmer 2.2s linear infinite;
-      box-shadow: none;
-    }
-    @keyframes shimmer { to { background-position: -80% 0; } }
-    @media (prefers-reduced-motion: reduce) {
-      #startup #load-fill { animation: none; transition: none; }
     }
     .load-caption {
       position: absolute;
@@ -128,15 +117,26 @@
 </head>
 <body>
   <div id="startup">
-    <img class="town-panorama" src="./county-riverfront.webp" alt="" fetchpriority="high">
+    <template id="covers">
+      <img class="town-panorama" data-cover="town" src="./cover-town.webp" alt="" fetchpriority="high">
+      <img class="town-panorama" data-cover="city" src="./cover-city.webp" alt="" fetchpriority="high">
+      <img class="town-panorama" data-cover="pixel" src="./cover-pixel.webp" alt="" fetchpriority="high">
+    </template>
+    <script>
+      const covers = document.getElementById('covers');
+      const requestedCover = new URLSearchParams(location.search).get('cover');
+      const selectedCover = Array.from(covers.content.querySelectorAll('img'))
+        .find(image => image.dataset.cover === requestedCover);
+      covers.replaceWith(selectedCover || covers.content.firstElementChild);
+    </script>
     <section class="loading-town" aria-labelledby="game-title">
       <h1 id="game-title">我在县城当县长</h1>
       <div class="load-details">
         <div class="load-meter">
-          <div id="load-track" role="progressbar" aria-label="城镇加载进度" aria-valuemin="0" aria-valuemax="100"><div id="load-fill"></div></div>
+          <div id="load-track" role="progressbar" aria-label="城镇加载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="load-fill"></div></div>
           <div class="load-caption">
             <span id="startup-status" role="status">正在启动游戏引擎…</span>
-            <span id="load-count" aria-hidden="true"></span>
+            <span id="load-count" aria-hidden="true">0%</span>
           </div>
         </div>
         <button type="button" hidden onclick="location.reload()">重新加载</button>
@@ -170,22 +170,23 @@
       clearTimeout(slowTimer);
       console.error('[城镇加载]', error);
       statusText.textContent = '加载失败，请重新加载。';
-      count.textContent = '';
-      track.hidden = true;
+      // 保留失败时的位置，重试才开始新的加载。
       retry.hidden = false;
     }
 
     // 资源解码、地图、图集、建造栏和绘制首帧均完成后才到 100%。
     let totalSteps = 0;
     let completedSteps = 0;
-    function advanceProgress(steps = 1) {
-      if (failed) return;
+    function showProgress(percent) {
+      if (failed || percent < Number(track.getAttribute('aria-valuenow'))) return;
       markActivity();
-      completedSteps += steps;
-      const percent = Math.floor(100 * completedSteps / totalSteps);
       track.setAttribute('aria-valuenow', percent);
       count.textContent = percent + '%';
       fill.style.width = percent + '%';
+    }
+    function advanceProgress() {
+      completedSteps++;
+      showProgress(10 + Math.floor(90 * completedSteps / totalSteps));
     }
     async function loadTownResources(cc) {
       const { resources, JsonAsset, ImageAsset, Prefab, Material } = cc;
@@ -204,7 +205,7 @@
 
       totalSteps = assets.length + readyEvents.length + 1;
       statusText.textContent = '正在加载城镇资源';
-      advanceProgress(0);
+      showProgress(10);
       // 使用游戏本身的资源缓存。每项在解码及其依赖就绪后计入进度。
       await Promise.all(assets.map(({ path, type }) => new Promise((resolve, reject) => {
         resources.load(path, type, (error, asset) => {
@@ -239,7 +240,7 @@
     const readyEvents = ['town-ready', 'town-art-ready', 'town-thumbnails-ready'];
     Promise.resolve().then(() => System.import('cc')).then(cc => {
       const { director, Director, game, settings, ResolutionPolicy } = cc;
-      markActivity();
+      showProgress(2);
       statusText.textContent = '正在读取游戏配置…';
       director.once('town-load-error', startupFailed);
       const ready = name => new Promise(resolve => director.once(name, resolve));
@@ -254,6 +255,8 @@
           });
         });
       });
+      game.onPostInfrastructureInitDelegate.add(() => showProgress(6));
+      game.onPostSubsystemInitDelegate.add(() => showProgress(8));
       game.onPostProjectInitDelegate.add(async () => {
         try {
           await loadTownResources(cc);
@@ -263,6 +266,7 @@
         }
       });
       game.onPostBaseInitDelegate.add(() => {
+        showProgress(4);
         settings.overrideSettings('screen', 'landscapeWebLayout', true);
         settings.overrideSettings('screen', 'designResolution', {
           width: designWidth,

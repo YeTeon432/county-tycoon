@@ -1,5 +1,5 @@
 import { DayClock } from './DayClock';
-import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx } from 'cc';
+import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx, screen, view as gameView, ResolutionPolicy } from 'cc';
 import { Spike3D } from '../spike/Spike3D';
 import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
@@ -16,7 +16,7 @@ import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
 import { PlaceControls } from '../world/PlaceControls';
 import { TopBar } from '../ui/TopBar';
 import { TrackChip } from '../ui/TrackChip';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 
 const { ccclass } = _decorator;
 const MAP_GRID_PREFERENCE_KEY = 'county-map-grid';
@@ -63,11 +63,28 @@ export class GameRoot extends Component {
         return this._newGame;
     }
 
+    private landscape: boolean | null = null;
+
+    private fitViewport(): void {
+        const size = screen.windowSize;
+        const wide = size.width > size.height;
+        if (wide === this.landscape) return;
+        this.landscape = wide;
+        if (wide) gameView.setDesignResolutionSize(1600, 960, ResolutionPolicy.FIXED_HEIGHT);
+        else gameView.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_WIDTH);
+    }
+
     protected onDestroy(): void {
+        gameView.off('canvas-resize', this.fitViewport, this);
         if (this._saver) this._saver.stopAutoSave();
     }
 
     protected start(): void {
+        const platform = getPlatform().name;
+        if ((platform === 'web' && !usesLandscapeWebLayout()) || platform === 'native') {
+            this.fitViewport();
+            gameView.on('canvas-resize', this.fitViewport, this);
+        }
         // 微信小游戏的 location 没有 search。浏览器带 ?spike3d 时进入 3D 技术验证场景。
         if (typeof location !== 'undefined' && typeof location.search === 'string' && location.search.includes('spike3d')) {
             for (const c of director.getScene()!.getComponentsInChildren(Camera)) c.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;
@@ -184,6 +201,7 @@ export class GameRoot extends Component {
             DayClock.speed = () => (ui.clock ? ui.clock.speed : 1);
             // 第三、四批（D026）：环境图层、特色街道小旗、招商选址
             if (sim) {
+                ui.onResidentChanged = () => this.save();
                 view.envAt = sim.envAt ? (c, r) => sim.envAt!(c, r) : null;
                 view.envOfDef = sim.buildingEnv ? (id) => sim.buildingEnv!(id) : null;
                 // T538 覆盖范围：放店 / 学校时画它沿路够得着的路和住户；追踪居民时画他心愿要的范围
@@ -236,7 +254,7 @@ export class GameRoot extends Component {
             // 点地块的回调比预览挪位置早一步：等这一帧预览挪好了再读（不然提示的是上一个位置）
             view.onCellTapped = () => this.scheduleOnce(() => this.updatePlacementHint(), 0);
             // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
-            view.onTownChanged = () => { this.updatePlacementHint(); this.save(); };
+            view.onTownChanged = () => { this.updatePlacementHint(); ui.refreshOpenPanels(); this.save(); };
         }
         this.updatePlacementHint();
     }

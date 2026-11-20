@@ -13,7 +13,7 @@ const { ccclass } = _decorator;
 /**
  * 月度账单（T310）。
  *
- * 顶栏「账单」按钮打开（T406 起是白色抽屉）：顶部收入 / 支出 / 结余三格，下面两列明细、人口变化、大事记。
+ * 顶栏「账单」按钮打开：顶部收入 / 支出 / 结余三格，下面两列明细、人口变化、大事记。
  * 结构照 DESIGN 第 8 节：收入分项、支出分项、人口前后、事件列表。
  *
  * 收入 / 支出的中文名写在这里而不是配置表里：它们对应 MonthlyReport 的固定字段，
@@ -42,23 +42,31 @@ const EXPENSE_ROWS: { key: keyof MonthlyReport['expense']; label: string }[] = [
 
 @ccclass('MonthReportPanel')
 export class MonthReportPanel extends Panel {
-    protected cardH = 1060;
 
     private _report: MonthlyReport | null = null;
     private _sim: SimApi | null = null;
 
-    static show(parent: Node, sim: SimApi, report: MonthlyReport): MonthReportPanel {
-        const panel = Panel.open(MonthReportPanel, parent, `${monthLabel(report.month)} 账单`, '月度');
+    static show(parent: Node, sim: SimApi, report: MonthlyReport | null): MonthReportPanel {
+        const panel = Panel.open(MonthReportPanel, parent, '月度账单', monthLabel(report?.month ?? sim.state.month), 'report');
         panel._sim = sim;
         panel._report = report;
-        panel.fill();
+        panel.renderPage = () => panel.fill();
+        panel.renderPage();
         return panel;
     }
 
     private fill(): void {
         const r = this._report;
         const content = this.content;
-        if (!r || !content) return;
+        if (!content || !this._sim) return;
+        if (!r) {
+            const W = this.contentW;
+            const tile = makeStatTile(content, W, 112, '当前县库', formatMoney(this._sim.state.finance.funds), UI_COLOR.text);
+            tile.node.setPosition(0, this.contentTop - 56, 0);
+            const note = makeLabelLeft(content, 'FirstSettlement', '首月经营中，月底结算后可查看收支明细和人口变化。', UI_FONT.body, UI_COLOR.textDim, W);
+            note.node.setPosition(-W / 2, this.contentTop - 162, 0);
+            return;
+        }
         const W = this.contentW;
         let y = this.contentTop;
 

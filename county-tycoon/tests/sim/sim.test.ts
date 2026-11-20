@@ -1196,7 +1196,6 @@ suite('特色街道 / 环境 / 住房 / 招商（D026 第三、四批）', () =>
 
     test('住房：自家翻盖（钱从住户出、算流出），完工换成砖瓦房，房租和幸福度跟着变', () => {
         const cfg = loadFullConfig();
-        cfg.economy.renovateChance = 1;
         const m = new MapBuilder(12, 6);
         m.hRoad(0, 10, 3);
         const home = m.build('hut', 2, 2); m.build('workshop', 4, 2); m.build('breakfast', 5, 2);
@@ -1482,7 +1481,7 @@ suite('覆盖范围：放置预览 / 心愿范围', () => {
         eq(sim.serviceReach('house', 5, 6, 1, 1), null);
     });
 
-    test('wishReach：店 / 学校 / 卫生院心愿从他家沿路画范围，别的心愿没有', () => {
+    test('wishReach：旧购物心愿读新圆半径，学校仍显示沿路范围', () => {
         const cfg = loadConfig();
         const t = basicTown(cfg);
         const sim = new Simulation(cfg, t.view, { seed: 5 });
@@ -1492,13 +1491,127 @@ suite('覆盖范围：放置预览 / 心愿范围', () => {
         r.wish = { kind: 'shop', demand: 'fun', text: '', hint: '', suggest: '', radius: 6, since: 0, until: 99 };
         const w = sim.wishReach(r.id)!;
         ok(!!w);
-        eq(w.radius, 6);
+        eq(w.radius, 8);
+        ok(!!w.circle);
         eq(w.homes.join(','), String(r.homeId));
-        ok(w.roads.length > 0);
+        eq(w.roads.length, 0);
+        r.wish = { kind: 'school', text: '', hint: '', suggest: '', radius: 10, since: 0, until: 99 };
+        ok(sim.wishReach(r.id)!.roads.length > 0);
         r.wish = { kind: 'job', text: '', hint: '', suggest: '', radius: 0, since: 0, until: 99 };
         eq(sim.wishReach(r.id), null);
         r.wish = null;
         eq(sim.wishReach(r.id), null);
+    });
+});
+
+suite('居民引导与用工', () => {
+    test('开局介绍工作：按扣分排序、重查空岗、成功才结算一次', () => {
+        const m = new MapBuilder();
+        m.build('house', 2, 2); m.build('house', 3, 2);
+        const shop = m.build('breakfast', 4, 2);
+        const sim = new Simulation(loadFullConfig(), m.view(), { seed: 81 });
+        const [a, b] = sim.state.residents;
+        for (const r of [a, b]) {
+            r.monthsUnemployed = 5;
+            r.moodParts = [{ key: 'work', label: '失业', value: -18 }, { key: 'missed', label: '购物', value: -12 }];
+            sim.openGuidance(r.id);
+            eq(r.wish?.kind, 'job');
+            ok(r.wish!.text.includes('5 个月'));
+            eq(sim.jobReferral(r.id)?.uid, shop);
+        }
+        const offered = sim.jobReferral(a.id)!;
+        eq(sim.introduceJob(a.id, shop, '不合适的岗位'), false);
+        eq(sim.introduceJob(a.id, shop, offered.title), true);
+        eq(sim.introduceJob(b.id, shop, offered.title), false);
+        eq(sim.introduceJob(a.id, shop, offered.title), false);
+        eq(sim.state.wishesDone, 1);
+        eq(a.jobId, shop);
+        eq(a.wish?.kind, 'shop');
+        ok(a.wish!.hint.includes('未解锁'));
+        eq(sim.employers()[0].staff, 1);
+        eq(sim.employers()[0].required, 1);
+    });
+
+    test('企业逐栋统计，特定意向须满足企业、职称、学历和实际空缺', () => {
+        const cfg = loadFullConfig(), m = new MapBuilder();
+        m.build('house', 1, 2);
+        const a = m.build('supermarket', 4, 2), b = m.build('supermarket', 7, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 82 });
+        const r = sim.state.residents[0];
+        r.wish = { kind: 'job', jobTarget: { defId: 'supermarket', title: '店长' },
+            text: '想当店长', hint: '', suggest: '', radius: 0, since: 0, until: 10 };
+        r.education = 0;
+        eq(sim.jobReferral(r.id), null);
+        r.education = 2;
+        eq(sim.introduceJob(r.id, a, '收银员'), false);
+        ok(sim.introduceJob(r.id, b, '店长'));
+        const rows = sim.employers();
+        eq(rows.length, 2);
+        eq(rows[0].required + rows[1].required, 8);
+        eq(rows.find((x) => x.uid === a)!.staff, 0);
+        eq(rows.find((x) => x.uid === b)!.staff, 1);
+        sim.onDemolished(b);
+        eq(sim.employers().length, 1);
+        eq(r.jobId, null);
+    });
+
+    test('购物圆按建筑中心判定，圈外对角、施工中均无效；圈边断路店完工即满足', () => {
+        const cfg = loadFullConfig(), m = new MapBuilder();
+        cfg.progress!.wishes.shopRadius = 5;
+        m.build('house', 2, 2); m.build('house', 2, 3);
+        m.build('store', 6, 6);
+        const sim = new Simulation(cfg, m.view(), { seed: 83 });
+        const r = sim.state.residents.find((p) => p.homeId === sim.state.buildings[0].uid)!;
+        r.idle = true;
+        r.moodParts = [{ key: 'missed', label: '购物', value: -12 }];
+        r.wish = { kind: 'shop', demand: 'daily', text: '买日用品要跑很远', hint: '旧提示', suggest: 'parcel', radius: 99, since: 0, until: 10 };
+        sim.openGuidance(r.id);
+        eq(r.wish!.text, '买日用品要跑很远');
+        for (const name of ['小卖部', '快递驿站', '药店', '超市']) ok(r.wish!.hint.includes(name));
+        const reach = sim.wishReach(r.id)!;
+        eq(reach.radius, 5);
+        eq(reach.circle!.col, 2.5);
+        eq(reach.circle!.row, 2.5);
+        sim.state.unlocked!.push('store');
+        const uid = m.build('store', 5, 6);
+        ok(sim.onBuilt(uid, 'store'));
+        sim.openGuidance(r.id);
+        eq(r.wish!.demand, 'daily');
+        sim.stepMonth();
+        ok(sim.building(uid));
+        ok(r.log.some((event) => event.text.includes('心愿实现了：买日用品要跑很远')));
+    });
+
+    test('挽留最后一个月先兑现心愿，再决定是否搬离', () => {
+        const cfg = loadFullConfig(), m = new MapBuilder();
+        cfg.economy.leaveMonths = 1;
+        cfg.progress!.wishes.doneMood = 100;
+        m.build('house', 2, 2); m.build('store', 3, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 85 });
+        const r = sim.state.residents[0];
+        r.mood = 0;
+        r.leaving = { since: 0, reasons: ['购物不便'] };
+        r.wish = { kind: 'shop', demand: 'daily', text: '想在附近买日用品', hint: '', suggest: 'store', radius: 8, since: 0, until: 1 };
+        eq(sim.leaveMonthsLeft(r), 1);
+        sim.stepMonth();
+        ok(sim.resident(r.id));
+        eq(r.leaving, null);
+        ok(r.mood >= cfg.economy.stayMood);
+    });
+
+    test('住处提示随解锁、存款和施工更新，翻盖费用只付一次', () => {
+        const cfg = loadFullConfig(), m = new MapBuilder();
+        const home = m.build('hut', 2, 2);
+        const sim = new Simulation(cfg, m.view(), { seed: 84 });
+        ok(sim.housingHint(home).includes('尚未解锁'));
+        sim.state.unlocked!.push('brick');
+        for (const p of sim.state.residents) { p.savings = 0; p.mood = 100; }
+        ok(sim.housingHint(home).includes('再攒'));
+        sim.state.residents[0].savings = 100000;
+        ok(sim.housingHint(home).includes('条件已齐'));
+        sim.stepMonth();
+        ok(sim.housingHint(home).includes('正在翻盖'));
+        eq(sim.state.renovations!.filter((x) => x.uid === home).length, 1);
     });
 });
 

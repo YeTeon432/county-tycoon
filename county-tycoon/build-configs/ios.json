@@ -5,10 +5,10 @@
     "ios": {
       "packageName": "com.countytycoon.ios",
       "orientation": {
-        "portrait": true,
+        "portrait": false,
         "upsideDown": false,
-        "landscapeRight": false,
-        "landscapeLeft": false
+        "landscapeRight": true,
+        "landscapeLeft": true
       },
       "osTarget": {
         "iphoneos": true,

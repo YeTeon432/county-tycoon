@@ -531,6 +531,7 @@
     "top100": 500000
   },
   "wishes": {
+    "shopRadius": 8,
     "_说明": "每月每个没心愿的成年人有 chance 的概率冒一个（条件满足才冒）；全县同时最多 max(minActive, 人口 / perPeople) 个；days 天内实现幸福度 +doneMood，过期 −expireMood",
     "chance": 0.25,
     "minActive": 3,

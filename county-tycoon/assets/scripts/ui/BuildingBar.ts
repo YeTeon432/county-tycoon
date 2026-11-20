@@ -31,7 +31,7 @@ const LEVEL_NAME: Record<TownLevel, string> = {
 };
 
 /** economy.json 里建造栏要用的两项 */
-interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean; housing: number }
+interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean; housing: number; jobs: number }
 
 interface Card {
     def: BuildingDef;
@@ -86,6 +86,7 @@ export class BuildingBar extends Component {
     static readonly PADDING = 16;
     private static readonly THUMB_H = 84;
 
+    onOpenCatalog: (() => void) | null = null;
     onSelect: ((def: BuildingDef | null) => void) | null = null;
     onDemolishToggle: ((on: boolean) => void) | null = null;
     /** 点了未解锁 / 买不起的卡片：给一句提示（UiRoot 接到顶栏提示条） */
@@ -126,20 +127,23 @@ export class BuildingBar extends Component {
 
     build(defs: BuildingDef[]): void {
         this._defs = defs;
-        const visible = view.getVisibleSize();
-        const W = usesLandscapeWebLayout() ? Math.min(1280, visible.width) : visible.width;
+        const W = usesLandscapeWebLayout() ? Math.min(1280, view.getVisibleSize().width) : 720;
         const H = BuildingBar.BAR_HEIGHT;
 
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
         trans.setContentSize(W, H);
-        this.node.setPosition(0, -visible.height / 2 + H / 2, 0);
+        const align = () => {
+            const visible = view.getVisibleSize();
+            this.node.setPosition(0, -visible.height / 2 + H / 2, 0);
+        };
+        align();
+        view.on('canvas-resize', align, this);
 
         this.buildSheet(W, H);
         this.buildTabs(W, H);
-        const clipCards = W < visible.width;
-        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H + (clipCards ? 24 : 0));
-        if (clipCards) this._cardLayer.addComponent(Mask).type = Mask.Type.GRAPHICS_RECT;
+        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H + (usesLandscapeWebLayout() ? 24 : 0));
+        this._cardLayer.addComponent(Mask).type = Mask.Type.GRAPHICS_RECT;
         this._cardLayer.setPosition(0, -H / 2 + BuildingBar.bottomInset() + 14 + BuildingBar.ITEM_H / 2, 0);
         // 金币和小锁是两张图：分两层，不然一张卡里交替出现就断批
         this._layers = ['BgLayer', 'ThumbLayer', 'CoinLayer', 'LockLayer', 'TextLayer'].map((n) => makePanelNode(this._cardLayer!, n, W, BuildingBar.ITEM_H));
@@ -184,7 +188,7 @@ export class BuildingBar extends Component {
     private loadEconomy(): void {
         resources.load('config/economy', JsonAsset, (err, asset) => {
             if (err || !asset || !asset.json) return;
-            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean; housing?: number }[] }).buildings;
+            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean; housing?: number; jobs?: { count: number }[] }[] }).buildings;
             if (!Array.isArray(list)) return;
             for (const b of list) {
                 if (!b || typeof b.id !== 'string') continue;
@@ -192,6 +196,7 @@ export class BuildingBar extends Component {
                     cost: typeof b.cost === 'number' ? b.cost : 0,
                     unlock: LEVEL_ORDER.indexOf(b.unlock as TownLevel) >= 0 ? b.unlock as TownLevel : 'village',
                     selfBuilt: b.selfBuilt === true,
+                    jobs: (b.jobs ?? []).reduce((sum, slot) => sum + slot.count, 0),
                     housing: typeof b.housing === 'number' ? b.housing : 0,
                 });
             }
@@ -244,6 +249,7 @@ export class BuildingBar extends Component {
             node.on(Node.EventType.TOUCH_END, () => {
                 if (this._dragging) return;
                 this.selectTab(t.key);
+                this.onOpenCatalog?.();
             }, this);
             this._tabs.push({ key: t.key, node, g, label, w });
             x += w + gap;
@@ -282,6 +288,10 @@ export class BuildingBar extends Component {
         this._tab = key;
         this._scrollX = 0;
         this.applyTab();
+    }
+
+    catalogEntries(): { def: BuildingDef; econ?: Econ }[] {
+        return this.visibleCards().map(({ def }) => ({ def, econ: this._econ.get(def.id) }));
     }
 
     get tab(): string {
@@ -452,7 +462,7 @@ export class BuildingBar extends Component {
     private isLocked(def: BuildingDef): Econ | null {
         const e = this._econ.get(def.id);
         const sim = this._sim;
-        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village', housing: 0 });
+        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village', housing: 0, jobs: 0 });
         if (!e || !sim) return null;
         return LEVEL_ORDER.indexOf(e.unlock) > LEVEL_ORDER.indexOf(sim.state.level) ? e : null;
     }
@@ -489,8 +499,9 @@ export class BuildingBar extends Component {
         const e = this._econ.get(c.def.id);
         c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
         c.coin.node.active = !!e;
-        c.cap.node.active = !!e && e.housing > 0;
-        if (e && e.housing > 0) c.cap.string = `住${e.housing}人`;
+        const jobs = c.def.category === '店铺' ? e?.jobs ?? 0 : 0;
+        c.cap.string = e?.housing ? `住${e.housing}人` : jobs ? `招${jobs}人` : '';
+        c.cap.node.active = !!c.cap.string;
         // 选中上浮一点
         c.node.setPosition(c.node.position.x, selected ? 4 : 0, 0);
     }
@@ -538,11 +549,7 @@ export class BuildingBar extends Component {
     }
 
     private maxScroll(): number {
-        return Math.max(0, this.contentWidth() - this.viewportWidth);
-    }
-
-    private get viewportWidth(): number {
-        return this.node.getComponent(UITransform)!.width;
+        return Math.max(0, this.contentWidth() - this.node.getComponent(UITransform)!.width);
     }
 
     private scrollBy(px: number): void {
@@ -551,7 +558,7 @@ export class BuildingBar extends Component {
     }
 
     private applyScroll(): void {
-        const visibleW = this.viewportWidth;
+        const visibleW = this.node.getComponent(UITransform)!.width;
         const max = this.maxScroll();
         if (this._scrollX < 0) this._scrollX = 0;
         if (this._scrollX > max) this._scrollX = max;
@@ -726,7 +733,7 @@ export class BuildingBar extends Component {
         g.clear();
         const w = BuildingBar.ITEM_W, h = BuildingBar.ITEM_H;
         const imgW = w - 16, imgH = BuildingBar.THUMB_H, imgY = h / 2 - 8 - imgH / 2;
-        const vw = this.viewportWidth;
+        const vw = this.node.getComponent(UITransform)!.width;
         for (const c of this._cards) {
             if (!c.node.active) continue;
             const x = c.node.position.x, y = c.node.position.y, sel = c.selected;
@@ -745,6 +752,7 @@ export class BuildingBar extends Component {
     }
 
     protected onDestroy(): void {
+        view.targetOff(this);
         if (this._sheet) InputGuard.remove(this._sheet);
         if (this._hint?.node.parent) InputGuard.remove(this._hint.node.parent);
         if (this._hintArrow) Tween.stopAllByTarget(this._hintArrow);

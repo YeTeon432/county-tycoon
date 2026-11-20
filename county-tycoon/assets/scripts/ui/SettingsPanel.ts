@@ -1,5 +1,4 @@
 import { _decorator, Graphics, Node } from 'cc';
-import { InputGuard } from '../core/InputGuard';
 import { Panel } from './Panel';
 import { makeButton, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_RADIUS } from './UiTheme';
 
@@ -7,13 +6,14 @@ const { ccclass } = _decorator;
 
 @ccclass('SettingsPanel')
 export class SettingsPanel extends Panel {
-    protected cardH = 292;
 
     static show(parent: Node, gridOn: boolean, onGridChange: (on: boolean) => void): SettingsPanel {
-        const panel = Panel.open(SettingsPanel, parent, '设置');
-        panel.buildGridRow(gridOn, onGridChange);
-        // 点遮罩时只关设置，地图上的建造或拆除目标不应跟着改变。
-        InputGuard.add(panel.node);
+        const panel = Panel.open(SettingsPanel, parent, '地图设置', '', 'settings');
+        panel.renderPage = () => panel.buildGridRow(gridOn, (on) => {
+            gridOn = on;
+            onGridChange(on);
+        });
+        panel.renderPage();
         return panel;
     }
 
@@ -46,8 +46,4 @@ export class SettingsPanel extends Panel {
         toggle.node.setPosition(width / 2 - buttonWidth / 2 - 20, 0, 0);
     }
 
-    protected onDestroy(): void {
-        InputGuard.remove(this.node);
-        super.onDestroy();
-    }
 }

@@ -20,13 +20,16 @@ for sub in ('buildings', 'actors'):
     d = os.path.join(SRC, sub)
     if not os.path.isdir(d): continue
     for f in sorted(os.listdir(d)):
-        if f.endswith('.png'):
-            ims.append((f[:-4], Image.open(os.path.join(d, f)).convert('RGBA')))
-            if sub == 'actors' and not f.startswith('face-'):
-                HIRES.add(f[:-4])
+        name, ext = os.path.splitext(f)
+        if ext != '.png':
+            continue
+        # 楼的背面、工地和塔吊由 3D 模型显示。旧出图目录中可能还有它们的 PNG。
+        if sub == 'buildings' and (name.endswith(('_b', '_br')) or name.startswith(('build-', 'crane-'))):
+            continue
+        ims.append((name, Image.open(os.path.join(d, f)).convert('RGBA')))
+        if sub == 'actors' and not name.startswith('face-'):
+            HIRES.add(name)
 assert len({n for n, _ in ims}) == len(ims), '建筑和角色有重名'
-def is_back(n):
-    return n.endswith('_b') or n.endswith('_br')
 
 
 def pack(group, out):
@@ -52,7 +55,7 @@ def pack(group, out):
 
 
 os.makedirs(os.path.join(RES, 'art', 'ground'), exist_ok=True)
-place = pack([t for t in ims if not is_back(t[0])], 'atlas')
+place = pack(ims, 'atlas')
 frames = {n: list(v) + ([HISCALE] if n in HIRES else []) for n, v in place.items()}
 meta = {'scale': SCALE, 'frames': frames}
 json.dump(meta, open(os.path.join(RES, 'art', 'atlas-frames.json'), 'w'), indent=1, sort_keys=True)

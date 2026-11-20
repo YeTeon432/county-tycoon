@@ -6,7 +6,7 @@
 
 两类图标：
   - 彩色图标（日历、硬币、人、笑脸、账单、房子、店铺、发展中心）：自带配色，直接显示
-  - 单色图标（暂停、播放、快进、关闭、换朝向、对勾、叉、锁、拆除、箭头）：纯白，
+  - 单色图标（暂停、播放、快进、关闭、换朝向、对勾、锁、拆除、箭头）：纯白，
     游戏里用 Sprite.color 染成需要的颜色（白 × 颜色 = 颜色）
 
 输出：county-tycoon/assets/resources/ui/icons/<name>.png
@@ -227,13 +227,6 @@ def close():
     save(im, 'close')
 
 
-def cross():
-    im, d = canvas()
-    line(d, [(22, 22), (74, 74)], 13, WHITE)
-    line(d, [(74, 22), (22, 74)], 13, WHITE)
-    save(im, 'cross')
-
-
 def check():
     im, d = canvas()
     line(d, [(18, 50), (40, 72), (78, 28)], 13, WHITE)
@@ -314,7 +307,7 @@ def minus():
 
 
 ALL = [calendar, coin, people, smile, bill, home, shop, center,
-       pause, play, fast, close, cross, check, rotate, lock, demolish, arrow_down, plus, minus]
+       pause, play, fast, close, check, rotate, lock, demolish, arrow_down, plus, minus]
 
 if __name__ == '__main__':
     for f in ALL:

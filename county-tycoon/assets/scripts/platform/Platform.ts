@@ -10,7 +10,7 @@
  * 平台差异不要散落到业务里：微信独有的能力（登录、分享、激励视频）
  * 以后加进 IPlatform（见 types.ts），三家各写各的。
  */
-import { sys } from 'cc';
+import { settings, sys } from 'cc';
 import { IPlatform, createMiniGamePlatform, SystemInfo } from './types';
 import { createWxPlatform } from './wx';
 import { createTtPlatform } from './tt';
@@ -28,6 +28,11 @@ let _instance: IPlatform | null = null;
 export function getPlatform(): IPlatform {
     if (!_instance) _instance = detectPlatform();
     return _instance;
+}
+
+/** 由桌面网页版的启动模板开启。 */
+export function usesLandscapeWebLayout(): boolean {
+    return settings.querySettings('screen', 'landscapeWebLayout') === true;
 }
 
 /** 测试或特殊场景注入别的实现；传 null 恢复自动识别 */

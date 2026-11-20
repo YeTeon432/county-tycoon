@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我在县城当县长</title>
+  <link rel="stylesheet" href="<%= cssUrl %>">
+  <style>
+    body {
+      display: grid;
+      place-items: center;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      background: #26362d;
+    }
+
+    #GameDiv {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    #GameCanvas {
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="GameDiv" cc_exact_fit_screen="false">
+    <div id="Cocos3dGameContainer">
+      <canvas id="GameCanvas" tabindex="0" aria-label="我在县城当县长"></canvas>
+    </div>
+  </div>
+  <script>
+    const frame = document.getElementById('GameDiv');
+    const designWidth = <%= previewWidth %>;
+    const designHeight = <%= previewHeight %>;
+
+    // 先更新容器，再由 Cocos 的 resize 监听器更新画布。
+    function fitGameFrame() {
+      const scale = Math.min(window.innerWidth / designWidth, document.body.clientHeight / designHeight);
+      frame.style.width = Math.round(designWidth * scale) + 'px';
+      frame.style.height = Math.round(designHeight * scale) + 'px';
+    }
+
+    fitGameFrame();
+    window.addEventListener('resize', fitGameFrame);
+    frame.addEventListener('contextmenu', (event) => event.preventDefault());
+  </script>
+  <% if (polyfillsBundleFile) { %>
+  <script src="<%= polyfillsBundleFile %>"></script>
+  <% } %>
+  <script src="<%= systemJsBundleFile %>"></script>
+  <script src="<%= importMapFile %>" type="systemjs-importmap"></script>
+  <script>
+    System.import('cc').then(({ game, settings, ResolutionPolicy }) => {
+      game.onPostBaseInitDelegate.add(() => {
+        settings.overrideSettings('screen', 'landscapeWebLayout', true);
+        settings.overrideSettings('screen', 'designResolution', {
+          width: designWidth,
+          height: designHeight,
+          policy: ResolutionPolicy.FIXED_WIDTH,
+        });
+      });
+      return System.import('<%= indexJsName.startsWith("./") ? indexJsName : "./" + indexJsName %>');
+    }).catch((error) => console.error(error));
+  </script>
+</body>
+</html>

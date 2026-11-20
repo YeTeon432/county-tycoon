@@ -2,6 +2,7 @@ import {
     _decorator, Component, EventTouch, Graphics, Label, Layers, Node, Tween, tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
 import { InputGuard } from '../core/InputGuard';
+import { usesLandscapeWebLayout } from '../platform/Platform';
 import {
     drawShadow, makeLabelLeft, makePanelNode, makeRoundButton, makeTag, UI_COLOR, UI_FONT, UI_PALETTE, UI_SHEET_RADIUS,
 } from './UiTheme';
@@ -100,8 +101,8 @@ export class Panel extends Component {
         shade.on(Node.EventType.TOUCH_END, () => this.close(), this);
         this._shade = shade;
 
-        // 抽屉：全屏宽，高度夹到屏高 - 120（顶栏的日期资金还露着）
-        const cw = W;
+        // 抽屉在宽屏上限制宽度，高度留出顶部的日期和资金。
+        const cw = usesLandscapeWebLayout() ? Math.min(W, 840) : W;
         const ch = Math.min(this.cardH, H - 120);
         this.cardW = cw;
         this.cardH = ch;

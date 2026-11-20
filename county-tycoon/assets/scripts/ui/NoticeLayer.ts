@@ -2,6 +2,7 @@ import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
+import { usesLandscapeWebLayout } from '../platform/Platform';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
 import { drawGraphicsOnEnable, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
@@ -129,7 +130,8 @@ export class NoticeLayer extends Component {
         this._hornDot = dot;
 
         // 展开的长条
-        const bw = W - 32 - 120;
+        const available = W - 32 - 120;
+        const bw = usesLandscapeWebLayout() ? Math.min(available, 680) : available;
         const bar = makePanelNode(this.node, 'Bar', bw, NoticeLayer.BAR_H);
         bar.setPosition(-W / 2 + 16 + bw / 2, y, 0);
         bar.active = false;
@@ -193,13 +195,14 @@ export class NoticeLayer extends Component {
         this._unread = false;
         if (this._hornDot) this._hornDot.active = false;
         const vis = view.getVisibleSize();
-        const W = vis.width - 32;
+        const wide = usesLandscapeWebLayout();
+        const W = wide ? Math.min(vis.width - 32, 720) : vis.width - 32;
         const items = this._history.slice(-12).reverse();
         const rowH = 40;
         const H = Math.max(1, items.length) * rowH + 56;
         const box = makePanelNode(this.node, 'List', W, H);
         const top = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 8;
-        box.setPosition(0, top - H / 2, 0);
+        box.setPosition(wide ? -vis.width / 2 + 16 + W / 2 : 0, top - H / 2, 0);
         const g = box.addComponent(Graphics);
         drawShadow(g, -W / 2, -H / 2, W, H, 20, 3);
         g.fillColor = UI_PALETTE.white;

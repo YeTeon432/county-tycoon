@@ -1,7 +1,7 @@
 import { _decorator, Color, Component, Graphics, Label, Layers, Node, tween, Tween, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
@@ -101,25 +101,26 @@ export class TopBar extends Component {
         const visible = view.getVisibleSize();
         const W = visible.width;
         const H = TopBar.BODY_HEIGHT;
+        const wide = usesLandscapeWebLayout();
 
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
         trans.setContentSize(W, H);
         this.node.setPosition(0, visible.height / 2 - TopBar.topInset() - H / 2, 0);
 
-        this.buildChips(W, H);
-        this.buildSecondRow(W, H);
+        this.buildChips(W, H, wide);
+        this.buildControls(W, H, wide);
         this.refresh();
     }
 
     // ───────────────────────── 第一行：胶囊 ─────────────────────────
 
-    private buildChips(W: number, H: number): void {
+    private buildChips(W: number, H: number, wide: boolean): void {
         const y = H / 2 - TopBar.MARGIN_TOP - TopBar.CHIP_H / 2;
         // 宽度：日期 / 资金 / 人口 / 心情。资金最长（¥1,234,567），给最多
         const widths = [158, 220, 116, 116];
         const sum = widths.reduce((a, b) => a + b, 0);
-        const gap = Math.max(8, (W - 32 - sum) / 3);
+        const gap = wide ? 12 : Math.max(8, (W - 32 - sum) / 3);
         let x = -W / 2 + 16;
         const make = (i: number, name: string, icon: IconName, color = UI_COLOR.text) => {
             const w = widths[i];
@@ -165,9 +166,10 @@ export class TopBar extends Component {
 
     // ───────────────────────── 第二行：提示 + 圆按钮 ─────────────────────────
 
-    private buildSecondRow(W: number, H: number): void {
+    private buildControls(W: number, H: number, wide: boolean): void {
         const S = TopBar.BTN;
-        const y = H / 2 - TopBar.MARGIN_TOP - TopBar.CHIP_H - 14 - S / 2;
+        const hintY = H / 2 - TopBar.MARGIN_TOP - TopBar.CHIP_H - 14 - S / 2;
+        const y = wide ? H / 2 - TopBar.MARGIN_TOP - TopBar.CHIP_H / 2 : hintY;
         const GAP = 12;
 
         // 从右往左：账单 / 县发展中心 / 快进 / 播放·暂停
@@ -223,10 +225,10 @@ export class TopBar extends Component {
         this.guard(play.node);
 
         // 提示条：左边到播放按钮之间
-        const hintW = x - S / 2 - GAP - (-W / 2 + 16);
+        const hintW = wide ? 680 : x - S / 2 - GAP - (-W / 2 + 16);
         const hh = 44;
         const box = makePanelNode(this.node, 'HintBox', hintW, hh);
-        box.setPosition(-W / 2 + 16 + hintW / 2, y, 0);
+        box.setPosition(-W / 2 + 16 + hintW / 2, hintY, 0);
         const bg = box.addComponent(Graphics);
         bg.fillColor = new Color(255, 255, 255, 215);
         bg.roundRect(-hintW / 2, -hh / 2, hintW, hh, hh / 2);

@@ -1,5 +1,5 @@
 import {
-    _decorator, Color, Component, EventTouch, Graphics, JsonAsset, Label, Layers, Node, resources, Sprite, SpriteFrame,
+    _decorator, Color, Component, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
     tween, Tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
@@ -8,7 +8,7 @@ import { hexToColor } from '../core/ColorUtil';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
 import { TownLevel } from '../core/sim/types';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 import {
     drawShadow, formatNumber, makeIcon, makeLabel, makePanelNode, makeRoundButton,
     UI_COLOR, UI_FONT, UI_PALETTE, UI_RADIUS, UI_SHEET_RADIUS,
@@ -136,7 +136,7 @@ export class BuildingBar extends Component {
     build(defs: BuildingDef[]): void {
         this._defs = defs;
         const visible = view.getVisibleSize();
-        const W = visible.width;
+        const W = usesLandscapeWebLayout() ? Math.min(1280, visible.width) : visible.width;
         const H = BuildingBar.BAR_HEIGHT;
 
         this.node.layer = Layers.Enum.UI_2D;
@@ -146,7 +146,9 @@ export class BuildingBar extends Component {
 
         this.buildSheet(W, H);
         this.buildTabs(W, H);
-        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H);
+        const clipCards = W < visible.width;
+        this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H + (clipCards ? 24 : 0));
+        if (clipCards) this._cardLayer.addComponent(Mask).type = Mask.Type.GRAPHICS_RECT;
         this._cardLayer.setPosition(0, -H / 2 + BuildingBar.bottomInset() + 20 + BuildingBar.ITEM_H / 2, 0);
         // 金币和小锁是两张图：分两层，不然一张卡里交替出现就断批
         this._layers = ['BgLayer', 'ThumbLayer', 'CoinLayer', 'LockLayer', 'TextLayer'].map((n) => makePanelNode(this._cardLayer!, n, W, BuildingBar.ITEM_H));
@@ -509,7 +511,11 @@ export class BuildingBar extends Component {
     }
 
     private maxScroll(): number {
-        return Math.max(0, this.contentWidth() - view.getVisibleSize().width);
+        return Math.max(0, this.contentWidth() - this.viewportWidth);
+    }
+
+    private get viewportWidth(): number {
+        return this.node.getComponent(UITransform)!.width;
     }
 
     private scrollBy(px: number): void {
@@ -518,7 +524,7 @@ export class BuildingBar extends Component {
     }
 
     private applyScroll(): void {
-        const visibleW = view.getVisibleSize().width;
+        const visibleW = this.viewportWidth;
         const max = this.maxScroll();
         if (this._scrollX < 0) this._scrollX = 0;
         if (this._scrollX > max) this._scrollX = max;
@@ -657,7 +663,7 @@ export class BuildingBar extends Component {
         g.clear();
         const w = BuildingBar.ITEM_W, h = BuildingBar.ITEM_H;
         const imgW = w - 16, imgH = 96, imgY = h / 2 - 8 - imgH / 2;
-        const vw = view.getVisibleSize().width;
+        const vw = this.viewportWidth;
         for (const c of this._cards) {
             if (!c.node.active) continue;
             const x = c.node.position.x, y = c.node.position.y, sel = c.selected;

@@ -12,8 +12,8 @@
   "=": "bridge"
  },
  "spawn": {
-  "col": 10,
-  "row": 8
+  "col": 15,
+  "row": 10
  },
  "zones": [
   {

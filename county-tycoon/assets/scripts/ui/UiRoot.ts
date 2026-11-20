@@ -81,8 +81,9 @@ export class UiRoot extends Component {
     private _panelLayer: Node | null = null;
     /** 当前打开的建筑详情 */
     private _topPanel: BuildingPanel | null = null;
-    /** 叠在建筑详情上面的居民档案 */
+    onTownUpgraded: (() => void) | null = null;
     onResidentChanged: (() => void) | null = null;
+    /** 叠在建筑详情上面的居民档案 */
     private _residentPanel: ResidentPanel | null = null;
     /** 居民总览 */
     private _listPanel: ResidentListPanel | null = null;
@@ -566,6 +567,7 @@ export class UiRoot extends Component {
     }
 
     private onLevelUp(lv: TownLevel): void {
+        this.onTownUpgraded?.();
         const name: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
         if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去发展中心看看新目标吧。');
         if (this._bar) this._bar.refreshUnlocks();

@@ -1,3 +1,4 @@
+import type { TownLevel } from './sim/types';
 import { JsonAsset, resources } from 'cc';
 
 /**
@@ -23,6 +24,13 @@ export interface BuildingDef {
     unlockLevel: number;
     /** 地形要求（T321）：桥要在河上、港口贴河、矿场在矿点；其他为 null */
     terrain?: 'river' | 'riverbank' | 'ore' | null;
+}
+
+/** 发展中心始终是同一个建筑；城镇等级只决定模型与缩略图。 */
+export function centerArtId(level: TownLevel): string {
+    if (level === 'village') return 'center';
+    if (level === 'town') return 'center-town';
+    return 'center-county';
 }
 
 export type RoadKind = 'dirt' | 'city';

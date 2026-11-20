@@ -3,7 +3,7 @@ import {
     tween, Tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
-import { BuildingDef } from '../core/BuildingConfig';
+import { BuildingDef, centerArtId } from '../core/BuildingConfig';
 import { hexToColor } from '../core/ColorUtil';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
@@ -161,6 +161,7 @@ export class BuildingBar extends Component {
     /** 接模拟层：买得起吗、城镇等级。可以晚于 build 调 */
     bindSim(sim: SimApi): void {
         this._sim = sim;
+        if (this._art) this.setArt(this._art);
         this.applyTab();
     }
 
@@ -397,7 +398,7 @@ export class BuildingBar extends Component {
         if (!art) return null;
         if (def.road) return art.groundByName(`${def.road}-5`) ?? art.get(def.id);
         if (def.id === 'bridge') return art.groundByName('bridge-gx') ?? art.get(def.id);
-        return art.get(def.id);
+        return art.get(def.id === 'center' && this._sim ? centerArtId(this._sim.state.level) : def.id);
     }
 
     private tryApplyArt(): void {

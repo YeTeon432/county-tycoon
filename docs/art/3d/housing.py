@@ -44,6 +44,15 @@ def hut():
     box(x0 + 0.08, y0 - 0.008, Z0, 0.13, 0.016, 0.22, WOOD_D())                         # 门
     window_front(x0 + 0.36, Z0 + 0.12, 0.16, 0.11, y=y0, frame='wood', glass='glass_dark', sill=False)
     window_side(y0 + 0.2, Z0 + 0.12, 0.16, 0.11, x0 + sx, frame='wood', glass='glass_dark', sill=False)
+    # 草顶压脊和灶烟囱让农房从背面也能认出。篱笆后是自家菜畦。
+    box(0.10, 0.476, Z0 + wh + 0.24, 0.76, 0.048, 0.035, THATCH_D())
+    box(0.59, 0.61, Z0 + wh, 0.105, 0.105, 0.25, BRICK_RED())
+    box(0.58, 0.60, Z0 + wh + 0.25, 0.125, 0.125, 0.03, M('#695748'))
+    box(0.22, 0.07, Z0, 0.18, 0.15, 0.018, 'curb')
+    for y in (0.83, 0.93):
+        box(0.20, y - 0.035, Z0, 0.47, 0.07, 0.02, M('#775337'))
+        for x in (0.26, 0.39, 0.52, 0.64):
+            bush(x, y, 0.045, Z0 + 0.02, 'leaf_light')
     # 柴堆、水缸
     for i in range(3):
         cyl(0.86, 0.12 + i * 0.045, Z0 + 0.025, 0.022, 0.12, 'wood', 8, rot=(0, math.radians(90), 0))

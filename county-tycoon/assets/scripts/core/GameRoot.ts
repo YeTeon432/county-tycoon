@@ -1,7 +1,7 @@
 import { DayClock } from './DayClock';
 import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx, screen, view as gameView, ResolutionPolicy } from 'cc';
 import { Spike3D } from '../spike/Spike3D';
-import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
+import { BuildingDef, centerArtId, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
@@ -145,7 +145,7 @@ export class GameRoot extends Component {
             console.log(`[GameRoot] 读档：${sim.state.residents.length} 人，${model.allBuildings().length} 栋`);
         } else {
             if (loaded.reason && loaded.reason !== 'empty') console.warn(`[GameRoot] 存档读不了（${loaded.reason}），新开一局`);
-            // 开局地块：一条土路 + 两栋自建房（PRD 第 2 节）。要在建模拟之前放，模拟层会把它们登记成开局的家
+            // 先摆好村口，再由模拟层登记开局住户和岗位。
             this.placeOpening(model, buildings);
             sim = createSimulation(model, economy, names, Date.now() % 100000000, undefined, this._progressJson);
         }
@@ -154,11 +154,13 @@ export class GameRoot extends Component {
         this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
         this._saver.startAutoSave();
         sim.onMonth = () => {
+            this.syncCenterAppearance();
             this.save();
             if (this._branchSource !== undefined) this.updatePlacementHint();
         };
 
         this.buildWorld(world, model);
+        this.syncCenterAppearance();
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
         this._defs = buildings;
         this.buildBar(buildings);
@@ -205,6 +207,10 @@ export class GameRoot extends Component {
             DayClock.speed = () => (ui.clock ? ui.clock.speed : 1);
             // 第三、四批（D026）：环境图层、特色街道小旗、招商选址
             if (sim) {
+                ui.onTownUpgraded = () => {
+                    this.syncCenterAppearance();
+                    this.save();
+                };
                 ui.onResidentChanged = () => this.save();
                 view.envAt = sim.envAt ? (c, r) => sim.envAt!(c, r) : null;
                 view.envOfDef = sim.buildingEnv ? (id) => sim.buildingEnv!(id) : null;
@@ -338,6 +344,11 @@ export class GameRoot extends Component {
         return `沿路 ${reach.radius} 格内（蓝色）能服务 ${reach.homes.length} 栋住宅（黄框）${more}`;
     }
 
+    private syncCenterAppearance(): void {
+        const view = this._view;
+        if (this._sim && view?.setCenterArtId(centerArtId(this._sim.state.level))) this._bar?.setArt(view.art);
+    }
+
     /** 住户翻盖完（模拟层把 defId 换了），地图上也换成新楼（D026） */
     private _syncT = 0;
     protected update(dt: number): void {
@@ -358,36 +369,35 @@ export class GameRoot extends Component {
 
     private placeOpening(model: TownModel, defs: BuildingDef[]): void {
         const def = (id: string) => defs.find((d) => d.id === id);
-        const road = def('dirt-road'), house = def('hut') ?? def('house');   // D026：开局都是土坯农房
-        if (!road || !house) return;
-        // 开局放在出生点附近（map.json 的 spawn）。出生点那一排可能压着池塘、树林，
-        // 所以上下找一排：9 格土路 + 路南 4 栋都放得下的最近一排
-        const sp = model.terrain ? model.terrain.spawn : { col: Math.floor(model.width / 2), row: Math.floor(model.height / 2) };
-        const workshop0 = def('workshop'), breakfast0 = def('breakfast'), center0 = def('center');
-        // 发展中心（D026）：路北侧正中，2×2，开局镜头对准它
-        const fits = (cx: number, cy: number) => {
-            for (let c = cx - 4; c <= cx + 4; c++) if (!model.canPlace(road, c, cy)) return false;
-            const lots: [BuildingDef | undefined, number][] = [[house, cx - 1], [house, cx + 1], [workshop0, cx + 3], [breakfast0, cx - 3]];
-            if (center0 && !model.canPlace(center0, cx - 1, cy + 1)) return false;
-            return lots.every(([d, c]) => !d || model.canPlace(d, c, cy - 1));
-        };
-        let cx = sp.col + 4, cy = sp.row;
-        search: for (let d = 0; d < 12; d++) {
-            for (const dy of d === 0 ? [0] : [-d, d]) {
-                for (const dx of [0, -2, 2, -4, 4]) {
-                    if (fits(sp.col + 4 + dx, sp.row + dy)) { cx = sp.col + 4 + dx; cy = sp.row + dy; break search; }
+        const road = def('dirt-road'), home = def('hut') ?? def('house');
+        if (!road || !home) return;
+        // 以塘边路口为原点。主街从埠头通到作坊，短巷通到两户人家。
+        const plots: [BuildingDef | undefined, number, number][] = [];
+        for (let x = -2; x <= 3; x++) plots.push([road, x, 0]);
+        for (let y = 1; y <= 3; y++) plots.push([road, 0, y]);
+        plots.push([home, -1, 2], [home, 1, 3], [def('breakfast'), -3, 0],
+            [def('workshop'), 3, -1], [def('center'), 0, -2]);
+
+        const spawn = model.terrain?.spawn ?? { col: Math.floor(model.width / 2), row: Math.floor(model.height / 2) };
+        // 路口内侧留出连续的 2×2 空地。地形配置变动时，整体移到最近的可用位置。
+        const shopLot = { ...home, width: 2, height: 2 };
+        const fits = (x: number, y: number) => model.canPlace(shopLot, x + 1, y + 1)
+            && plots.every(([building, dx, dy]) => !building || model.canPlace(building, x + dx, y + dy));
+        let cx = spawn.col, cy = spawn.row;
+        if (!fits(cx, cy)) {
+            let nearest = Infinity;
+            for (let y = 0; y < model.height; y++) {
+                for (let x = 0; x < model.width; x++) {
+                    const distance = Math.abs(x - spawn.col) + Math.abs(y - spawn.row);
+                    if (distance < nearest && fits(x, y)) { nearest = distance; cx = x; cy = y; }
                 }
             }
+            if (nearest === Infinity) console.warn('[GameRoot] 地图过小或地形受限，只摆放出生点附近能放下的开局建筑');
         }
         this._openingCell = [cx, cy];
-        for (let c = cx - 4; c <= cx + 4; c++) model.place(road, c, cy);
-        model.place(house, cx - 1, cy - 1);
-        model.place(house, cx + 1, cy - 1);
-        // 开局要有饭碗：只有住宅时 6 个月内全员找不到工作搬走（M2 验收发现）。
-        // 一间小作坊（4 岗）+ 一家早餐铺（2 岗，也满足吃饭），够开局 5 人里能干活的都有活干
-        if (workshop0) model.place(workshop0, cx + 3, cy - 1);
-        if (breakfast0) model.place(breakfast0, cx - 3, cy - 1);
-        if (center0) model.place(center0, cx - 1, cy + 1);
+        for (const [building, dx, dy] of plots) {
+            if (building) model.place(building, cx + dx, cy + dy);
+        }
     }
 
     /** 搭地图，挂到本节点下 */

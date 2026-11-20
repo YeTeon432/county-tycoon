@@ -1,6 +1,7 @@
 import { _decorator, Color, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
 import { Education, Offer, TownLevel } from '../core/sim/types';
+import { centerArtId } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { Panel } from './Panel';
 import { ListRow, ScrollList } from './ScrollList';
@@ -95,7 +96,6 @@ export class CenterPanel extends Panel {
             art.ellipse(0, -38, 98, 21);
             art.fill();
             this.buildingImage(sky, 'tree', -80, -14, 40, 73);
-            this.buildingImage(sky, 'center', -12, 12, 145, 139);
             this.buildingImage(sky, 'hut', 63, -28, 68, 57);
             const masthead = makeLabel(sky, 'CenterName', title, 30, INK, railW - 38);
             masthead.isBold = true;
@@ -166,6 +166,8 @@ export class CenterPanel extends Panel {
         p._sim = sim;
         p._tab = tab;
         p.renderPage = () => {
+            const sky = p.rail?.getChildByName('Townscape');
+            if (sky) p.buildingImage(sky, centerArtId(sim.state.level), -12, 12, 145, 139);
             p._tabNodes = [];
             p._body = null;
             p._modal = null;
@@ -282,7 +284,7 @@ export class CenterPanel extends Panel {
             g.fill();
         });
         this.buildingImage(banner, 'tree', W / 2 - 137, -2, 48, 72);
-        this.buildingImage(banner, 'apartment', W / 2 - 83, 6, 94, 106);
+        this.buildingImage(banner, centerArtId(next), W / 2 - 83, 6, 102, 106);
         this.buildingImage(banner, 'breakfast', W / 2 - 41, -24, 62, 62);
 
         const footerH = 80;

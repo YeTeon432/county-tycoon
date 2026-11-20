@@ -2,12 +2,12 @@ import { Employer, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
-import { assignJob, clearJob, openingsFor, staffing, totalPositions, Opening } from './labor';
+import { assignJob, clearJob, openingsFor, staffing, totalPositions, positionsOf, Opening } from './labor';
 import { consumeForResident, shopCapacity, shopRadius } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, DealOwner, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BuildingEcon, BuildingSim, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -184,13 +184,15 @@ export class Simulation implements SimApi {
      * 工地记下这个绝对时刻，工期和进度条都从它算起——不从月初算（不然下午开工的 1 天楼
      * 一出现进度条就半满，而且月底动的工下月初就完工，等于工期缩水）。
      */
-    onBuilt(uid: number, defId: string, dayProgress = 0): boolean {
+    onBuilt(uid: number, defId: string, dayProgress = 0, branchOf?: number): boolean {
         const econ = this._cfg.building(defId);
         const s = this.state;
         if (s.buildings.some((b) => b.uid === uid) || s.construction?.some((c) => c.uid === uid)) return true;
         if (!this.isUnlocked(defId)) return false;   // 没研究过（D026）
         if (econ && econ.selfBuilt) return false;     // 只能住户自己翻盖得到
         const deal = s.pendingDeal && s.pendingDeal.defId === defId ? s.pendingDeal : null;
+        const source = branchOf === undefined ? null : this.building(branchOf);
+        if (branchOf !== undefined && (!source || source.defId !== defId || !this.branchOffer(branchOf) || deal)) return false;
         // 招商（D032）：对方出钱盖；补贴路线交地时我们拨补贴款
         const cost = deal ? dealCost(deal) : econ ? econ.cost : 0;
         if (cost > s.finance.funds) return false;
@@ -204,19 +206,20 @@ export class Simulation implements SimApi {
             this._flows.outflow.construction += cost;     // 施工队、建材都在县外（D026）
         }
         const owner = deal ? this.closeLandDeal(deal) : undefined;
+        const branch: FactoryBranch | undefined = source ? { sourceUid: source.uid, owner: source.owner ?? 'county' } : undefined;
         // 有工期的先进工地，完工那天才变成能用的楼（D026，DESIGN 24）
         const days = econ ? econ.buildDays : 0;
         if (days > 0) {
             const c: NonNullable<SimState['construction']>[number] = { uid, defId, left: days, total: days, startAt: s.month + clamp01(dayProgress) };
+            if (branch) c.branch = branch;
             if (owner) c.deal = owner;   // 记在工地上：施工中途存档也不丢
             (s.construction ??= []).push(c);
             this._town.refresh?.();   // 工地也占着路边：特色街道提示要算到它
             this.syncRng();
             return true;
         }
-        s.buildings.push(Simulation.newBuilding(uid, defId));
-        this.applyDealOwner(uid, owner);
         this._town.refresh?.();
+        this.openBuilding(uid, defId, owner, branch);
         // 有了新楼，先把没工作的人配上去（不等下个月）
         const world = this.refreshWorld();
         this.fillVacancies(world);
@@ -225,6 +228,8 @@ export class Simulation implements SimApi {
     }
 
     onDemolished(uid: number): void {
+        this._town.refresh?.();
+        this._distCache.clear();
         const s = this.state;
         if (s.construction && s.construction.some((c) => c.uid === uid)) {
             s.construction = s.construction.filter((c) => c.uid !== uid);   // 拆工地：钱不退
@@ -241,7 +246,6 @@ export class Simulation implements SimApi {
             if (r && r.homeId === uid) r.homeId = null;
         }
         s.buildings = s.buildings.filter((x) => x.uid !== uid);
-        this._town.refresh?.();
         // 被拆掉的楼里的人另找房子
         const world = this.refreshWorld();
         this.assignHomes(s.residents.filter((r) => r.homeId === null));
@@ -1180,10 +1184,60 @@ export class Simulation implements SimApi {
         for (const b of this.state.buildings) {
             const econ = this._cfg.building(b.defId);
             if (!econ || !econ.jobs.length) continue;
-            rows.push({ uid: b.uid, name: this.buildingName(b.defId), required: totalPositions(econ),
+            rows.push({ uid: b.uid, name: this.buildingName(b.defId) + (b.branchOf === undefined ? '' : '分厂'), required: totalPositions(econ),
                 staff: staffing(b, econ, byId).staff });
         }
         return rows;
+    }
+
+    branchOffer(uid: number): { cost: number; jobs: number } | null {
+        const source = this.building(uid);
+        if (!source || source.branchOf !== undefined) return null;
+        const econ = this._cfg.building(source.defId);
+        return econ?.canOpenBranch ? { cost: econ.cost, jobs: totalPositions(econ) } : null;
+    }
+
+    branchTransferCount(uid: number, col: number, row: number, w: number, h: number): number {
+        const source = this.building(uid);
+        if (!source || !this.branchOffer(uid)) return 0;
+        const reach = this._town.spotReach?.(col, row, w, h, Infinity);
+        return this.branchTransfers(source, home => reach?.near.get(home) ?? Infinity).length;
+    }
+
+    private branchTransfers(source: BuildingSim, distanceToBranch: (home: number) => number): Resident[] {
+        const econ = this._cfg.building(source.defId);
+        if (!econ) return [];
+        const slots = positionsOf(econ);
+        const transfers: Resident[] = [];
+        for (const id of source.workerIds) {
+            const r = this.resident(id);
+            if (!r || r.homeId === null || r.jobId !== source.uid) continue;
+            if (distanceToBranch(r.homeId) >= this._town.roadDistance(r.homeId, source.uid)) continue;
+            const i = slots.findIndex(slot => slot.title === r.jobTitle && slot.edu <= r.education);
+            if (i < 0) continue;
+            slots.splice(i, 1);
+            transfers.push(r);
+        }
+        return transfers;
+    }
+
+    private openBuilding(uid: number, defId: string, owner?: DealOwner, branch?: FactoryBranch): number {
+        const building = Simulation.newBuilding(uid, defId);
+        this.state.buildings.push(building);
+        this.applyDealOwner(uid, owner);
+        if (!branch) return 0;
+        building.branchOf = branch.sourceUid;
+        building.owner = branch.owner;
+        const source = this.building(branch.sourceUid);
+        if (!source) return 0;
+        const transfers = this.branchTransfers(source, home => this._town.roadDistance(home, uid));
+        for (const r of transfers) {
+            source.workerIds.splice(source.workerIds.indexOf(r.id), 1);
+            r.jobId = uid;
+            building.workerIds.push(r.id);
+            this.log(r, `调到${this.buildingName(defId)}分厂，离家更近了`);
+        }
+        return transfers.length;
     }
 
     canAfford(defId: string): boolean {
@@ -1272,9 +1326,10 @@ export class Simulation implements SimApi {
         if (!s.construction || !s.construction.length) return;
         for (const c of s.construction) c.left = constructionLeft(s, c);
         for (const c of s.construction.filter((x) => x.left <= 0)) {
-            s.buildings.push(Simulation.newBuilding(c.uid, c.defId));
-            this.applyDealOwner(c.uid, c.deal);
-            this.notice('info', `${this.buildingName(c.defId)}完工了`, []);
+            const moved = this.openBuilding(c.uid, c.defId, c.deal, c.branch);
+            const message = !c.branch ? `${this.buildingName(c.defId)}完工了`
+                : `${this.buildingName(c.defId)}分厂投产，${moved} 名老员工就近调岗`;
+            this.notice('info', message, []);
         }
         s.construction = s.construction.filter((x) => x.left > 0);
         this._town.refresh?.();

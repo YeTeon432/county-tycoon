@@ -374,6 +374,7 @@ function parseEcon(raw: any, defId: string): BuildingEcon {
         env: Math.round(num(raw?.env, 0)),
         unlock,
         publicJob: raw?.publicJob === true,
+        canOpenBranch: raw?.canOpenBranch === true,
         buildDays: Math.max(0, Math.floor(num(raw?.buildDays, 1))),
         rent: Math.max(0, num(raw?.rent, 0)),
         homeLevel: Math.max(0, Math.floor(num(raw?.homeLevel, raw?.housing > 0 ? 1 : 0))),

@@ -12,7 +12,7 @@ const { ccclass } = _decorator;
  * 面板骨架：从底部滑上来的白色抽屉（D022 / DESIGN 8.2）。
  * 建筑详情、居民档案、居民总览、月账单共用，子类只管往 content 里填内容。
  *
- *   1. 浅遮罩：盖住全屏并登记 InputGuard，挡住地图手势；点遮罩 = 关闭。
+ *   1. 浅遮罩：盖住全屏，打开期间锁住地图缩放；点遮罩 = 关闭。
  *   2. 抽屉：全屏宽，贴底，顶部两个大圆角 + 投影；顶部拖动条，往下拖超过 120 就关。
  *   3. 标题行：左标题 + 类别小标签，右上圆形关闭按钮。下面一条分隔线。
  *   4. content：标题行以下、离底 24 的区域，原点在 content 中心。子类用 contentTop / contentH 排版。
@@ -131,7 +131,7 @@ export class Panel extends Component {
 
         // 只遮挡卡片本身，遮罩区不登记——让点遮罩时 WorldView 仍能接到 tap，
         // 从而实现「点空处关面板 / 点建筑直接开新详情」（原先登记 root = 全屏，导致任何点击都被拦截）
-        if (card) InputGuard.add(card);
+        InputGuard.add(card, 'panel');
     }
 
     private buildHeader(card: Node, cw: number, ch: number, title: string, subtitle: string): void {

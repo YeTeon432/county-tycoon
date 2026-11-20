@@ -1,4 +1,4 @@
-import { _decorator, Component, EventTouch, Mask, Node, UITransform } from 'cc';
+import { _decorator, Component, EventMouse, EventTouch, Mask, Node, UITransform } from 'cc';
 
 const { ccclass } = _decorator;
 
@@ -68,6 +68,11 @@ export class ScrollList extends Component {
             this._lastY = y;
             this._dragDist += Math.abs(dy);
             this.scrollTo(this._scrollY + dy);
+        }, this);
+
+        this.node.on(Node.EventType.MOUSE_WHEEL, (e: EventMouse) => {
+            // 与 Cocos ScrollView 使用相同的滚轮方向和灵敏度。
+            this.scrollTo(this._scrollY - e.getScrollY() * 0.1);
         }, this);
 
         const end = () => {

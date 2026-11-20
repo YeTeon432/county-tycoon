@@ -377,7 +377,10 @@ export class WorldView extends Component {
             this._velX = 0; this._velY = 0;
             this._panTarget = null;
         }
-        if (this._touches.size >= 2) this._dragged = true;   // 双指开始就作废点击
+        if (this._touches.size >= 2) {
+            this._dragged = true;
+            if (InputGuard.blocksMapZoom) this._startedOnUI = true;
+        }
         this.rebaseGesture();
     }
 
@@ -390,6 +393,10 @@ export class WorldView extends Component {
         if (this._startedOnUI) return;
 
         if (this._touches.size >= 2) {
+            if (InputGuard.blocksMapZoom) {
+                this._startedOnUI = true;
+                return;
+            }
             const [a, b] = this.firstTwo();
             const dist = Math.hypot(b.x - a.x, b.y - a.y);
             const previousDistance = this._pinchDistance;
@@ -965,7 +972,7 @@ export class WorldView extends Component {
     /** 按钮用：放大 / 缩小一档 */
     zoomStep(delta: number): void {
         const config = this._config;
-        if (!config) return;
+        if (!config || InputGuard.blocksMapZoom) return;
         // 捏合后倍率可能在两档之间：放大就去上面一档，缩小就去下面一档
         const levels = config.zoomLevels;
         const eps = 1e-3;
@@ -983,6 +990,8 @@ export class WorldView extends Component {
     private onMouseWheel(event: EventMouse): void {
         const scrollY = event.getScrollY();
         if (scrollY === 0 || !this._config) return;
+        const loc = event.getUILocation();
+        if (InputGuard.isBlocked(loc.x, loc.y)) return;
         // 滚轮一格换一档
         this.zoomStep(scrollY > 0 ? 1 : -1);
     }

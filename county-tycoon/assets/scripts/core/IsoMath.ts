@@ -37,12 +37,12 @@ export class IsoMath {
 
     /** 整张地图外接矩形的宽（未缩放） */
     get mapWidth(): number {
-        return (this.cols + this.rows) * this.hw;
+        return (this.cols + this.rows) * this.hw * Math.cos(this._spin);
     }
 
     /** 整张地图外接矩形的高（未缩放） */
     get mapHeight(): number {
-        return (this.cols + this.rows) * this.hh;
+        return (this.cols + this.rows) * this.hh * Math.cos(this._spin);
     }
 
     // ---------------- 视角旋转（D031） ----------------
@@ -66,9 +66,8 @@ export class IsoMath {
     }
 
     /**
-     * 跟手转时 rot 之外多出来的那一点角度（弧度，|spin| ≤ 45°，正 = 屏幕上顺时针）。
-     * 只影响连续坐标（楼、人车的位置和前后顺序）；格子换算（viewCell / modelCell / toCell）和选图仍按 rot。
-     * 停下来时一定是 0。
+     * 实际视角相对最近的 90° 朝向的偏移（弧度，|spin| ≤ 45°，顺时针为正）。
+     * 正方形地图在此范围内的投影宽高都随 cos(spin) 缩放。
      */
     private _spin = 0;
 
@@ -180,8 +179,11 @@ export class IsoMath {
 
     /** 地图本地坐标 → 模型格子 [col, row]；越界返回 null */
     toCell(x: number, y: number): [number, number] | null {
-        const v = this.toViewCell(x, y);
-        return v ? this.modelCell(v[0], v[1]) : null;
+        const [gx, gy] = this.fromLocal(x, y);
+        const col = Math.floor(gx);
+        const row = Math.floor(gy);
+        if (col < 0 || row < 0 || col >= this.cols || row >= this.rows) return null;
+        return [col, row];
     }
 
     /** 某一格菱形在屏幕上的上顶点：贴地面图时用它对齐 */

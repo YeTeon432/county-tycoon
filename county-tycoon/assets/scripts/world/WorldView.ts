@@ -71,31 +71,14 @@ export class WorldView extends Component {
     /** 当前缩放倍率 */
     private _zoom = 1;
 
-    /** 双指缩放时记录的初始指距与初始倍率 */
-    private _pinchStartDist = 0;
-    private _pinchStartZoom = 1;
-    /** 捏合开始时两指中点下面是地图的哪个点（地图本地坐标），缩放全程钉住它 */
-    private _pinchMapX = 0;
-    private _pinchMapY = 0;
-    /**
-     * 双指手势是捏还是扭（D031）：开头先不动，等两指距离变化或转过的弧长先超过阈值，定了就锁住。
-     * 'twist' 时不缩放，地图跟着手指一点点转；松手后转到最近的 90° 停稳。
-     */
-    private _gesture: 'none' | 'pinch' | 'twist' = 'none';
-    private _twistStartAngle = 0;
-    /** 扭的时候：上一帧两指连线的角度、开始扭以来累计转了多少（弧度，UI 坐标逆时针为正）、开始时的视角 */
-    private _twistLast = 0;
-    private _twistAccum = 0;
-    private _twistBase = 0;
-    /** 判定捏 / 扭的阈值（UI 像素） */
-    private static readonly GESTURE_SLOP = 14;
-    /** 当前视角总角度（弧度，顺时针为正；停稳时是 90° 的整数倍） */
+    /** 上一次记录的双指间距 */
+    private _pinchDistance = 0;
+    /** 当前视角总角度（弧度，顺时针为正） */
     private _viewAngle = 0;
-    /** 转视角时钉在屏幕中心的那一点（模型坐标）；不在转时是 null */
-    private _spinPivot: [number, number] | null = null;
-    /** 停稳 / 按钮转的动画 */
-    private _snap: { from: number; to: number; t: number; dur: number } | null = null;
-    /** 地面的旋转节点：压扁 0.5 → 转 → 拉回 2 倍，等于在地平面上绕竖轴转 */
+    /** 视角按钮触发的旋转动画 */
+    private _turn: { from: number; to: number; elapsed: number } | null = null;
+    private static readonly TURN_STEP = Math.PI / 12;
+    private static readonly TURN_DURATION = 0.25;
     /** 视角转了（D031），给 HUD 用 */
     onViewRotated: ((rot: number) => void) | null = null;
 
@@ -350,9 +333,9 @@ export class WorldView extends Component {
     }
 
     /**
-     * 手势（D024）：自己记每根手指的位置，不依赖 getAllTouches 在抬手那一帧的内容。
+     * 手势（D024、D037）：自己记每根手指的位置。
      * - 单指拖地图，松手带惯性；
-     * - 双指同时缩放 + 平移，缩放以两指中点为中心（手指下面那块地不跑）；
+     * - 双指捏合围绕两指中点缩放，单指负责拖动，按钮负责转视角；
      * - 手指数变了就重新取基准，不跳；一次手势里只要出现过双指，就不算点击。
      */
     private onTouchStart(event: EventTouch): void {
@@ -362,7 +345,7 @@ export class WorldView extends Component {
             const loc = event.getUILocation();
             this._startedOnUI = InputGuard.isBlocked(loc.x, loc.y);
             this._dragDist = 0;
-            this._dragged = false;
+            this._dragged = this.rotating;
             this._velX = 0; this._velY = 0;
             this._panTarget = null;
         }
@@ -381,37 +364,12 @@ export class WorldView extends Component {
         if (this._touches.size >= 2) {
             const [a, b] = this.firstTwo();
             const dist = Math.hypot(b.x - a.x, b.y - a.y);
-            if (this._pinchStartDist <= 0 || dist <= 0) return;
-            const turn = WorldView.angleDiff(Math.atan2(b.y - a.y, b.x - a.x), this._twistStartAngle);
-            if (this._gesture === 'none') {
-                // 捏：两指距离变了多少；扭：两指绕中点转过的弧长。谁先过阈值就是谁
-                const pinch = Math.abs(dist - this._pinchStartDist);
-                const twist = Math.abs(turn) * dist / 2;
-                if (Math.max(pinch, twist) < WorldView.GESTURE_SLOP) return;
-                this._gesture = twist > pinch && this.canRotateView ? 'twist' : 'pinch';
-                if (this._gesture === 'twist') {
-                    // 从按下那一刻算起：判定前扭过的那一点也算上，地图直接跟到手指的位置
-                    this._snap = null;
-                    this._twistBase = this._viewAngle;
-                    this._twistAccum = turn;
-                    this._twistLast = Math.atan2(b.y - a.y, b.x - a.x);
-                    this._velX = 0; this._velY = 0;
-                    this.setViewAngle(this._twistBase - this._twistAccum);
-                }
-                // 判定之前手指已经挪了一点：从现在起算缩放，画面不跳
-                this.rebaseGesture();
-                return;
-            }
-            if (this._gesture === 'twist') {
-                // 逐帧累加，转超过半圈也不跳；UI 坐标 y 朝上，手指逆时针（+）→ 地图逆时针（视角角度 −）
-                const cur = Math.atan2(b.y - a.y, b.x - a.x);
-                this._twistAccum += WorldView.angleDiff(cur, this._twistLast);
-                this._twistLast = cur;
-                this.setViewAngle(this._twistBase - this._twistAccum);
-                return;
-            }
+            const previousDistance = this._pinchDistance;
+            // 到倍率上限或下限仍更新指距，手指一反向便立即响应。
+            this._pinchDistance = dist;
+            if (previousDistance <= 0 || dist <= 0 || Math.abs(dist - previousDistance) < 1e-6) return;
             const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
-            this.setZoomAround(this._pinchStartZoom * (dist / this._pinchStartDist), anchor.x, anchor.y, this._pinchMapX, this._pinchMapY);
+            this.setZoomAround(this._zoom * (dist / previousDistance), anchor.x, anchor.y);
             return;
         }
 
@@ -436,20 +394,22 @@ export class WorldView extends Component {
 
     private onTouchEnd(event: EventTouch): void {
         const wasPinch = this._touches.size >= 2;
-        for (const t of event.getTouches()) this._touches.delete(t.getID());
-        if (this._touches.size < 2) {
-            if (this._gesture === 'twist') this.snapView();
-            this._gesture = 'none';
+        const cancelled = event.type === Input.EventType.TOUCH_CANCEL;
+        let released = false;
+        for (const t of event.getTouches()) {
+            if (this._touches.delete(t.getID())) released = true;
         }
+        // Cocos 会按每根手指重复派发同一批抬手事件。
+        if (!released) return;
+        if (cancelled || wasPinch) { this._velX = 0; this._velY = 0; }
         if (this._touches.size > 0) {
             // 还有手指按着：换基准接着拖 / 捏
-            if (wasPinch) { this._velX = 0; this._velY = 0; }
             this.rebaseGesture();
             return;
         }
         // 全部抬起
         if (this._startedOnUI || Date.now() - this._lastMoveAt > 80) { this._velX = 0; this._velY = 0; }
-        if (!this._dragged && !this._startedOnUI) {
+        if (!cancelled && !this._dragged && !this._startedOnUI && !this.rotating) {
             const loc = event.getUILocation();
             this.tapAt(loc.x, loc.y);
         }
@@ -462,15 +422,9 @@ export class WorldView extends Component {
     private rebaseGesture(): void {
         if (this._touches.size >= 2) {
             const [a, b] = this.firstTwo();
-            this._pinchStartDist = Math.hypot(b.x - a.x, b.y - a.y);
-            this._pinchStartZoom = this._zoom;
-            if (this._gesture !== 'twist') this._twistStartAngle = Math.atan2(b.y - a.y, b.x - a.x);
-            const anchor = this.uiToNode((a.x + b.x) / 2, (a.y + b.y) / 2);
-            const w = this._world ? this._world.position : Vec3.ZERO;
-            this._pinchMapX = (anchor.x - w.x) / this._zoom;
-            this._pinchMapY = (anchor.y - w.y) / this._zoom;
+            this._pinchDistance = Math.hypot(b.x - a.x, b.y - a.y);
         } else {
-            this._pinchStartDist = 0;
+            this._pinchDistance = 0;
             const p = this._touches.values().next().value as Vec2 | undefined;
             if (p) { this._lastX = p.x; this._lastY = p.y; }
             this._lastMoveAt = Date.now();
@@ -482,14 +436,6 @@ export class WorldView extends Component {
         return [it.next().value as Vec2, it.next().value as Vec2];
     }
 
-    /** 两个角度之差，落在 (-π, π] */
-    private static angleDiff(a: number, b: number): number {
-        let d = a - b;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d <= -Math.PI) d += Math.PI * 2;
-        return d;
-    }
-
     get viewRotation(): number {
         return this._iso ? this._iso.rot : 0;
     }
@@ -498,74 +444,59 @@ export class WorldView extends Component {
         return !!this._iso && this._iso.canRotate;
     }
 
-    /** 按钮用：平滑转 90°（dir = 1 顺时针，-1 逆时针）。正在转的话接着它的终点再转一档 */
+    /** 转向按钮按当前动画的目标角度累加步长，连续点击时每一下都算。 */
     rotateView(dir: 1 | -1): void {
         if (!this.canRotateView) return;
-        const q = Math.PI / 2;
-        const base = this._snap ? this._snap.to : Math.round(this._viewAngle / q) * q;
-        this._snap = { from: this._viewAngle, to: base + dir * q, t: 0, dur: 0.35 };
+        const base = this._turn?.to ?? this._viewAngle;
+        this._turn = { from: this._viewAngle, to: base + dir * WorldView.TURN_STEP, elapsed: 0 };
+        this._panTarget = null;
         this._velX = 0; this._velY = 0;
     }
 
-    /** 松手：转到最近的 90° 停稳 */
-    private snapView(): void {
-        const q = Math.PI / 2;
-        const to = Math.round(this._viewAngle / q) * q;
-        const dur = 0.1 + 0.25 * Math.abs(to - this._viewAngle) / (q / 2);
-        this._snap = { from: this._viewAngle, to, t: 0, dur };
-    }
-
-    private stepSnap(dt: number): void {
-        const sn = this._snap;
-        if (!sn) return;
-        sn.t = Math.min(1, sn.t + dt / Math.max(0.01, sn.dur));
-        const e = 1 - (1 - sn.t) * (1 - sn.t);           // 先快后慢
-        if (sn.t >= 1) { this._snap = null; this.setViewAngle(sn.to); }
-        else this.setViewAngle(sn.from + (sn.to - sn.from) * e);
+    private stepTurn(dt: number): void {
+        const turn = this._turn;
+        if (!turn) return;
+        turn.elapsed += dt;
+        const t = Math.min(1, turn.elapsed / WorldView.TURN_DURATION);
+        const eased = t * (2 - t);
+        if (t === 1) this._turn = null;
+        this.setViewAngle(t === 1 ? turn.to : turn.from + (turn.to - turn.from) * eased);
     }
 
     /**
-     * 把视角设到 phi（弧度，顺时针为正）（D031）。
-     * 拆成「最近的 90° 档位 rot」+「多出来的 spin」：rot 决定楼用哪张图、地面瓦片换哪一格；
-     * spin 让地面节点和所有楼、人车的位置连续地转。屏幕中心那一点始终不动。
-     * 停在 90° 整数倍时收尾：重建山 / 树、重画环境图层、放置预览，钉住的中心点放开。
+     * 把视角设到 phi（弧度，顺时针为正）。rot 和 spin 一起用于 3D 相机和界面的坐标换算。
+     * 每帧围绕当前屏幕中心转，玩家在动画中拖动或缩放时，下一帧继续用更新后的中心。
      */
     private setViewAngle(phi: number): void {
         const iso = this._iso, world = this._world;
         if (!iso || !world || !iso.canRotate) return;
-        if (!this._spinPivot) {
-            const w0 = world.position;
-            this._spinPivot = iso.fromLocal(-w0.x / this._zoom, -w0.y / this._zoom);
-        }
+        const w = world.position;
+        const [gx, gy] = iso.fromLocal(-w.x / this._zoom, -w.y / this._zoom);
         const q = Math.PI / 2;
         const k = Math.round(phi / q);
         let spin = phi - k * q;
         if (Math.abs(spin) < 1e-6) spin = 0;
         const rot = ((k % 4) + 4) % 4;
-        const rotChanged = rot !== iso.rot;
         iso.rot = rot;
         iso.spin = spin;
         this._viewAngle = spin === 0 ? k * q : phi;
 
-        const [gx, gy] = this._spinPivot;
         const p = iso.toLocal(gx, gy);
-        const w = world.position;
         world.setPosition(-p.x * this._zoom, -p.y * this._zoom, w.z);
+        this.clampPosition();
 
         if (this._buildings) this._buildings.relayout(spin !== 0);
         if (this._life) this._life.relayout();
-        if (spin === 0) {
-            this._spinPivot = null;
-            this.clampPosition();
+        if (!this._turn) {
             this._hoverCol = -1; this._hoverRow = -1;
             this.refreshGhost();
-            if (rotChanged || this.onViewRotated) { if (this.onViewRotated) this.onViewRotated(iso.rot); }
+            this.onViewRotated?.(iso.rot);
         }
     }
 
-    /** 正在转视角（跟手或动画中）：这时不响应点地图 */
+    /** 正在播放旋转动画 */
     get rotating(): boolean {
-        return this._gesture === 'twist' || !!this._snap || (!!this._iso && this._iso.spin !== 0);
+        return this._turn !== null;
     }
 
     /** UI 坐标 → 本节点本地坐标（屏幕中心为原点） */
@@ -654,7 +585,7 @@ export class WorldView extends Component {
     /** 松手后的惯性滑动 */
     protected update(dt: number): void {
         this.syncConstruction(dt);
-        this.stepSnap(dt);
+        this.stepTurn(dt);
         this.stepPan(dt);
         this.updateTrack(dt);
         if (this._touches.size > 0) return;
@@ -1083,21 +1014,17 @@ export class WorldView extends Component {
      * 以屏幕中心为缩放中心。
      */
     setZoom(zoom: number): void {
-        const w = this._world;
-        const p = w ? w.position : Vec3.ZERO;
-        this.setZoomAround(zoom, 0, 0, -p.x / this._zoom, -p.y / this._zoom);
+        this.setZoomAround(zoom, 0, 0);
     }
 
-    /**
-     * 缩放并让地图点 (mapX, mapY) 落在本节点坐标 (anchorX, anchorY) 上。
-     * 捏合时 anchor 是两指中点、map 点是捏合开始时中点下面的地，所以缩放和平移一起跟手。
-     */
-    private setZoomAround(zoom: number, anchorX: number, anchorY: number, mapX: number, mapY: number): void {
+    /** 缩放前后，让相同的地图点留在锚点下方。 */
+    private setZoomAround(zoom: number, anchorX: number, anchorY: number): void {
         const config = this._config;
         const world = this._world;
         if (!config || !world) return;
         const levels = config.zoomLevels;
         const value = Math.max(levels[0], Math.min(levels[levels.length - 1], zoom));
+        if (value === this._zoom) return;
 
         // 下标 = 最接近的档位（按钮显示、滚轮换档用）
         let nearest = 0, gap = Infinity;
@@ -1111,12 +1038,13 @@ export class WorldView extends Component {
         if (nearest === 0 && value > levels[0] + eps) nearest = Math.min(1, levels.length - 1);
         this._zoomIndex = nearest;
 
-        const changed = value !== this._zoom;
+        const ratio = value / this._zoom;
+        const p = world.position;
         this._zoom = value;
         this.applyTransform();
-        world.setPosition(anchorX - mapX * value, anchorY - mapY * value, world.position.z);
+        world.setPosition(anchorX - (anchorX - p.x) * ratio, anchorY - (anchorY - p.y) * ratio, p.z);
         this.clampPosition();
-        if (changed && this.onZoomChanged) this.onZoomChanged(this._zoom, this._zoomIndex);
+        this.onZoomChanged?.(this._zoom, this._zoomIndex);
     }
 
     /** 平移，参数是 UI 坐标下的位移 */

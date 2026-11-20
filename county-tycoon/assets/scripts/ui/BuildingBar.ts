@@ -1,5 +1,5 @@
 import {
-    _decorator, Color, Component, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
+    _decorator, Color, Component, director, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
     tween, Tween, UIOpacity, UITransform, Vec3, view,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
@@ -416,6 +416,7 @@ export class BuildingBar extends Component {
             c.swatch.node.active = false;
         }
         this.refreshCards(true);
+        director.emit('town-thumbnails-ready');
     }
 
     /** 盖不了的原因（放置预览用）：没解锁 → 「镇上解锁」；钱不够 → 「预算不够」；能盖 → null */

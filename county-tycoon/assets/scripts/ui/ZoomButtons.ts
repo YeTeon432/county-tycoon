@@ -1,62 +1,68 @@
-import { _decorator, Component, Graphics, Label, Node, UITransform, view } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
-import { drawShadow, makeLabel, makePanelNode, makeRoundButton, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
+import { drawHudTile, IconName, makeIcon, makeLabel, makePanelNode, UI_HUD } from './UiTheme';
 
 const { ccclass } = _decorator;
 
-/**
- * 右侧的缩放按钮：＋ / 当前倍率 / －（双指和滚轮之外再给一个明确的入口）。
- * T406 起和顶栏一个风格：白色圆按钮 + 投影，中间一个白色小胶囊写倍率。
- * 只负责按钮本身，真正的缩放交给 onStep（WorldView.zoomStep）。
- */
+/** 地图右侧工具台。镜头和环境图层由 WorldView 控制。 */
 @ccclass('ZoomButtons')
 export class ZoomButtons extends Component {
-    /** +1 放大一档，-1 缩小一档 */
     onStep: ((delta: number) => void) | null = null;
+    onRotate: (() => void) | null = null;
+    onEnvironment: (() => boolean) | null = null;
+    onSettings: (() => void) | null = null;
 
     private _label: Label | null = null;
-    private _plus: ReturnType<typeof makeRoundButton> | null = null;
-    private _minus: ReturnType<typeof makeRoundButton> | null = null;
-
-    private static readonly SIZE = 64;
-    private static readonly MID_H = 40;
-    private static readonly GAP = 10;
-
-    /** @param bottomReserve 底部被建筑栏占掉的高度 */
-    static totalHeight(): number {
-        return ZoomButtons.SIZE * 2 + ZoomButtons.MID_H + ZoomButtons.GAP * 2;
-    }
+    private _plus: Sprite | null = null;
+    private _minus: Sprite | null = null;
 
     build(bottomReserve: number): void {
         const visible = view.getVisibleSize();
-        const S = ZoomButtons.SIZE, G = ZoomButtons.GAP, M = ZoomButtons.MID_H;
-        const totalH = S * 2 + M + G * 2;
+        const w = 88, keyW = 74, keyH = 48, step = 53;
+        const h = step * (this.onRotate ? 5 : 4) + 42;
         const ui = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
-        ui.setContentSize(S + 12, totalH);
-        this.node.setPosition(visible.width / 2 - S / 2 - 16, -visible.height / 2 + bottomReserve + totalH / 2 + 24, 0);
+        ui.setContentSize(w, h);
+        this.node.setPosition(visible.width / 2 - w / 2 - 14, -visible.height / 2 + bottomReserve + h / 2 + 8, 0);
+        const g = this.node.addComponent(Graphics);
+        drawHudTile(g, -w / 2, -h / 2, w, h, 14, UI_HUD.base, UI_HUD.rim);
 
-        this._plus = makeRoundButton(this.node, 'ZoomIn', 'plus', S, () => this.onStep && this.onStep(1));
-        this._plus.node.setPosition(0, totalH / 2 - S / 2, 0);
+        let y = h / 2 - keyH / 2 - 7;
+        const key = (name: string, onTap: () => void, icon?: IconName, title = '') => {
+            const node = makePanelNode(this.node, name, keyW, keyH);
+            node.setPosition(0, y, 0);
+            y -= step;
+            const graphics = node.addComponent(Graphics);
+            const image = icon ? makeIcon(node, icon, 26, UI_HUD.text) : null;
+            const label = title ? makeLabel(node, 'Text', title, 21, UI_HUD.text, keyW - 6) : null;
+            if (label) label.isBold = true;
+            const draw = (active: boolean) => {
+                graphics.clear();
+                drawHudTile(graphics, -keyW / 2, -keyH / 2, keyW, keyH, 9,
+                    active ? UI_HUD.accent : UI_HUD.key, active ? UI_HUD.accentRim : UI_HUD.rim);
+                if (label) label.color = active ? UI_HUD.onAccent : UI_HUD.text;
+            };
+            draw(false);
+            node.on(Node.EventType.TOUCH_END, onTap, this);
+            return { image, draw };
+        };
 
-        const mid = makePanelNode(this.node, 'ZoomText', S + 8, M);
-        const g = mid.addComponent(Graphics);
-        drawShadow(g, -(S + 8) / 2, -M / 2, S + 8, M, M / 2, 2);
-        g.fillColor = UI_PALETTE.white;
-        g.roundRect(-(S + 8) / 2, -M / 2, S + 8, M, M / 2);
-        g.fill();
-        this._label = makeLabel(mid, 'Txt', '', UI_FONT.small, UI_COLOR.text, S);
+        key('SettingsBtn', () => this.onSettings?.(), undefined, '设置');
+        const environment = key('EnvBtn', () => environment.draw(this.onEnvironment?.() ?? false), undefined, '环境');
+        if (this.onRotate) key('RotateBtn', () => this.onRotate?.(), 'rotate');
+        this._plus = key('ZoomIn', () => this.onStep?.(1), 'plus').image;
+        this._label = makeLabel(this.node, 'ZoomText', '', 20, UI_HUD.dim, keyW - 6);
         this._label.isBold = true;
-
-        this._minus = makeRoundButton(this.node, 'ZoomOut', 'minus', S, () => this.onStep && this.onStep(-1));
-        this._minus.node.setPosition(0, -totalH / 2 + S / 2, 0);
+        this._label.node.setPosition(0, y + 9, 0);
+        y -= 34;
+        this._minus = key('ZoomOut', () => this.onStep?.(-1), 'minus').image;
         InputGuard.add(this.node);
     }
 
-    /** 倍率变化后刷新：中间显示当前档，到头的按钮图标变浅 */
     refresh(zoom: number, index: number, count: number): void {
         if (this._label) this._label.string = `×${Math.round(zoom * 10) / 10}`;
-        if (this._plus) this._plus.icon.color = index < count - 1 ? UI_PALETTE.ink : UI_COLOR.border;
-        if (this._minus) this._minus.icon.color = index > 0 ? UI_PALETTE.ink : UI_COLOR.border;
+        const disabled = new Color(160, 134, 109);
+        if (this._plus) this._plus.color = index < count - 1 ? UI_HUD.text : disabled;
+        if (this._minus) this._minus.color = index > 0 ? UI_HUD.text : disabled;
     }
 
     protected onDestroy(): void {

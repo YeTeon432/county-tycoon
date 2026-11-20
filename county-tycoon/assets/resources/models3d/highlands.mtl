@@ -1,0 +1,11 @@
+{
+  "__type__": "cc.Material",
+  "_name": "highlands",
+  "_objFlags": 0,
+  "_native": "",
+  "_effectAsset": { "__uuid__": "e7b8cc1c-da11-4431-8356-6c9ae4a21d54" },
+  "_techIdx": 1,
+  "_defines": [ {} ],
+  "_states": [ {} ],
+  "_props": [ {} ]
+}

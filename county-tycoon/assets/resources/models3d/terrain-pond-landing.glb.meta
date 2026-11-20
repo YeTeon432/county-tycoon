@@ -1,0 +1,93 @@
+{
+  "ver": "2.3.14",
+  "importer": "gltf",
+  "imported": true,
+  "uuid": "bd6a2790-365e-45e3-a4b2-7b1c121d1d05",
+  "files": [],
+  "subMetas": {
+    "58049": {
+      "importer": "gltf-scene",
+      "uuid": "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@58049",
+      "displayName": "",
+      "id": "58049",
+      "name": "terrain-pond-landing.prefab",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "49b7c": {
+      "importer": "gltf-mesh",
+      "uuid": "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@49b7c",
+      "displayName": "",
+      "id": "49b7c",
+      "name": "柱体.mesh",
+      "userData": {
+        "gltfIndex": 0,
+        "triangleCount": 404
+      },
+      "ver": "1.1.1",
+      "imported": true,
+      "files": [
+        ".bin",
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "ce988": {
+      "importer": "gltf-material",
+      "uuid": "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@ce988",
+      "displayName": "",
+      "id": "ce988",
+      "name": "lit.material",
+      "userData": {
+        "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    }
+  },
+  "userData": {
+    "imageMetas": [],
+    "lods": {
+      "enable": false,
+      "hasBuiltinLOD": false,
+      "options": [
+        {
+          "screenRatio": 0.25,
+          "faceCount": 1
+        },
+        {
+          "screenRatio": 0.125,
+          "faceCount": 0.25
+        },
+        {
+          "screenRatio": 0.01,
+          "faceCount": 0.1
+        }
+      ]
+    },
+    "assetFinder": {
+      "meshes": [
+        "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@49b7c"
+      ],
+      "skeletons": [],
+      "textures": [],
+      "materials": [
+        "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@ce988"
+      ],
+      "scenes": [
+        "bd6a2790-365e-45e3-a4b2-7b1c121d1d05@58049"
+      ]
+    }
+  }
+}

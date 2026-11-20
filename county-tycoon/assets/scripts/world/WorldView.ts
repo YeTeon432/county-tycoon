@@ -195,7 +195,7 @@ export class WorldView extends Component {
         this._zoomIndex = config.defaultZoomIndex;
         this._zoom = config.zoomLevels[this._zoomIndex];
 
-        // 地图外的底色 = 草地色（T218）：缩到最小也不露出场景相机默认的紫黑
+        // 地图外用淡青色衬托地块边缘。
         const cam = director.getScene()?.getComponentInChildren(Camera);
         const bg = new Color().fromHEX(config.palette.background);
         if (cam) cam.clearColor = bg;

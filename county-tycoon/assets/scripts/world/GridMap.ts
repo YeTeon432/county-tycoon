@@ -57,15 +57,24 @@ export class GridMap extends Component {
         return this.frameFor(col, row);
     }
 
-    /** 混铺接头和沿街门前的小径，在实际建好的地块上生成。 */
+    /** 按实际占地铺建筑阴影，再叠混铺接头和沿街小径。 */
     *roadOverlays(): Iterable<GroundQuad> {
         const model = this._model;
         const art = this._art;
         if (!model || !art) return;
+        const buildings = model.allBuildings();
+        const shadow = art.groundByName('lot-shadow');
+        if (shadow) for (const b of buildings) {
+            if (b.def.flat || b.def.terrain || b.def.id === 'farm') continue;
+            const { width, height } = b.def;
+            const tree = b.def.id === 'tree';
+            yield { frame: shadow, c: b.col + width / 2, r: b.row + height / 2,
+                width: tree ? 0.56 : width + 0.34, length: tree ? 0.56 : height + 0.34, turn: 0 };
+        }
         const apron = art.groundByName('asphalt-apron');
         const earth = art.groundByName('entrance-earth');
         const paving = art.groundByName('entrance-paving');
-        for (const b of model.allBuildings()) {
+        for (const b of buildings) {
             if (b.def.road === 'dirt' && apron) {
                 for (const { dc, dr, turn } of ROAD_EDGES) {
                     if (this.roadKind(b.col + dc, b.row + dr) === 'city') {
@@ -73,8 +82,8 @@ export class GridMap extends Component {
                     }
                 }
             }
-            if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || b.def.terrain || !b.facing) continue;
-            const frame = b.def.id === 'hut' ? earth : paving;
+            if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || (b.def.terrain && b.def.id !== 'mine') || !b.facing) continue;
+            const frame = b.def.id === 'hut' || b.def.id === 'mine' ? earth : paving;
             const entrance = frame && this.entranceOverlay(b, b.facing, frame);
             if (entrance) yield entrance;
         }
@@ -171,6 +180,8 @@ export class GridMap extends Component {
             return art.groundByName(this.viewBridge(col, row))
                 ?? art.groundByName('water-0');
         }
+        // 山体网格在山脚收回草地，避免低处露出方形石板。
+        if (t === 'mountain') return art.groundByName(grassName(col, row));
         return art.groundByName(terrainName(t, col, row));
     }
 

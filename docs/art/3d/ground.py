@@ -8,6 +8,7 @@
   54~56  mountain-0..2 石地   57~58 ore-0..1 矿点   59~62 forest-0..3 林地   63~64 farm-0..1   65 pond
   66 dirt-tile 泥土地   67 flagstone 石板路   68 flower-bed 花坛（T218，玩家可铺的装饰地块）
   69 entrance-earth  70 entrance-paving  71 asphalt-apron（半透明贴地叠层，沿 +v 朝门面或柏油路）
+  72 lot-shadow（建筑基座的柔和接地阴影）
 道路 mask 位：1 左上邻(col-1)  2 右上邻(row-1)  4 右下邻(col+1)  8 左下邻(row+1)
 
 画法：每个像素反算格内坐标 (u, v)（u 沿 gx 往右下、v 沿 gy 往左下，0..1），按 (u, v) 取色。
@@ -226,6 +227,12 @@ def asphalt_apron(u, v):
     color = mix(asphalt(u, v), C['dirt_d'], fade * 3.2)
     return (*color, 255 * opacity)
 
+def lot_shadow(u, v):
+    # 圆角矩形对应院子轮廓，半透明外圈跨到相邻格，旋转时和模型一起转。
+    radius = (abs(2 * u - 1) ** 5 + abs(2 * v - 1) ** 5) ** 0.2
+    fade = min(1, max(0, (1 - radius) / 0.29))
+    return 47, 53, 46, 72 * fade * fade * (3 - 2 * fade)
+
 # ---------------------------------------------------------------- 水
 def water_base(u, v, seed=3):
     t = per_noise(u, v, seed, ((1, 1), (2, 1), (1, 2))) * 0.5 + 0.5
@@ -410,7 +417,8 @@ add('dirt-tile', dirt_tile_fn()); add('flagstone', flagstone_fn()); add('flower-
 add('entrance-earth', entrance_fn(False), translucent=True)
 add('entrance-paving', entrance_fn(True), translucent=True)
 add('asphalt-apron', asphalt_apron, translucent=True)
-assert len(frames) == 72, len(frames)
+add('lot-shadow', lot_shadow, translucent=True)
+assert len(frames) == 73, len(frames)
 
 COLS = 16                       # 每行 16 帧 → 图集宽 2048（手机 GPU 纹理上限常见 4096）
 rows = (len(frames) + COLS - 1) // COLS

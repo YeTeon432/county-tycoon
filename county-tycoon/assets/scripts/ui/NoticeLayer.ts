@@ -5,14 +5,14 @@ import { Notice, Resident } from '../core/sim/types';
 import { usesLandscapeWebLayout } from '../platform/Platform';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
-import { drawGraphicsOnEnable, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
 /**
  * 公告栏 + 大公示（D026，DESIGN 16.4 / 16.5）。
  *
- * - 公告栏：顶栏下面、左上角一条白色半透明长条。新消息滑进来停 4 秒，然后收成一个小喇叭（有没看过的消息时带红点）。
+ * - 公告栏：顶栏下面、左上角一条县城消息。新消息滑进来停 4 秒，然后收成一个小喇叭（有没看过的消息时带红点）。
  *   点喇叭 / 长条 = 展开最近 12 条。没有消息时，开局前几天轮播玩法提示。
  * - 大公示：有人来 / 有人走时屏幕中间弹一张卡片（头像 + 名字 + 一句话 + 理由），2.5 秒自动消失，点一下立刻关；
  *   不暂停游戏。同一批多张排队，一次超过 3 张就合并成「今天来了 N 位新居民」。
@@ -64,12 +64,6 @@ export class NoticeLayer extends Component {
         return c;
     }
 
-    /** 点了目标小牌（UiRoot 打开县发展中心的目标页） */
-    onGoalsTap: (() => void) | null = null;
-    private _goal: Node | null = null;
-    private _goalLabel: Label | null = null;
-    private _goalG: Graphics | null = null;
-    private _goalReady = false;
     private _celebrate: Node | null = null;
 
     /** 一个月的通知进来：公告栏全收，来人 / 走人上大公示 */
@@ -110,10 +104,7 @@ export class NoticeLayer extends Component {
         const horn = makePanelNode(this.node, 'Horn', 44, 44);
         horn.setPosition(-W / 2 + 16 + 22, y, 0);
         drawGraphicsOnEnable(horn, (g) => {
-            drawShadow(g, -22, -22, 44, 44, 22, 2);
-            g.fillColor = UI_PALETTE.white;
-            g.circle(0, 0, 22);
-            g.fill();
+            drawHudTile(g, -22, -22, 44, 44, 10, UI_HUD.key, UI_HUD.rim);
             this.drawHorn(g);
         });
         const dot = makePanelNode(horn, 'Dot', 14, 14);
@@ -130,20 +121,17 @@ export class NoticeLayer extends Component {
         this._hornDot = dot;
 
         // 展开的长条
-        const available = W - 32 - 120;
-        const bw = usesLandscapeWebLayout() ? Math.min(available, 680) : available;
+        const bw = (usesLandscapeWebLayout() ? Math.min(W, 720) : W) - 32 - 120;
         const bar = makePanelNode(this.node, 'Bar', bw, NoticeLayer.BAR_H);
         bar.setPosition(-W / 2 + 16 + bw / 2, y, 0);
         bar.active = false;
         drawGraphicsOnEnable(bar, (g) => {
-            g.fillColor = new Color(255, 255, 255, 235);
-            g.roundRect(-bw / 2, -NoticeLayer.BAR_H / 2, bw, NoticeLayer.BAR_H, NoticeLayer.BAR_H / 2);
-            g.fill();
+            drawHudTile(g, -bw / 2, -NoticeLayer.BAR_H / 2, bw, NoticeLayer.BAR_H, 10, UI_HUD.base, UI_HUD.rim);
         });
         const hornIn = makePanelNode(bar, 'HornIn', 44, 44);
         hornIn.setPosition(-bw / 2 + 22, 0, 0);
         drawGraphicsOnEnable(hornIn, (g) => this.drawHorn(g));
-        this._barText = makeLabelLeft(bar, 'Txt', '', UI_FONT.small, UI_COLOR.text, bw - 60);
+        this._barText = makeLabelLeft(bar, 'Txt', '', UI_FONT.small, UI_HUD.text, bw - 60);
         this._barText.node.setPosition(-bw / 2 + 46, 0, 0);
         bar.addComponent(UIOpacity).opacity = 0;
         bar.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
@@ -152,10 +140,10 @@ export class NoticeLayer extends Component {
 
     /** 小喇叭图标（Graphics 画，不用图） */
     private drawHorn(g: Graphics): void {
-        g.fillColor = UI_PALETTE.yellow;
+        g.fillColor = UI_HUD.accent;
         g.moveTo(-10, -5); g.lineTo(-4, -5); g.lineTo(6, -12); g.lineTo(6, 12); g.lineTo(-4, 5); g.lineTo(-10, 5); g.close();
         g.fill();
-        g.strokeColor = UI_PALETTE.yellow;
+        g.strokeColor = UI_HUD.accent;
         g.lineWidth = 2.5;
         g.arc(8, 0, 7, -0.9, 0.9, true);
         g.stroke();
@@ -167,7 +155,7 @@ export class NoticeLayer extends Component {
         label.string = text;
         label.color = kind === 'leave' || kind === 'warn' || kind === 'layoff' ? UI_COLOR.down
             : kind === 'arrive' || kind === 'stay' || kind === 'wishDone' || kind === 'research' || kind === 'street' || kind === 'deal' || kind === 'renovate' ? UI_COLOR.up
-                : kind === 'wish' ? UI_PALETTE.blue : UI_COLOR.text;
+                : kind === 'wish' ? UI_HUD.accent : UI_HUD.text;
         bar.active = true;
         InputGuard.add(bar);
         const op = bar.getComponent(UIOpacity)!;
@@ -185,7 +173,10 @@ export class NoticeLayer extends Component {
         tween(op).to(0.2, { opacity: 0 }).call(() => {
             bar.active = false;
             InputGuard.remove(bar);
-            if (this._horn) this._horn.active = true;
+            if (this._horn) {
+                this._horn.active = true;
+                InputGuard.add(this._horn);
+            }
         }).start();
     }
 
@@ -195,17 +186,16 @@ export class NoticeLayer extends Component {
         this._unread = false;
         if (this._hornDot) this._hornDot.active = false;
         const vis = view.getVisibleSize();
-        const wide = usesLandscapeWebLayout();
-        const W = wide ? Math.min(vis.width - 32, 720) : vis.width - 32;
+        const W = (usesLandscapeWebLayout() ? Math.min(vis.width, 720) : vis.width) - 32;
         const items = this._history.slice(-12).reverse();
         const rowH = 40;
         const H = Math.max(1, items.length) * rowH + 56;
         const box = makePanelNode(this.node, 'List', W, H);
         const top = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 8;
-        box.setPosition(wide ? -vis.width / 2 + 16 + W / 2 : 0, top - H / 2, 0);
+        box.setPosition(0, top - H / 2, 0);
         const g = box.addComponent(Graphics);
         drawShadow(g, -W / 2, -H / 2, W, H, 20, 3);
-        g.fillColor = UI_PALETTE.white;
+        g.fillColor = UI_COLOR.panel;
         g.roundRect(-W / 2, -H / 2, W, H, 20);
         g.fill();
         const title = makeLabelLeft(box, 'Title', '县里的消息', UI_FONT.body, UI_COLOR.text, W - 40);
@@ -231,47 +221,6 @@ export class NoticeLayer extends Component {
         InputGuard.remove(this._list);
         this._list.destroy();
         this._list = null;
-    }
-
-    // ───────────────────────── 目标小牌（D026，DESIGN 18） ─────────────────────────
-
-    /** 左上角喇叭下面：「目标 2/5」，全部完成时变绿「可以升级！」 */
-    private buildGoalChip(): void {
-        const vis = view.getVisibleSize();
-        const w = 150, h = 44;
-        const y = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 12 - h / 2;
-        const n = makePanelNode(this.node, 'Goal', w, h);
-        n.setPosition(-vis.width / 2 + 16 + w / 2, y, 0);
-        this._goalG = n.addComponent(Graphics);
-        this._goalLabel = makeLabel(n, 'Txt', '', UI_FONT.small, UI_COLOR.text, w - 16);
-        this._goalLabel.isBold = true;
-        n.on(Node.EventType.TOUCH_END, () => { if (this.onGoalsTap) this.onGoalsTap(); }, this);
-        InputGuard.add(n);
-        this._goal = n;
-        n.active = false;
-    }
-
-    /** UiRoot 每 0.5 秒调：done / total 个目标完成 */
-    setGoals(done: number, total: number): void {
-        if (!this._goal) this.buildGoalChip();
-        const n = this._goal!, g = this._goalG!, l = this._goalLabel!;
-        n.active = total > 0;
-        if (!total) return;
-        const ready = done >= total;
-        const w = 150, h = 44;
-        g.clear();
-        drawShadow(g, -w / 2, -h / 2, w, h, h / 2, 2);
-        g.fillColor = ready ? UI_PALETTE.green : UI_PALETTE.white;
-        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
-        g.fill();
-        l.string = ready ? '可以升级！' : `目标 ${done}/${total}`;
-        l.color = ready ? UI_PALETTE.white : UI_COLOR.text;
-        if (ready && !this._goalReady) {
-            this.say('info', '发展目标全部完成，点左上角「可以升级！」去县发展中心申请升级');
-            tween(n).to(0.15, { scale: new Vec3(1.15, 1.15, 1) }).to(0.15, { scale: new Vec3(1, 1, 1) })
-                .to(0.15, { scale: new Vec3(1.1, 1.1, 1) }).to(0.15, { scale: new Vec3(1, 1, 1) }).start();
-        }
-        this._goalReady = ready;
     }
 
     // ───────────────────────── 升级庆祝（全屏，点了才关） ─────────────────────────

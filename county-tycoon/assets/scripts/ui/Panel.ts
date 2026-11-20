@@ -101,8 +101,8 @@ export class Panel extends Component {
         shade.on(Node.EventType.TOUCH_END, () => this.close(), this);
         this._shade = shade;
 
-        // 抽屉在宽屏上限制宽度，高度留出顶部的日期和资金。
-        const cw = usesLandscapeWebLayout() ? Math.min(W, 840) : W;
+        // 抽屉高度留出顶部的日期和资金，横屏沿用 720 的面板设计宽度。
+        const cw = usesLandscapeWebLayout() ? Math.min(W, 720) : W;
         const ch = Math.min(this.cardH, H - 120);
         this.cardW = cw;
         this.cardH = ch;

@@ -31,7 +31,7 @@ const LEVEL_NAME: Record<TownLevel, string> = {
 };
 
 /** economy.json 里建造栏要用的两项 */
-interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean; housing: number }
+interface Econ { cost: number; unlock: TownLevel; selfBuilt?: boolean; housing: number; jobs: number }
 
 interface Card {
     def: BuildingDef;
@@ -182,7 +182,7 @@ export class BuildingBar extends Component {
     private loadEconomy(): void {
         resources.load('config/economy', JsonAsset, (err, asset) => {
             if (err || !asset || !asset.json) return;
-            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean; housing?: number }[] }).buildings;
+            const list = (asset.json as { buildings?: { id: string; cost?: number; unlock?: TownLevel; selfBuilt?: boolean; housing?: number; jobs?: { count: number }[] }[] }).buildings;
             if (!Array.isArray(list)) return;
             for (const b of list) {
                 if (!b || typeof b.id !== 'string') continue;
@@ -190,6 +190,7 @@ export class BuildingBar extends Component {
                     cost: typeof b.cost === 'number' ? b.cost : 0,
                     unlock: LEVEL_ORDER.indexOf(b.unlock as TownLevel) >= 0 ? b.unlock as TownLevel : 'village',
                     selfBuilt: b.selfBuilt === true,
+                    jobs: (b.jobs ?? []).reduce((sum, slot) => sum + slot.count, 0),
                     housing: typeof b.housing === 'number' ? b.housing : 0,
                 });
             }
@@ -449,7 +450,7 @@ export class BuildingBar extends Component {
     private isLocked(def: BuildingDef): Econ | null {
         const e = this._econ.get(def.id);
         const sim = this._sim;
-        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village', housing: 0 });
+        if (sim && sim.isUnlocked) return sim.isUnlocked(def.id) ? null : (e ?? { cost: 0, unlock: 'village', housing: 0, jobs: 0 });
         if (!e || !sim) return null;
         return LEVEL_ORDER.indexOf(e.unlock) > LEVEL_ORDER.indexOf(sim.state.level) ? e : null;
     }
@@ -486,8 +487,9 @@ export class BuildingBar extends Component {
         const e = this._econ.get(c.def.id);
         c.price.string = e ? `¥${formatNumber(e.cost)}` : '';
         c.coin.node.active = !!e;
-        c.cap.node.active = !!e && e.housing > 0;
-        if (e && e.housing > 0) c.cap.string = `住${e.housing}人`;
+        const jobs = c.def.category === '店铺' ? e?.jobs ?? 0 : 0;
+        c.cap.string = e?.housing ? `住${e.housing}人` : jobs ? `招${jobs}人` : '';
+        c.cap.node.active = !!c.cap.string;
         // 选中上浮一点
         c.node.setPosition(c.node.position.x, selected ? 4 : 0, 0);
     }

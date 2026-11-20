@@ -1,4 +1,4 @@
-import { GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
+import { Employer, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
@@ -152,8 +152,9 @@ export class Simulation implements SimApi {
         this.payWages(world);                     // 1. 上班领工资
         this.runConsumption(world);               // 2. 消费
         const { income, expense } = this.settleFinance(world);  // 3. 交租交税、财政支出
-        this.updateResidents(world, income);      // 4. 心情、找工作、买车、结婚生子、搬走
+        this.updateResidents(world, income);      // 4. 心情、找工作、买车、结婚生子
         this.updateWishes(world);                 //    心愿（D026）
+        this.updateDepartures();                  // 最后一个月达成心愿也有机会留下
         this.renovateHomes();                     //    住户自家翻盖（D026）
         this.moveToBetterHomes();                 //    搬去更好的房子
         this.assessBuildings(world);              //    店铺口碑
@@ -455,11 +456,10 @@ export class Simulation implements SimApi {
         const cfg = this._cfg.economy;
         const rt = cfg.residents;
         if (r.homeId === null || r.age < rt.workMinAge) return out;
-        const range = this.tier(r).range;
-        const cover = this.homeCoverage(r.homeId, world, range);
+
         // 1. 找工作
-        if (r.jobId === null && !r.idle && r.age < rt.retireAge && r.monthsUnemployed >= 1) {
-            out.push({ kind: 'job', text: '想找份工作，县里没有合适的岗位', ...this.suggestJob(r), radius: 0 });
+        if (r.jobId === null && !r.idle && r.age < rt.retireAge) {
+            out.push(this.jobWish(r, world));
         }
         // 2. 孩子上学
         const kid = r.childIds.map((id) => this.resident(id)).find((c) => c && c.age >= rt.schoolMinAge && c.age <= rt.schoolMaxAge);
@@ -472,12 +472,11 @@ export class Simulation implements SimApi {
         }
         // 4. 附近缺店
         for (const d of DEMAND_ORDER) {
-            if (cover.has(d)) continue;
+            if (this.hasShopInCircle(r.homeId, d, world)) continue;
             const ids = this.shopsOf(d);
-            // 范围按建议盖的那种店自己的半径算（每种店半径不同）
-            const sug = this.suggestFor(ids, '').suggest || ids[0];
-            const radius = Math.round(this.shopRadiusOf(sug) * range);
-            out.push({ kind: 'shop', demand: d, text: WISH_SHOP_TEXT[d], ...this.suggestFor(ids, `在他家 ${radius} 格内（沿路）盖一家`), radius });
+            if (!ids.length) continue;
+            out.push({ kind: 'shop', demand: d, text: WISH_SHOP_TEXT[d],
+                hint: this.shopList(ids), suggest: ids.find((id) => this.isUnlocked(id)) ?? '', radius: this.shoppingRadius });
         }
         // 5. 上班太远
         if (r.jobId !== null) {
@@ -494,8 +493,10 @@ export class Simulation implements SimApi {
         // 7. 想住好房子：存款够、家里房子等级低、县里没有更好的空房
         const home = world.buildingByUid.get(r.homeId);
         const he = home ? this._cfg.building(home.defId) : null;
-        if (he && he.homeLevel <= 2 && r.savings >= 20000 && !this.betterHomeFor(r, he.homeLevel, 1)) {
-            out.push({ kind: 'house', text: '攒了点钱，想住好一点的房子', ...this.suggestFor(['detached', 'apartment'], '盖一栋'), radius: 0 });
+        if (he && he.homeLevel <= 2 && ((r.moodParts ?? []).some((p) => p.value < 0 && (p.key === 'home' || p.key === 'crowd')) || (r.savings >= 20000 && !this.betterHomeFor(r, he.homeLevel, 1)))) {
+            const renovation = this.housingHint(r.homeId);
+            const housing = renovation ? { hint: renovation, suggest: '' } : this.suggestFor(['detached', 'apartment'], '盖一栋');
+            out.push({ kind: 'house', text: '想让家里住得好一点', ...housing, radius: 0 });
         }
         // 8. 想买车
         const vc = cfg.vehicles;
@@ -506,18 +507,54 @@ export class Simulation implements SimApi {
                 out.push({ kind: 'vehicle', text: '攒够钱了，想买辆电动车，可县里没车厂', ...this.suggestFor([eb.factory], '建一座摩托车厂'), radius: 0 });
             }
         }
-        return out;
+        return out.sort((a, b) => this.wishImpact(r, b.kind) - this.wishImpact(r, a.kind));
+    }
+
+    private wishImpact(r: Resident, kind: WishKind): number {
+        const penalty = (r.moodParts ?? []).reduce((sum, part) =>
+            sum + (WISH_MOOD_KEYS[kind].includes(part.key) ? Math.max(0, -part.value) : 0), 0);
+        // 开局还没有第一份月度幸福度明细，按同一失业扣分口径排序。
+        return kind === 'job' && !penalty ? Math.min(25, 8 + r.monthsUnemployed * 2) : penalty;
+    }
+
+    /** 打开档案时提出眼下最重要的一件事；重开档案不会延长同一个心愿。 */
+    openGuidance(id: number): void {
+        const r = this.resident(id);
+        const tuning = this._cfg.progress?.wishes;
+        if (!r || !tuning) return;
+        const world = this.guidanceWorld();
+        if (r.wish && !this.wishUnmet(r, r.wish, world)) this.settleWish(r);
+        const candidates = this.wishCandidates(r, world);
+        const old = r.wish;
+        let candidate = candidates[0];
+        if (!candidate) { r.wish = null; return; }
+        const current = old && candidates.find((w) => w.kind === old.kind && w.demand === old.demand);
+        if (current && this.wishImpact(r, current.kind) === this.wishImpact(r, candidate.kind)) candidate = current;
+        const same = old && old.kind === candidate.kind && old.demand === candidate.demand;
+        r.wish = { ...candidate, text: same && candidate.kind === 'shop' && old.text ? old.text : candidate.text,
+            since: same ? old.since : this.state.month,
+            until: same ? old.until : this.state.month + tuning.days };
+    }
+
+    private guidanceWorld(): World {
+        const byUid = new Map(this.state.buildings.map((b) => [b.uid, this._cfg.building(b.defId)] as const));
+        return buildWorld(this.state.residents, this.state.buildings, (uid) => byUid.get(uid) ?? null);
+    }
+
+    leaveMonthsLeft(r: Resident): number {
+        return r.leaving ? Math.max(0, this._cfg.economy.leaveMonths - (this.state.month - r.leaving.since)) : 0;
     }
 
     /** 心愿还没实现吗（true = 还缺） */
     private wishUnmet(r: Resident, w: Wish, world: World): boolean {
+        if (w.kind === 'job') return r.jobId === null || !!(w.jobTarget &&
+            (this.building(r.jobId)?.defId !== w.jobTarget.defId || r.jobTitle !== w.jobTarget.title));
         if (r.homeId === null) return false;
         const cfg = this._cfg.economy;
         switch (w.kind) {
-            case 'job': return r.jobId === null && !r.idle;
             case 'school': return !this.hasNearby(r.homeId, 'school', SCHOOL_RANGE);
             case 'clinic': return !this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE);
-            case 'shop': return !!w.demand && !this.homeCoverage(r.homeId, world, this.tier(r).range).has(w.demand);
+            case 'shop': return !!w.demand && !this.hasShopInCircle(r.homeId, w.demand, world);
             case 'commute': {
                 if (r.jobId === null) return false;
                 const d = this.distance(r.homeId, r.jobId);
@@ -532,6 +569,23 @@ export class Simulation implements SimApi {
         }
     }
 
+    private settleWish(r: Resident): void {
+        const w = r.wish;
+        const s = this.state;
+        const wt = this._cfg.progress?.wishes;
+        if (!w || !wt) return;
+        r.wish = null;
+        r.mood = clamp(0, 100, r.mood + wt.doneMood);
+        s.wishesDone = (s.wishesDone ?? 0) + 1;
+        s.buzz = Math.min(this._cfg.economy.buzzMax, (s.buzz ?? 0) + wt.doneBuzz);
+        this.notice('wishDone', `${r.name}的心愿实现了：${WISH_DONE_TEXT[w.kind] ?? w.text}`, [r.id]);
+        this.log(r, `心愿实现了：${w.text}`);
+        if (r.leaving && r.mood >= this._cfg.economy.stayMood) {
+            r.leaving = null;
+            this.notice('stay', `${r.name}决定留下来了`, [r.id]);
+        }
+    }
+
     private updateWishes(world: World): void {
         const p = this._cfg.progress;
         if (!p) return;
@@ -542,16 +596,7 @@ export class Simulation implements SimApi {
             const w = r.wish;
             if (!w) continue;
             if (!this.wishUnmet(r, w, world)) {
-                r.wish = null;
-                r.mood = clamp(0, 100, r.mood + wt.doneMood);
-                s.wishesDone = (s.wishesDone ?? 0) + 1;
-                s.buzz = Math.min(this._cfg.economy.buzzMax, (s.buzz ?? 0) + wt.doneBuzz);
-                this.notice('wishDone', `${r.name}的心愿实现了：${WISH_DONE_TEXT[w.kind] ?? w.text}`, [r.id]);
-                this.log(r, `心愿实现了：${w.text}`);
-                if (r.leaving && r.mood >= this._cfg.economy.stayMood) {
-                    r.leaving = null;
-                    this.notice('stay', `${r.name}决定留下来了`, [r.id]);
-                }
+                this.settleWish(r);
             } else if (s.month >= w.until) {
                 r.wish = null;
                 r.mood = clamp(0, 100, r.mood - wt.expireMood);
@@ -758,8 +803,13 @@ export class Simulation implements SimApi {
         const r = this.resident(residentId);
         const w = r ? r.wish : null;
         const town = this._town;
-        if (!r || !w || r.homeId === null || !town.uidReach) return null;
-        if (w.kind !== 'shop' && w.kind !== 'school' && w.kind !== 'clinic') return null;
+        if (!r || !w || r.homeId === null) return null;
+        if (w.kind === 'shop') {
+            const circle = this.shoppingCircle(r.homeId);
+            return circle ? { circle, radius: this.shoppingRadius, homes: [r.homeId], roads: [], byVehicle: false } : null;
+        }
+        if (!town.uidReach) return null;
+        if (w.kind !== 'school' && w.kind !== 'clinic') return null;
         const radius = Math.round(w.radius);
         if (radius <= 0) return null;
         return this.toServiceReach(town.uidReach(r.homeId, radius), radius, [r.homeId], false);
@@ -772,22 +822,37 @@ export class Simulation implements SimApi {
         return r ? r.name : '一户人';
     }
 
+    private renovationPlan(b: BuildingSim) {
+        const econ = this._cfg.building(b.defId);
+        const next = econ?.upgradeTo ? this._cfg.building(econ.upgradeTo) : null;
+        if (!next || !b.residentIds.length) return null;
+        const cfg = this._cfg.economy;
+        const people = b.residentIds.map((id) => this.resident(id)).filter((r): r is Resident => !!r);
+        const adults = people.filter((r) => r.age >= cfg.residents.workMinAge);
+        const savings = adults.reduce((sum, r) => sum + Math.max(0, r.savings), 0);
+        const mood = people.reduce((sum, r) => sum + r.mood, 0) / Math.max(1, people.length);
+        const name = this.buildingName(next.id);
+        const gap = Math.ceil(next.cost * cfg.renovateSavingsRatio - savings);
+        let hint = '';
+        if (this.state.renovations?.some((x) => x.uid === b.uid)) hint = `正在翻盖${name}`;
+        else if (!this.isUnlocked(next.id)) hint = `${name}尚未解锁`;
+        else if (gap > 0) hint = `再攒 ¥${gap} 就够翻盖费`;
+        else if (mood < cfg.renovateMood) hint = `住户平均幸福度需达到 ${cfg.renovateMood}`;
+        return { next, adults, people, savings, hint };
+    }
+
+    housingHint(homeId: number): string {
+        const b = this.building(homeId);
+        const plan = b && this.renovationPlan(b);
+        return plan ? plan.hint || '条件已齐，下次结算开工' : '';
+    }
+
     private renovateHomes(): void {
         const s = this.state;
-        const cfg = this._cfg.economy;
         for (const b of s.buildings) {
-            const econ = this._cfg.building(b.defId);
-            if (!econ || !econ.upgradeTo || !b.residentIds.length) continue;
-            if (!this.isUnlocked(econ.upgradeTo)) continue;
-            if (s.renovations?.some((x) => x.uid === b.uid)) continue;
-            const next = this._cfg.building(econ.upgradeTo);
-            if (!next) continue;
-            const people = b.residentIds.map((id) => this.resident(id)).filter((x): x is Resident => !!x);
-            const adults = people.filter((x) => x.age >= cfg.residents.workMinAge);
-            const savings = adults.reduce((a, x) => a + Math.max(0, x.savings), 0);
-            const mood = people.reduce((a, x) => a + x.mood, 0) / Math.max(1, people.length);
-            if (savings < next.cost * cfg.renovateSavingsRatio || mood < cfg.renovateMood) continue;
-            if (!chance(this._rng, cfg.renovateChance)) continue;
+            const plan = this.renovationPlan(b);
+            if (!plan || plan.hint) continue;
+            const { next, adults, people, savings } = plan;
             // 翻盖费按存款比例分摊，付给施工队（县外）
             let left = next.cost;
             for (const a of adults) {
@@ -797,8 +862,8 @@ export class Simulation implements SimApi {
             }
             if (left > 0) for (const a of adults) { const pay = Math.min(left, Math.max(0, a.savings)); a.savings -= pay; left -= pay; }
             this._flows.outflow.construction += next.cost - left;
-            (s.renovations ??= []).push({ uid: b.uid, to: econ.upgradeTo, left: Math.max(1, next.buildDays), total: Math.max(1, next.buildDays), startAt: s.month });
-            this.notice('renovate', `${this.homeOwnerName(b)}家开始把${this.buildingName(b.defId)}翻盖成${this.buildingName(econ.upgradeTo)}`, people.map((x) => x.id));
+            (s.renovations ??= []).push({ uid: b.uid, to: next.id, left: Math.max(1, next.buildDays), total: Math.max(1, next.buildDays), startAt: s.month });
+            this.notice('renovate', `${this.homeOwnerName(b)}家开始把${this.buildingName(b.defId)}翻盖成${this.buildingName(next.id)}`, people.map((x) => x.id));
         }
     }
 
@@ -1014,11 +1079,32 @@ export class Simulation implements SimApi {
 
     /** 某类消费有哪些店（按造价从便宜到贵） */
     private shopsOf(d: Demand): string[] {
-        const p = this._cfg.progress;
-        const ids = new Set<string>(p ? p.initialUnlocked : []);
-        if (p) for (const r of p.research) for (const id of r.unlocks) ids.add(id);
-        return Array.from(ids).filter((id) => this._cfg.building(id)?.demand === d)
-            .sort((a, b) => (this._cfg.building(a)!.cost - this._cfg.building(b)!.cost));
+        return this._cfg.catalog.filter((e) => e.demand === d && e.capacity > 0)
+            .sort((a, b) => Number(this.isUnlocked(b.id)) - Number(this.isUnlocked(a.id)) || a.cost - b.cost)
+            .map((e) => e.id);
+    }
+
+    private shopList(ids: string[]): string {
+        return ids.map((id) => this.buildingName(id) + (this.isUnlocked(id) ? '' : '（未解锁）')).join('、');
+    }
+
+    private get shoppingRadius(): number {
+        return this._cfg.progress?.wishes.shopRadius ?? 8;
+    }
+
+    private shoppingCircle(homeId: number): { col: number; row: number } | null {
+        const home = this._town.building(homeId);
+        return home ? { col: home.col + home.width / 2, row: home.row + home.height / 2 } : null;
+    }
+
+    private hasShopInCircle(homeId: number, demand: Demand, world: World): boolean {
+        const center = this.shoppingCircle(homeId);
+        if (!center) return false;
+        return (world.shopsByDemand.get(demand) ?? []).some((b) => {
+            const site = this._town.building(b.uid);
+            return !!site && Math.hypot(site.col + site.width / 2 - center.col,
+                site.row + site.height / 2 - center.row) <= this.shoppingRadius;
+        });
     }
 
     /** 建议：已解锁的第一个；都没解锁就提示先研究（方向 B：跨等级也指路，hint 把升级步骤说清楚） */
@@ -1050,9 +1136,54 @@ export class Simulation implements SimApi {
         };
     }
 
-    private suggestJob(r: Resident): { hint: string; suggest: string } {
-        const edu = EDU_NAME[r.education];
-        return { hint: `盖一栋有岗位的店或厂（他是${edu}学历），比如小作坊`, suggest: this.isUnlocked('workshop') ? 'workshop' : '' };
+    private jobWish(r: Resident, world: World): Omit<Wish, 'since' | 'until'> {
+        const eligible = this._cfg.catalog.filter((e) => e.jobs.some((j) => j.edu <= r.education));
+        // 意向随居民稳定，旧档也能得到相同的企业和岗位。
+        const preferred = r.id % 3 === 0 && eligible.length ? eligible[r.id % eligible.length] : null;
+        const slot = preferred?.jobs.find((j) => j.edu <= r.education);
+        const jobTarget = r.wish?.kind === 'job' ? r.wish.jobTarget :
+            preferred && slot ? { defId: preferred.id, title: slot.title } : undefined;
+        const ids = jobTarget ? [jobTarget.defId] : eligible.map((e) => e.id);
+        const vacancy = this.bestJobFor(r, world, jobTarget);
+        const guidance = vacancy ? { hint: `${this.buildingName(vacancy.building.defId)}正在招${vacancy.slot.title}`, suggest: '' }
+            : this.suggestFor(ids, '建一座');
+        const looking = r.monthsUnemployed > 0 ? `我已经 ${r.monthsUnemployed} 个月没找到工作了` : '我想找一份工作';
+        return { kind: 'job', jobTarget, text: jobTarget ? `${looking}，想去${this.buildingName(jobTarget.defId)}做${jobTarget.title}` : looking,
+            ...guidance, radius: 0 };
+    }
+
+    private referralOpening(id: number, uid?: number, title?: string): Opening | null {
+        const r = this.resident(id);
+        const rt = this._cfg.economy.residents;
+        if (!r || r.jobId !== null || r.idle || r.age < rt.workMinAge || r.age >= rt.retireAge || r.wish?.kind !== 'job') return null;
+        return this.bestJobFor(r, this.guidanceWorld(), r.wish.jobTarget, uid, title);
+    }
+
+    jobReferral(id: number): JobReferral | null {
+        const o = this.referralOpening(id);
+        return o ? { uid: o.building.uid, title: o.slot.title, employer: this.buildingName(o.building.defId) } : null;
+    }
+
+    introduceJob(id: number, uid: number, title: string): boolean {
+        const o = this.referralOpening(id, uid, title);
+        const r = this.resident(id);
+        if (!r || !o) return false;
+        this.takeJob(r, o);
+        this.settleWish(r);
+        this.openGuidance(id);
+        return true;
+    }
+
+    employers(): Employer[] {
+        const byId = new Map(this.state.residents.map((r) => [r.id, r] as const));
+        const rows: Employer[] = [];
+        for (const b of this.state.buildings) {
+            const econ = this._cfg.building(b.defId);
+            if (!econ || !econ.jobs.length) continue;
+            rows.push({ uid: b.uid, name: this.buildingName(b.defId), required: totalPositions(econ),
+                staff: staffing(b, econ, byId).staff });
+        }
+        return rows;
     }
 
     canAfford(defId: string): boolean {
@@ -1489,6 +1620,12 @@ export class Simulation implements SimApi {
             }
         }
 
+    }
+
+    private updateDepartures(): void {
+        const s = this.state;
+        const cfg = this._cfg.economy;
+        const rt = cfg.residents;
         // 想走 → 挽留期 → 留下或全家搬走（D026，DESIGN 16.3）。取代「心情低 3 个月 / 失业 6 个月就走」
         const handled = new Set<number>();
         for (const r of s.residents.slice()) {
@@ -1975,14 +2112,17 @@ export class Simulation implements SimApi {
     }
 
     /** 找工作：工资 − 通勤距离 × 惩罚，挑最高的（DESIGN 2.4） */
-    private bestJobFor(r: Resident, world: World): Opening | null {
-        const openings = openingsFor(r, this.state.buildings, (uid) => this.econOfUid(uid), world.residentsById);
+    private bestJobFor(r: Resident, world: World,
+        target = r.wish?.kind === 'job' ? r.wish.jobTarget : undefined, uid?: number, title?: string): Opening | null {
+        const openings = openingsFor(r, this.state.buildings, world.econOf, world.residentsById);
         if (!openings.length) return null;
         // 有车的人不怕远：通勤惩罚 ÷ 交通倍率（DESIGN 11.2）
         const penalty = this._cfg.economy.residents.commutePenalty / this.tier(r).range;
         let best: Opening | null = null;
         let bestScore = -Infinity;
         for (const o of openings) {
+            if (uid !== undefined && (o.building.uid !== uid || o.slot.title !== title)) continue;
+            if (target && (o.building.defId !== target.defId || o.slot.title !== target.title)) continue;
             const d = r.homeId === null ? 0 : this.distance(r.homeId, o.building.uid);
             const dist = isFinite(d) ? d : this._cfg.economy.serviceRadius * 2;
             const score = o.slot.salary - dist * penalty;
@@ -2024,7 +2164,7 @@ export class Simulation implements SimApi {
         if (r.jobId === null) return;
         if (!chance(this._rng, this._cfg.economy.residents.jobHopChance)) return;
         const needs = this._cfg.economy.residents.jobHopRaise;
-        const openings = openingsFor(r, this.state.buildings, (uid) => this.econOfUid(uid), world.residentsById);
+        const openings = openingsFor(r, this.state.buildings, world.econOf, world.residentsById);
         let best: Opening | null = null;
         for (const o of openings) {
             if (o.building.uid === r.jobId) continue;
@@ -2375,6 +2515,10 @@ function rushCost(r: ResearchDef, left: number): number {
 }
 const EDU_NAME = ['没上过学', '初中', '高中', '大专'];
 const DEMAND_ORDER: Demand[] = ['food', 'daily', 'fun', 'other'];
+const WISH_MOOD_KEYS: Record<WishKind, string[]> = {
+    job: ['work'], shop: ['shops', 'missed'], house: ['home', 'crowd'], commute: ['commute'],
+    env: ['env'], vehicle: ['vehicle'], school: ['school'], clinic: ['clinic'],
+};
 const WISH_SHOP_TEXT: Record<Demand, string> = {
     food: '家附近没地方吃饭', daily: '家附近买不到日用品', fun: '家附近没地方玩', other: '家附近没有理发、修手机的地方',
 };

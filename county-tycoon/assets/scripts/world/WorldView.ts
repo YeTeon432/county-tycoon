@@ -571,19 +571,21 @@ export class WorldView extends Component {
         this._reachT -= dt;
         const key = `${model.allBuildings().length}|${p ? `${p.def.id}@${p.col},${p.row}` : ''}|${this._trackId ?? ''}`;
         // 追踪时心愿会自己变（实现 / 过期 / 新心愿），每秒再对一次
-        if (key === this._reachKey && (this._trackId === null || p || this._reachT > 0)) return;
+        if (key === this._reachKey && (this._trackId === null || this._reachT > 0)) return;
         this._reachKey = key;
         this._reachT = 1;
         let reach: ServiceReach | null = null;
         if (p && this.reachOfPending) reach = this.reachOfPending(p.def.id, p.col, p.row, p.def.width, p.def.height);
-        else if (!p && this._trackId !== null && this.wishReachOf) reach = this.wishReachOf(this._trackId);
+        const wish = this._trackId !== null ? this.wishReachOf?.(this._trackId) : null;
+        if (!reach && (!p || wish?.circle)) reach = wish;
         if (!reach) { layer.drawReach(null); return; }
         const homes: ReachDraw['homes'] = [];
         for (const uid of reach.homes) {
             const b = model.allBuildings().find((x) => x.uid === uid);
             if (b) homes.push({ col: b.col, row: b.row, width: b.def.width, height: b.def.height });
         }
-        layer.drawReach({ roads: reach.roads, homes });
+        const circle = wish?.circle ? { ...wish.circle, radius: wish.radius } : undefined;
+        layer.drawReach({ roads: reach.roads, homes, circle });
     }
 
     /** 环境图层：开着环境视图就画全县；正在预览有污染 / 绿化的楼就画它的影响范围 */

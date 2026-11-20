@@ -53,7 +53,14 @@ export function staffing(b: BuildingSim, econ: BuildingEcon, residentsById: Map<
 
     const used = positions.map(() => false);
     const idle: number[] = [];
-    for (const w of workers) {
+    // 有明确职称的员工占住实际岗位；旧档缺职称或配置变动的员工再按学历补位。
+    const unmatched = workers.filter((w) => {
+        const index = positions.findIndex((slot, i) => !used[i] && slot.title === w.jobTitle && slot.edu <= w.education);
+        if (index < 0) return true;
+        used[index] = true;
+        return false;
+    });
+    for (const w of unmatched) {
         let idx = -1;
         for (let i = 0; i < positions.length; i++) {
             if (!used[i] && positions[i].edu <= w.education) {

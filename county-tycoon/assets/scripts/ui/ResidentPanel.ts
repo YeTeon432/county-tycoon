@@ -27,21 +27,25 @@ export class ResidentPanel extends Panel {
     protected cardH = 980;
 
     private _sim: SimApi | null = null;
+    private _residentId = 0;
+    private _findingJob = false;
+    onJobChanged: ((message: string) => void) | null = null;
     private _model: TownModel | null = null;
     /** 「追踪」（T425）；心愿卡片的「看范围」也走它（T538：追踪时地图画出心愿范围） */
-    private _onTrack: ((id: number) => void) | null = null;
+    private _onTrack: ((id: number, focusHome?: boolean) => void) | null = null;
 
     /**
      * @param onTrack 「追踪」按钮（T425）：在地图上用箭头标出这个人和他家；不传就不显示按钮
      */
-    static show(parent: Node, sim: SimApi, model: TownModel, residentId: number, onTrack?: (id: number) => void): ResidentPanel | null {
+    static show(parent: Node, sim: SimApi, model: TownModel, residentId: number, onTrack?: (id: number, focusHome?: boolean) => void): ResidentPanel | null {
         const r = sim.resident(residentId);
         if (!r) return null;
         const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`);
         panel._sim = sim;
         panel._model = model;
         panel._onTrack = onTrack ?? null;
-        panel.fill(sim, r);
+        panel._residentId = r.id;
+        panel.refresh();
         if (onTrack) panel.buildTrackButton(() => onTrack(r.id));
         return panel;
     }
@@ -53,6 +57,19 @@ export class ResidentPanel extends Panel {
         const W = 148, H = 52;
         const btn = makeButton(head, 'TrackBtn', '追踪', W, H, 'primary', onTap, 'arrow-down');
         btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, Panel.HEAD_H / 2 - 60, 0);
+    }
+
+    refresh(): void {
+        const sim = this._sim;
+        if (!sim || !this.content) return;
+        const r = sim.resident(this._residentId);
+        if (!r) { this.close(); return; }
+        sim.openGuidance?.(r.id);
+        for (const child of this.content.children.slice()) {
+            child.removeFromParent();
+            child.destroy();
+        }
+        this.fill(sim, r);
     }
 
     private fill(sim: SimApi, r: Resident): void {
@@ -89,77 +106,52 @@ export class ResidentPanel extends Panel {
         }
         y -= tileH + 20;
 
-        // ── 想走（D026）：红条 + 吐槽，告诉玩家还有几天、该补什么 ──
-        if (r.leaving) {
-            const left = Math.max(0, 3 - (sim.state.month - r.leaving.since));
-            const why = r.leaving.reasons.length ? r.leaving.reasons.join('、') : '日子过得不顺心';
-            const wh = 76;
-            const warn = makePanelNode(content, 'Leaving', W, wh);
-            warn.setPosition(0, y - wh / 2, 0);
-            const wg = warn.addComponent(Graphics);
-            wg.fillColor = new Color(253, 236, 234, 255);
-            wg.roundRect(-W / 2, -wh / 2, W, wh, UI_RADIUS);
-            wg.fill();
-            const t1 = makeLabelLeft(warn, 'T1', `想离开县城（还有 ${left} 天）`, UI_FONT.body, UI_COLOR.down, W - 40);
-            t1.isBold = true;
-            t1.node.setPosition(-W / 2 + 20, 14, 0);
-            const t2 = makeLabelLeft(warn, 'T2', `吐槽：${why}。幸福度回到 35 以上就会留下`, UI_FONT.small, UI_COLOR.text, W - 40);
-            t2.node.setPosition(-W / 2 + 20, -18, 0);
-            y -= wh + 16;
-        }
-
-        // ── 心愿（D026）：蓝条 + 建议，告诉玩家该盖什么、盖在哪 ──
-        if (r.wish) {
-            const left = Math.max(0, r.wish.until - sim.state.month);
-            const wh = 96;
-            const card = makePanelNode(content, 'Wish', W, wh);
-            card.setPosition(0, y - wh / 2, 0);
-            const cg = card.addComponent(Graphics);
-            cg.fillColor = new Color(232, 241, 252, 255);
-            cg.roundRect(-W / 2, -wh / 2, W, wh, UI_RADIUS);
-            cg.fill();
-            // 要「在他家 N 格内」盖的心愿：右上角「看范围」→ 追踪他，地图上画出范围（T538）
-            const k = r.wish.kind;
-            const onTrack = this._onTrack;
-            const ranged = !!onTrack && r.homeId !== null && r.wish.radius > 0 && (k === 'shop' || k === 'school' || k === 'clinic');
-            const BW = 150;
-            if (ranged) {
-                const id = r.id;
-                const btn = makeButton(card, 'RangeBtn', '看范围', BW, 48, 'primary', () => onTrack!(id));
-                btn.node.setPosition(W / 2 - 16 - BW / 2, 20, 0);
+        if (r.wish || r.leaving) {
+            const wish = r.wish;
+            const job = wish?.kind === 'job';
+            const target = wish?.jobTarget;
+            const referral = job && this._findingJob ? sim.jobReferral?.(r.id) : null;
+            const ranged = wish && ['shop', 'school', 'clinic'].includes(wish.kind) && !!this._onTrack;
+            const h = 154 + (r.leaving ? 38 : 0);
+            const card = makePanelNode(content, 'Guidance', W, h);
+            card.setPosition(0, y - h / 2, 0);
+            const bg = card.addComponent(Graphics);
+            bg.fillColor = r.leaving ? new Color(253, 236, 234) : new Color(232, 241, 252);
+            bg.roundRect(-W / 2, -h / 2, W, h, UI_RADIUS);
+            bg.fill();
+            const line = (name: string, text: string, top: number, size: number, height: number) => {
+                const label = makeLabelLeft(card, name, text, size, UI_COLOR.text, W - 36);
+                label.node.getComponent(UITransform)!.setContentSize(W - 36, height);
+                label.node.setPosition(-W / 2 + 18, h / 2 - top - height / 2, 0);
+                return label;
+            };
+            line('Request', wish?.text ?? r.leaving?.reasons[0] ?? '我想离开县城', 5, UI_FONT.body, 40).isBold = true;
+            let detail = wish?.hint ?? '';
+            if (job && !this._findingJob) detail = target
+                ? `想做${target.title}，帮我问问有没有空位吧。` : '只要学历合适，有空岗我就愿意去。';
+            if (referral) detail = `${referral.employer} · ${referral.title}`;
+            line('Detail', detail, 45, UI_FONT.small, ranged || job ? 55 : 85);
+            if (ranged || job) {
+                const btn = makeButton(card, 'Action', ranged ? '看范围' : !this._findingJob ? '帮他找工作' :
+                    referral ? '介绍入职' : '暂无合适空岗', 202, 44, 'primary', () => {
+                    if (ranged) { this._onTrack?.(r.id, true); return; }
+                    if (referral && sim.introduceJob?.(r.id, referral.uid, referral.title)) {
+                        this._findingJob = false;
+                        this.onJobChanged?.(`${r.name}已入职${referral.employer}，担任${referral.title}`);
+                    } else this._findingJob = true;
+                    this.refresh();
+                });
+                btn.setEnabled(!!ranged || !this._findingJob || !!referral);
+                btn.node.setPosition(-W / 2 + 119, h / 2 - 124, 0);
             }
-            const t1 = makeLabelLeft(card, 'T1', `心愿：${r.wish.text}（还有 ${left} 天）`, UI_FONT.body, UI_PALETTE.blue, W - 40 - (ranged ? BW + 16 : 0));
-            t1.isBold = true;
-            t1.node.setPosition(-W / 2 + 20, 20, 0);
-            const t2 = makeLabelLeft(card, 'T2', `建议：${r.wish.hint}。实现了幸福度 +15`, UI_FONT.small, UI_COLOR.text, W - 40);
-            t2.node.setPosition(-W / 2 + 20, -20, 0);
-            y -= wh + 16;
+            if (r.leaving) line('Leaving', `挽留还剩 ${sim.leaveMonthsLeft?.(r) ?? 0} 个月`, 150, UI_FONT.small, 36);
+            y -= h + 16;
         }
-
-        // ── 幸福度分项（D026）：为什么开心 / 不开心 ──
-        const parts = (r.moodParts ?? []).slice().sort((a, b) => a.value - b.value);
-        if (parts.length) {
-            const chip = (p: { label: string; value: number }) => `${p.label} ${p.value > 0 ? '+' : ''}${Math.round(p.value)}`;
-            const bad = parts.filter((p) => p.value < 0).map(chip).join('　');
-            const good = parts.filter((p) => p.value > 0).reverse().map(chip).join('　');
-            if (bad) {
-                const l = makeLabelLeft(content, 'Bad', `不开心：${bad}`, UI_FONT.small, UI_COLOR.down, W);
-                l.node.setPosition(-W / 2, y - 14, 0);
-                y -= 34;
-            }
-            if (good) {
-                const l = makeLabelLeft(content, 'Good', `开心：${good}`, UI_FONT.small, UI_COLOR.up, W);
-                l.node.setPosition(-W / 2, y - 14, 0);
-                y -= 34;
-            }
-            y -= 8;
-        }
-
         // ── 信息卡 ──
         const eduText = ['未上学', '初中', '高中', '大专以上'][r.education] ?? '—';
         const lines: [string, string][] = [
             ['学历', eduText],
-            ['住处', this.buildingName(r.homeId) ?? '无'],
+            ['住处', [this.buildingName(r.homeId) ?? '无', r.homeId !== null && sim.housingHint?.(r.homeId)].filter(Boolean).join(' · ')],
             ['工作', this.jobText(r)],
         ];
         const family: string[] = [];
@@ -173,45 +165,27 @@ export class ResidentPanel extends Panel {
         lines.push(['出行', VEHICLE_NAME[r.vehicle ?? 'walk'] ?? '步行']);
         lines.push(['来县', monthLabel(r.arrivedMonth) + (r.monthsUnemployed > 0 && !r.jobTitle ? ` · 失业 ${r.monthsUnemployed} 个月` : '')]);
 
-        const LINE_H = 50;
-        const blockH = lines.length * LINE_H + 20;
-        const block = makePanelNode(content, 'Info', W, blockH);
-        block.setPosition(0, y - blockH / 2, 0);
-        const bg = block.addComponent(Graphics);
-        bg.fillColor = UI_COLOR.block;
-        bg.roundRect(-W / 2, -blockH / 2, W, blockH, UI_RADIUS);
-        bg.fill();
-        let ly = blockH / 2 - 10 - LINE_H / 2;
-        for (const [k, v] of lines) {
-            const kl = makeLabelLeft(block, 'Key', k, UI_FONT.small, UI_COLOR.textDim, 80);
-            kl.node.setPosition(-W / 2 + 24, ly, 0);
-            const vl = makeLabelLeft(block, 'Val', v, UI_FONT.body, UI_COLOR.text, W - 140);
-            vl.node.setPosition(-W / 2 + 108, ly, 0);
-            ly -= LINE_H;
-        }
-        y -= blockH + 36;
-
-        // ── 人生记录 ──
-        makeSectionTitle(content, W, y, '人生记录', UI_PALETTE.green);
-        y -= 30;
-        const bottom = -this.contentH / 2;
-        const listH = Math.max(90, y - bottom);
-        const list = ScrollList.mount(content, 'Log', W, listH);
+        const listH = y + this.contentH / 2;
+        const list = ScrollList.mount(content, 'Details', W, listH);
         list.node.setPosition(0, y - listH / 2, 0);
-
-        if (r.log.length === 0) {
-            const empty = makeLabel(content, 'Empty', '还没有记录', UI_FONT.body, UI_COLOR.textDim, W);
-            empty.node.setPosition(0, y - 40, 0);
-            list.node.active = false;
-            return;
+        const rows: ListRow[] = lines.map(([key, value]) => ({ height: 50, build: (row) => {
+            const label = makeLabelLeft(row, 'Key', key, UI_FONT.small, UI_COLOR.textDim, 80);
+            label.node.setPosition(-W / 2 + 16, 0, 0);
+            const val = makeLabelLeft(row, 'Value', value, UI_FONT.body, UI_COLOR.text, W - 126);
+            val.node.setPosition(-W / 2 + 106, 0, 0);
+        } }));
+        const parts = (r.moodParts ?? []).slice().sort((a, b) => a.value - b.value);
+        if (parts.length) {
+            rows.push({ height: 62, build: (row) => makeSectionTitle(row, W, 0, '幸福度明细', UI_PALETTE.green) });
+            for (const part of parts) rows.push({ height: 44, build: (row) => {
+                const l = makeLabelLeft(row, 'Part', `${part.label}　${part.value > 0 ? '+' : ''}${part.value}`,
+                    UI_FONT.small, part.value < 0 ? UI_COLOR.down : UI_COLOR.up, W - 32);
+                l.node.setPosition(-W / 2 + 16, 0, 0);
+            } });
         }
-
-        // 最近的在最上面（玩家关心"刚发生了什么"）
-        const items = r.log.slice().reverse();
-        const rows: ListRow[] = items.map((e) => ({
-            height: 52,
-            build: (row) => this.buildLogRow(row, W, e),
-        }));
+        rows.push({ height: 62, build: (row) => makeSectionTitle(row, W, 0, '人生记录', UI_PALETTE.green) });
+        if (!r.log.length) rows.push({ height: 50, build: (row) => makeLabel(row, 'Empty', '还没有记录', UI_FONT.small, UI_COLOR.textDim, W) });
+        for (const e of r.log.slice().reverse()) rows.push({ height: 52, build: (row) => this.buildLogRow(row, W, e) });
         list.setRows(rows);
     }
 

@@ -56,7 +56,7 @@ export interface SimApi {
     envAt?(col: number, row: number): number;
     /** 覆盖范围（T538）：在 (col,row) 盖 defId，沿路能服务到哪些路、哪些住宅；不是店 / 学校 / 卫生院返回 null */
     serviceReach?(defId: string, col: number, row: number, w: number, h: number): ServiceReach | null;
-    /** 覆盖范围（T538）：这位居民的店 / 学校 / 卫生院心愿要的范围（从他家沿路算）；没有这类心愿返回 null */
+    /** 覆盖范围（T538）：购物用住宅中心的圆，学校和卫生院从住宅沿路算；没有这类心愿返回 null */
     wishReach?(residentId: number): ServiceReach | null;
     /** 营商环境分项和总分（0～100） */
     businessEnv?(): { total: number; parts: { label: string; value: number; max: number }[] };
@@ -71,6 +71,12 @@ export interface SimApi {
     /** 能不能盖（资金、城镇等级） */
     canAfford(defId: string): boolean;
 
+    openGuidance?(id: number): void;
+    housingHint?(homeId: number): string;
+    leaveMonthsLeft?(resident: Resident): number;
+    jobReferral?(id: number): JobReferral | null;
+    introduceJob?(id: number, uid: number, title: string): boolean;
+    employers?(): Employer[];
     resident(id: number): Resident | null;
     building(uid: number): BuildingSim | null;
     /** 某种建筑的客单价（消费时飘字用）；不是消费型建筑返回 0 */
@@ -80,6 +86,19 @@ export interface SimApi {
 
     /** 月结算后的回调（顶栏、账单、行人刷新用） */
     onMonth: ((report: MonthlyReport) => void) | null;
+}
+
+export interface JobReferral {
+    uid: number;
+    title: string;
+    employer: string;
+}
+
+export interface Employer {
+    uid: number;
+    name: string;
+    staff: number;
+    required: number;
 }
 
 export interface ResearchStatus {
@@ -128,6 +147,7 @@ export interface SimSummary {
 
 /** 覆盖范围高亮（T538）：沿路走 radius 步以内 */
 export interface ServiceReach {
+    circle?: { col: number; row: number };
     radius: number;
     /** 走得到的道路格 [col, row] */
     roads: [number, number][];

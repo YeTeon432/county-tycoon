@@ -32,7 +32,7 @@ export interface Preview3D { id: string; col: number; row: number; w: number; h:
  * 贴在 3D 地面上的色块（T540e / T547）：放置预览的占地菱形、环境图层、覆盖范围。
  * c / r / w / h 是格子，颜色 0～255（a 是透明度）；stroke 给了就沿边描一圈。
  */
-export interface Decal { c: number; r: number; w: number; h: number; fill: Color | null; stroke?: Color | null }
+export interface Decal { c: number; r: number; w: number; h: number; fill: Color | null; stroke?: Color | null; farEdge?: [number, number] }
 /** 每层各一个网格，越往后越压在上面（离地高度不同） */
 export type DecalLayer = 'env' | 'reach' | 'grid' | 'ghost';
 const DECAL_Y: Record<DecalLayer, number> = { env: 0.004, reach: 0.006, grid: 0.008, ghost: 0.010 };
@@ -387,11 +387,11 @@ export class World3D extends Component {
         const y = DECAL_Y[layer];
         const minPos = new Vec3(Infinity, y, Infinity);
         const maxPos = new Vec3(-Infinity, y, -Infinity);
-        const quad = (x0: number, z0: number, x1: number, z1: number, c: Color) => {
+        const quad = (x0: number, z0: number, x1: number, z1: number, c: Color, farLeft = x0, farRight = x1) => {
             const i = pos.length / 3;
-            pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
-            minPos.x = Math.min(minPos.x, x0); minPos.z = Math.min(minPos.z, z0);
-            maxPos.x = Math.max(maxPos.x, x1); maxPos.z = Math.max(maxPos.z, z1);
+            pos.push(x0, y, z0, x1, y, z0, farRight, y, z1, farLeft, y, z1);
+            minPos.x = Math.min(minPos.x, x0, farLeft); minPos.z = Math.min(minPos.z, z0);
+            maxPos.x = Math.max(maxPos.x, x1, farRight); maxPos.z = Math.max(maxPos.z, z1);
             for (let k = 0; k < 4; k++) col.push(c.r / 255, c.g / 255, c.b / 255, c.a / 255);
             // 从上往下看是顺时针 → 正面朝上（同地面网格）
             idx.push(i, i + 2, i + 1, i, i + 3, i + 2);
@@ -399,7 +399,7 @@ export class World3D extends Component {
         const lw = 0.06;   // 描边宽（格）
         for (const d of list) {
             const x0 = d.c, z0 = d.r, x1 = d.c + d.w, z1 = d.r + d.h;
-            if (d.fill) quad(x0, z0, x1, z1, d.fill);
+            if (d.fill) quad(x0, z0, x1, z1, d.fill, d.farEdge?.[0], d.farEdge?.[1]);
             if (d.stroke) {
                 quad(x0, z0, x1, z0 + lw, d.stroke);
                 quad(x0, z1 - lw, x1, z1, d.stroke);

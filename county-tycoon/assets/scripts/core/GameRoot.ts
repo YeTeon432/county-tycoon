@@ -184,6 +184,7 @@ export class GameRoot extends Component {
             DayClock.speed = () => (ui.clock ? ui.clock.speed : 1);
             // 第三、四批（D026）：环境图层、特色街道小旗、招商选址
             if (sim) {
+                ui.onResidentChanged = () => this.save();
                 view.envAt = sim.envAt ? (c, r) => sim.envAt!(c, r) : null;
                 view.envOfDef = sim.buildingEnv ? (id) => sim.buildingEnv!(id) : null;
                 // T538 覆盖范围：放店 / 学校时画它沿路够得着的路和住户；追踪居民时画他心愿要的范围
@@ -236,7 +237,7 @@ export class GameRoot extends Component {
             // 点地块的回调比预览挪位置早一步：等这一帧预览挪好了再读（不然提示的是上一个位置）
             view.onCellTapped = () => this.scheduleOnce(() => this.updatePlacementHint(), 0);
             // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
-            view.onTownChanged = () => { this.updatePlacementHint(); this.save(); };
+            view.onTownChanged = () => { this.updatePlacementHint(); ui.refreshOpenPanels(); this.save(); };
         }
         this.updatePlacementHint();
     }

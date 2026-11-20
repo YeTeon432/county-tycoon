@@ -9,11 +9,12 @@ import {
 
 const { ccclass } = _decorator;
 
-type Tab = 'goals' | 'research' | 'talent' | 'invest' | 'streets';
+type Tab = 'goals' | 'research' | 'talent' | 'market' | 'invest' | 'streets';
 const TABS: { key: Tab; label: string }[] = [
     { key: 'goals', label: '发展目标' },
     { key: 'research', label: '产业研究' },
     { key: 'talent', label: '人才引进' },
+    { key: 'market', label: '人才市场' },
     { key: 'invest', label: '招商引资' },
     { key: 'streets', label: '特色街道' },
 ];
@@ -113,6 +114,7 @@ export class CenterPanel extends Panel {
         if (this._tab === 'goals') this.fillGoals(body, H);
         else if (this._tab === 'research') this.fillResearch(body, H);
         else if (this._tab === 'talent') this.fillTalent(body, H);
+        else if (this._tab === 'market') this.fillMarket(body, H);
         else if (this._tab === 'streets') this.fillStreets(body, H);
         else this.fillInvest(body, H);
     }
@@ -271,6 +273,28 @@ export class CenterPanel extends Panel {
     }
 
     // ───────────────────────── 人才引进（D030，DESIGN 16.6） ─────────────────────────
+
+    private fillMarket(body: Node, H: number): void {
+        const employers = this._sim?.employers?.() ?? [];
+        const hired = employers.reduce((sum, b) => sum + b.staff, 0);
+        const required = employers.reduce((sum, b) => sum + b.required, 0);
+        const summary = makeLabelLeft(body, 'Summary', `全县已招 ${hired} 人　所需 ${required} 人　空缺 ${required - hired} 人`,
+            UI_FONT.body, UI_COLOR.text, this.W);
+        summary.node.setPosition(-this.W / 2, H / 2 - 24, 0);
+        if (!employers.length) {
+            makeLabel(body, 'Empty', '县里还没有提供岗位的单位', UI_FONT.small, UI_COLOR.textDim, this.W);
+            return;
+        }
+        const list = ScrollList.mount(body, 'Employers', this.W, H - 72);
+        list.node.setPosition(0, -36, 0);
+        list.setRows(employers.map((b) => ({ height: 62, build: (row: Node) => {
+            const name = makeLabelLeft(row, 'Name', b.name, UI_FONT.body, UI_COLOR.text, this.W - 180);
+            name.node.setPosition(-this.W / 2 + 12, 0, 0);
+            const count = makeLabelRight(row, 'Staff', `${b.staff} / ${b.required}`, UI_FONT.body,
+                b.staff < b.required ? UI_PALETTE.blue : UI_COLOR.textDim, 150);
+            count.node.setPosition(this.W / 2 - 12, 0, 0);
+        } })));
+    }
 
     private fillTalent(body: Node, H: number): void {
         const sim = this._sim!;

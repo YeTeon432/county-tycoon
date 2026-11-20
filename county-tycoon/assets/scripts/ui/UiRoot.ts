@@ -81,6 +81,7 @@ export class UiRoot extends Component {
     /** 当前打开的建筑详情 */
     private _topPanel: BuildingPanel | null = null;
     /** 叠在建筑详情上面的居民档案 */
+    onResidentChanged: (() => void) | null = null;
     private _residentPanel: ResidentPanel | null = null;
     /** 居民总览 */
     private _listPanel: ResidentListPanel | null = null;
@@ -324,11 +325,16 @@ export class UiRoot extends Component {
         if (report.notices && report.notices.some((n) => n.kind === 'research')) {
             if (this._bar) this._bar.refreshUnlocks();
         }
-        if (this._centerPanel && this._centerPanel.node?.isValid) this._centerPanel.fill();
+        this.refreshOpenPanels();
         if (this._topBar) {
             this._topBar.refresh();
             this._topBar.setReportFresh(true);
         }
+    }
+
+    refreshOpenPanels(): void {
+        if (this._residentPanel?.node?.isValid) this._residentPanel.refresh();
+        if (this._centerPanel?.node?.isValid) this._centerPanel.fill();
     }
 
     /** 打开上月账单；还没有结算过就什么都不做 */
@@ -422,9 +428,15 @@ export class UiRoot extends Component {
         const old = this._residentPanel;
         this._residentPanel = null;
         if (old && old.node && old.node.isValid) old.node.destroy();
-        const onTrack = this.requestTrack ? (id: number) => this.startTrack(id) : undefined;
+        const onTrack = this.requestTrack ? (id: number, focusHome?: boolean) => this.startTrack(id, focusHome) : undefined;
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
+            panel.onJobChanged = (message) => {
+                this._notices?.say('info', message);
+                this._topBar?.refresh();
+                this._centerPanel?.fill();
+                this.onResidentChanged?.();
+            };
             panel.onClosed = () => {
                 if (this._residentPanel === panel) this._residentPanel = null;
             };
@@ -456,7 +468,7 @@ export class UiRoot extends Component {
     }
 
     /** 档案里点了「追踪」：关掉所有面板，地图上标出这个人和他家 */
-    startTrack(id: number): void {
+    startTrack(id: number, focusHome = false): void {
         const r = this.sim ? this.sim.resident(id) : null;
         if (!r || !this.requestTrack) return;
         this.closeTopPanel();
@@ -466,11 +478,12 @@ export class UiRoot extends Component {
         this._trackT = 1;
         this._trackChip?.show(r.name);
         this.requestTrack(id);
+        if (focusHome) this.requestTrackFocus?.('home');
         // T538：有「在他家 N 格内盖…」的心愿，地图上同时画出范围，这里说一句怎么看
         const reach = this.sim && this.sim.wishReach ? this.sim.wishReach(id) : null;
         if (reach && r.wish) {
-            const where = reach.roads.length ? `蓝色是他家沿路 ${reach.radius} 格内的路，挨着这些路盖就行` : '他家不挨路，先给他家修条路';
-            this._notices?.say('info', `${r.wish.hint}：${where}`);
+            const where = reach.circle ? `蓝色圆内建成任意一家适用店铺即可，半径 ${reach.radius} 格` : reach.roads.length ? `蓝色是他家沿路 ${reach.radius} 格内的路，挨着这些路盖就行` : '他家不挨路，先给他家修条路';
+            this._notices?.say('info', where);
         }
     }
 

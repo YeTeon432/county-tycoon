@@ -255,7 +255,7 @@ export class GameRoot extends Component {
         } else if (reach) {
             ui.setPlacementHint(reach);
         } else if (view.demolishing) {
-            ui.setPlacementHint('拆除模式：点建筑移除');
+            ui.setPlacementHint('拆除模式：点选建筑，再按「拆除」');
         } else if (view.selectedBuilding) {
             ui.setPlacementHint(view.selectedBuilding.flat
                 ? `修路：${view.selectedBuilding.name}，点地块直接铺`

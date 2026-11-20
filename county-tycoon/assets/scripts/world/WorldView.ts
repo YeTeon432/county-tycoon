@@ -103,11 +103,13 @@ export class WorldView extends Component {
     private _selected: BuildingDef | null = null;
     /** 当前是否处于拆除模式 */
     private _demolishing = false;
-    /** 鼠标/手指当前指到哪一格，-1 表示不在图上 */
+    /** 鼠标当前指到哪一格，-1 表示不在图上 */
     private _hoverCol = -1;
     private _hoverRow = -1;
+    private _hoverDemolition: PlacedBuilding | null = null;
     /** 放置预览：点了地块、还没按「确定」（D022，DESIGN 12）。道路不走预览 */
     private _pending: PendingPlace | null = null;
+    private _pendingDemolition: PlacedBuilding | null = null;
 
     /** 判定"点击"的最大位移，单位是 UI 像素。手指在真机上抖一两个像素很正常 */
     private static readonly TAP_SLOP = 12;
@@ -174,8 +176,8 @@ export class WorldView extends Component {
     canAfford: ((def: BuildingDef) => boolean) | null = null;
     /** 盖不了的原因（没解锁 / 预算不够），预览里显示；接了就优先用它，不再问 canAfford */
     blockReason: ((def: BuildingDef) => string | null) | null = null;
-    /** 预览出现 / 挪动 / 换朝向 / 消失时通知（确认条据此显示） */
-    onPendingChanged: ((p: PendingPlace | null) => void) | null = null;
+    /** 放置或拆除预览改变时通知确认条。 */
+    onPendingChanged: (() => void) | null = null;
 
     /** 追踪用：这位居民的名字和家（每帧问一次，搬家了箭头跟着换）；null = 人没了 */
     trackInfo: ((id: number) => { name: string; homeId: number | null } | null) | null = null;
@@ -289,16 +291,22 @@ export class WorldView extends Component {
     selectBuilding(def: BuildingDef | null): void {
         this._selected = def;
         this._demolishing = false;
-        this.setPending(null);
-        this.refreshGhost();
+        this.resetEditPreview();
     }
 
     /** 切到拆除模式（同时清空选中的建筑） */
     setDemolishMode(on: boolean): void {
         this._demolishing = on;
         if (on) this._selected = null;
+        this.resetEditPreview();
+    }
+
+    private resetEditPreview(): void {
+        this._hoverCol = this._hoverRow = -1;
+        this._hoverDemolition = this._pendingDemolition = null;
+        this._3d?.setGridVisible(!!this._selected || this._demolishing);
         this.setPending(null);
-        this.refreshGhost();
+        this._3d?.setDemolitionTarget(null);
     }
 
     private registerInput(): void {
@@ -490,6 +498,7 @@ export class WorldView extends Component {
         if (this._buildings) this._buildings.relayout(spin !== 0);
         if (!this._turn) {
             this._hoverCol = -1; this._hoverRow = -1;
+            this._hoverDemolition = null;
             this.refreshGhost();
             this.onViewRotated?.(iso.rot);
         }
@@ -609,6 +618,11 @@ export class WorldView extends Component {
             }
         }
         const cell = this.uiToCell(uiX, uiY);
+        if (this._demolishing) {
+            if (cell) this.onCellTapped?.(...cell);
+            this.setPendingDemolition(this.demolitionAt(uiX, uiY, cell));
+            return;
+        }
         if (!cell) {
             this.clearGhost();
             return;
@@ -617,12 +631,18 @@ export class WorldView extends Component {
 
         if (this.onCellTapped) this.onCellTapped(col, row);
 
-        if (this._demolishing) {
-            this.doDemolish(col, row);
-        } else if (this._selected) {
+        if (this._selected) {
             // 道路一点就铺；其他建筑先出预览，按「确定」才盖（D022）
-            if (this._selected.flat) this.doPlace(this._selected, col, row);
-            else this.previewAt(this._selected, col, row);
+            if (this._selected.flat) {
+                if (this.doPlace(this._selected, col, row)) this.clearGhost();
+                else {
+                    this._hoverCol = col;
+                    this._hoverRow = row;
+                    this.refreshGhost();
+                }
+            } else {
+                this.previewAt(this._selected, col, row);
+            }
         } else {
             // 没选建筑也没开拆除：点中建筑交给界面打开详情（换朝向改成详情里的按钮），点空地什么都不做。
             // 街上的人和车不能点（T424：老是抢走点楼；想看某人从居民总览「追踪」）。
@@ -641,7 +661,6 @@ export class WorldView extends Component {
             }
             return;
         }
-        this.refreshGhost();
     }
 
     /** 按 uid 换朝向（建筑详情面板的按钮用）。没有两个朝向的建筑返回 false */
@@ -693,7 +712,7 @@ export class WorldView extends Component {
             if (p) layer.showPreview(p.def, p.col, p.row, p.facing, p.ok);
             else layer.clearGhost();
         }
-        if (this.onPendingChanged) this.onPendingChanged(p);
+        this.onPendingChanged?.();
     }
 
     /** 预览换朝向（没有 _r 图的建筑不动） */
@@ -710,22 +729,24 @@ export class WorldView extends Component {
         const fresh = this.evalPending(p.def, p.col, p.row, p.facing);   // 资金可能刚变过
         if (!fresh.ok) { this.setPending(fresh); return false; }
         const ok = this.doPlace(p.def, p.col, p.row, p.facing);
-        this.setPending(null);
         if (ok && !p.def.flat) {
-            this._selected = null;
-            this.refreshGhost();
+            this.selectBuilding(null);
             if (this.onBuildingConfirmed) this.onBuildingConfirmed();
+        } else {
+            this.setPending(null);
         }
         return ok;
     }
 
     cancelPending(): void {
-        this.setPending(null);
+        if (this._pendingDemolition) this.setPendingDemolition(null);
+        else this.setPending(null);
     }
 
     /** 预览上方在 UI 坐标里的位置（确认条跟着它）；没有预览返回 null */
     pendingAnchorUI(out: Vec3): Vec3 | null {
-        const p = this._pending, iso = this._iso, world = this._world;
+        const p = this._pending ?? this._pendingDemolition;
+        const iso = this._iso, world = this._world;
         const trans = this.node.getComponent(UITransform);
         if (!p || !iso || !world || !trans) return null;
         const foot = iso.footBottom(p.col, p.row, p.def.width, p.def.height);
@@ -757,13 +778,36 @@ export class WorldView extends Component {
         return true;
     }
 
-    /** 拆掉点中的那一栋 */
-    private doDemolish(col: number, row: number): void {
-        const model = this._model;
-        const layer = this._buildings;
-        if (!model || !layer) return;
+    get pendingDemolition(): PlacedBuilding | null {
+        return this._pendingDemolition;
+    }
 
-        const removed = model.removeAt(col, row);
+    private demolitionAt(uiX: number, uiY: number, cell: [number, number] | null): PlacedBuilding | null {
+        const model = this._model;
+        if (!model || this.rotating) return null;
+        const lp = this.uiToLocal(uiX, uiY);
+        const uid = lp ? this._buildings?.pickBuildingAt(lp.x, lp.y) : null;
+        if (uid != null) {
+            const building = model.allBuildings().find((b) => b.uid === uid);
+            if (building) return building;
+        }
+        return cell ? model.getAt(...cell) : null;
+    }
+
+    private setPendingDemolition(target: PlacedBuilding | null): void {
+        this._hoverDemolition = null;
+        this._pendingDemolition = target;
+        this.refreshGhost();
+        this.onPendingChanged?.();
+    }
+
+    confirmDemolition(): void {
+        const model = this._model;
+        const target = this._pendingDemolition;
+        if (!model || !target || !this._demolishing) return;
+        this.setPendingDemolition(null);
+        if (model.getAt(target.col, target.row) !== target) return;
+        const removed = model.removeAt(target.col, target.row);
         if (!removed) return;
         if (this.onDemolished) this.onDemolished(removed.uid);
         this.redrawTown();
@@ -932,7 +976,19 @@ export class WorldView extends Component {
 
     /** 更新预览位置 */
     private updateHover(uiX: number, uiY: number): void {
+        if (this._pending || this._pendingDemolition) return;
+        if (this.rotating || InputGuard.isBlocked(uiX, uiY)) {
+            this.clearGhost();
+            return;
+        }
         const cell = this.uiToCell(uiX, uiY);
+        if (this._demolishing) {
+            const target = this.demolitionAt(uiX, uiY, cell);
+            if (target === this._hoverDemolition) return;
+            this._hoverDemolition = target;
+            this.refreshGhost();
+            return;
+        }
         if (!cell) {
             this.clearGhost();
             return;
@@ -948,22 +1004,28 @@ export class WorldView extends Component {
     private refreshGhost(): void {
         const layer = this._buildings;
         if (!layer) return;
+        const target = this._pendingDemolition ?? this._hoverDemolition;
+        this._3d?.setDemolitionTarget(target?.uid ?? null);
         if (this._pending) {
             // 资金、地块可能变了：按现状重算一遍
             const p = this._pending;
             this.setPending(this.evalPending(p.def, p.col, p.row, p.facing));
+        } else if (target) {
+            layer.showDemolition(target);
         } else if (this._selected && this._hoverCol >= 0) {
-            layer.showGhost(this._selected, this._hoverCol, this._hoverRow);
+            const { ok } = this.evalPending(this._selected, this._hoverCol, this._hoverRow, 'L');
+            layer.showGhost(this._selected, this._hoverCol, this._hoverRow, ok);
         } else {
             layer.clearGhost();
         }
     }
 
     private clearGhost(): void {
+        if (this._hoverCol < 0 && !this._hoverDemolition) return;
         this._hoverCol = -1;
         this._hoverRow = -1;
-        if (this._pending) return;           // 有预览时不清（鼠标移出地图不该把预览弄没）
-        if (this._buildings) this._buildings.clearGhost();
+        this._hoverDemolition = null;
+        if (!this._pending && !this._pendingDemolition) this.refreshGhost();
     }
 
     /**

@@ -30,9 +30,9 @@ export interface Preview3D { id: string; col: number; row: number; w: number; h:
  * c / r / w / h 是格子，颜色 0～255（a 是透明度）；stroke 给了就沿边描一圈。
  */
 export interface Decal { c: number; r: number; w: number; h: number; fill: Color | null; stroke?: Color | null }
-/** 三层各一个网格，越往后越压在上面（离地高度不同） */
-export type DecalLayer = 'env' | 'reach' | 'ghost';
-const DECAL_Y: Record<DecalLayer, number> = { env: 0.004, reach: 0.006, ghost: 0.008 };
+/** 每层各一个网格，越往后越压在上面（离地高度不同） */
+export type DecalLayer = 'env' | 'reach' | 'grid' | 'ghost';
+const DECAL_Y: Record<DecalLayer, number> = { env: 0.004, reach: 0.006, grid: 0.008, ghost: 0.010 };
 
 /** 一张纹理一批：人车的纸片合成一个动态网格，一次绘制 */
 interface ActorBatch { node: Node; mesh: Mesh; renderer: MeshRenderer; quadCount: number }
@@ -73,6 +73,9 @@ export class World3D extends Component {
     /** uid → 工地模型（三个阶段各一个、塔吊四帧各一个，换阶段 / 换帧只切 active） */
     private readonly _sites = new Map<number, { root: Node; stages: (Node | null)[]; cranes: (Node | null)[]; key: string }>();
     private _preview: { node: Node; key: string; ok: boolean } | null = null;
+    private readonly _previewMats = new Map<boolean, Material[]>();
+    private _demolitionUid: number | null = null;
+    private readonly _demolitionColor = new Color(255, 132, 119, 255);
     private _decalMat: Material | null = null;
     private readonly _decals = new Map<DecalLayer, Node>();
     /** 材质还没到时先记下，到了再画 */
@@ -335,6 +338,26 @@ export class World3D extends Component {
     }
 
     // ---------------------------------------------------------------- 贴地色块（T540e / T547）
+    /** 格线只建一次网格。切换工具时复用，移动相机时自然跟着地面走。 */
+    setGridVisible(visible: boolean): void {
+        const node = this._decals.get('grid');
+        if (node) { node.active = visible; return; }
+        if (!visible) { this._decalPending.delete('grid'); return; }
+        const { width, height } = this._model;
+        const color = new Color(38, 58, 47, 70);
+        const halfLine = 0.015;
+        const lines: Decal[] = [];
+        for (let c = 0; c <= width; c++) {
+            const left = Math.max(0, c - halfLine);
+            lines.push({ c: left, r: 0, w: Math.min(width, c + halfLine) - left, h: height, fill: color });
+        }
+        for (let r = 0; r <= height; r++) {
+            const top = Math.max(0, r - halfLine);
+            lines.push({ c: 0, r: top, w: width, h: Math.min(height, r + halfLine) - top, fill: color });
+        }
+        this.setDecals('grid', lines);
+    }
+
     /** 换掉一层贴地色块（空数组 = 清掉）。压在地面上、楼下面：楼会挡住它，转视角跟着地面走 */
     setDecals(layer: DecalLayer, list: readonly Decal[]): void {
         const mat = this._decalMat;
@@ -369,8 +392,16 @@ export class World3D extends Component {
             this._decals.set(layer, node);
         }
         const mr = node.getComponent(MeshRenderer)!;
+        const previousMesh = mr.mesh;
         mr.mesh = utils.MeshUtils.createMesh({ positions: pos, colors: col, indices: idx });
+        previousMesh?.destroy();
         node.active = true;
+    }
+
+    protected onDestroy(): void {
+        for (const node of this._decals.values()) node.getComponent(MeshRenderer)?.mesh?.destroy();
+        for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
+        this._decalMat?.destroy();
     }
 
     // ---------------------------------------------------------------- 工地、放置预览、封顶（T540e）
@@ -415,12 +446,13 @@ export class World3D extends Component {
                 cranes: [0, 1, 2, 3].map((k) => put(`crane-${site.n}-${k}`)),
             };
             this._sites.set(uid, s);
+            if (uid === this._demolitionUid) this.tintModel(root, this._demolitionColor);
         }
         s.stages.forEach((m, k) => { if (m && m.active !== (k === site.stage)) m.active = k === site.stage; });
         s.cranes.forEach((m, k) => { if (m && m.active !== (k === site.crane)) m.active = k === site.crane; });
     }
 
-    /** 放置预览：真模型摆在那里（和盖好以后一样），放不下时染红。null = 收起 */
+    /** 半透明模型保留格线和冲突格的可见性，放不下时染红。null = 收起 */
     setPreview(p: Preview3D | null): void {
         const cur = this._preview;
         if (!p || !this._mats || !this._prefabs.has(p.id)) {
@@ -433,15 +465,55 @@ export class World3D extends Component {
         const node = this.place(p.id, p.col, p.row, p.w, p.h, World3D.TURN[p.facing ?? 'L'] ?? 0);
         if (!node) { this._preview = null; return; }
         node.name = 'Preview';
-        if (!p.ok) {
-            const red = new Color(255, 110, 100, 255);
-            node.walk((c) => {
-                const mr = c.getComponent(MeshRenderer);
-                if (!mr) return;
-                for (let i = 0; i < mr.sharedMaterials.length; i++) mr.getMaterialInstance(i)!.setProperty('mainColor', red);
+        let mats = this._previewMats.get(p.ok);
+        if (!mats) {
+            const color = p.ok ? new Color(255, 255, 255, 150) : new Color(255, 118, 108, 130);
+            mats = [this._mats.lit, this._mats.emit].map((base) => {
+                const mat = new Material();
+                mat.initialize({ effectAsset: base.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
+                mat.setProperty('mainColor', color);
+                if (base === this._mats!.lit) {
+                    for (const name of ['roughness', 'metallic']) {
+                        const value = base.getProperty(name);
+                        if (typeof value === 'number') mat.setProperty(name, value);
+                    }
+                }
+                return mat;
             });
+            this._previewMats.set(p.ok, mats);
         }
+        node.walk((child) => {
+            const mr = child.getComponent(MeshRenderer);
+            if (!mr) return;
+            for (let i = 0; i < mr.sharedMaterials.length; i++) mr.setSharedMaterial(mats[i === 1 ? 1 : 0], i);
+            if (mr.model) mr.model.priority = 1;   // 先画贴地的格线和占格
+        });
         this._preview = { node, key, ok: p.ok };
+    }
+
+    setDemolitionTarget(uid: number | null): void {
+        const previous = this._demolitionUid;
+        if (previous === uid) return;
+        this._demolitionUid = uid;
+        if (previous !== null) {
+            this.tintModel(this._nodes.get(previous)?.node, null);
+            this.tintModel(this._sites.get(previous)?.root, null);
+        }
+        if (uid !== null) {
+            this.tintModel(this._nodes.get(uid)?.node, this._demolitionColor);
+            this.tintModel(this._sites.get(uid)?.root, this._demolitionColor);
+        }
+    }
+
+    private tintModel(node: Node | undefined, color: Color | null): void {
+        node?.walk((child) => {
+            const mr = child.getComponent(MeshRenderer);
+            if (!mr) return;
+            for (let i = 0; i < mr.sharedMaterials.length; i++) {
+                if (color) mr.getMaterialInstance(i)?.setProperty('mainColor', color);
+                else mr.setSharedMaterial(mr.getSharedMaterial(i), i, true);
+            }
+        });
     }
 
     // ---------------------------------------------------------------- 楼
@@ -458,6 +530,7 @@ export class World3D extends Component {
             if (!node) continue;
             node.active = !this._hidden.has(b.uid);
             this._nodes.set(b.uid, { node, key });
+            if (b.uid === this._demolitionUid) this.tintModel(node, this._demolitionColor);
         }
         this._nodes.forEach((v, uid) => { if (!alive.has(uid)) { v.node.destroy(); this._nodes.delete(uid); } });
         // 盖到一半拆掉的楼：工地也撤掉（BuildingLayer 那边楼节点没了，不会再来通知完工）

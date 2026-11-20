@@ -51,10 +51,10 @@ export class BuildingLayer extends Component {
     /** 贴地色块画到 3D 地面上（占地菱形、环境图层、覆盖范围；T540e / T547） */
     decal3D: ((layer: DecalLayer, list: readonly Decal[]) => void) | null = null;
 
-    private readonly _cGhostOk = new Color(255, 255, 255, 80);
-    private readonly _cGhostBad = new Color(224, 74, 74, 110);
-    private readonly _cGhostEdgeOk = new Color(255, 255, 255, 230);
-    private readonly _cGhostEdgeBad = new Color(224, 74, 74, 240);
+    private readonly _cGhostOk = new Color(35, 209, 118, 130);
+    private readonly _cGhostBad = new Color(240, 74, 69, 150);
+    private readonly _cGhostEdgeOk = new Color(148, 255, 191, 255);
+    private readonly _cGhostEdgeBad = new Color(241, 63, 58, 255);
 
     static create(iso: IsoMath, model: TownModel, art: ArtLibrary): Node {
         const node = new Node('BuildingLayer');
@@ -528,18 +528,47 @@ export class BuildingLayer extends Component {
         }
     }
 
-    /** 放置预览的占地菱形（贴在 3D 地面上）；def = null 收起 */
-    showGhost(def: BuildingDef | null, col: number, row: number): void {
+    /** 鼠标移动时只画贴地占格，点选后再摆真模型。 */
+    showGhost(def: BuildingDef, col: number, row: number, ok: boolean): void {
         if (this.preview3D) this.preview3D(null);
-        if (!def || !this._model) { if (this.decal3D) this.decal3D('ghost', []); return; }
-        this.showGhostShape(def, col, row, this._model.canPlace(def, col, row));
+        this.showGhostShape(def, col, row, ok);
     }
 
     private showGhostShape(def: BuildingDef, col: number, row: number, ok: boolean): void {
-        if (!this.decal3D) return;
-        this.decal3D('ghost', [{
-            c: col, r: row, w: def.width, h: def.height,
-            fill: ok ? this._cGhostOk : this._cGhostBad, stroke: ok ? this._cGhostEdgeOk : this._cGhostEdgeBad,
+        const model = this._model;
+        if (!this.decal3D || !model) return;
+        const cells: Decal[] = [];
+        let hasConflict = false;
+        const inset = 0.035;
+        for (let r = row; r < row + def.height; r++) {
+            for (let c = col; c < col + def.width; c++) {
+                const blocked = !ok && (!model.inBounds(c, r) || !!model.getAt(c, r)
+                    || model.terrain?.canBuildCell(def, c, r) === false);
+                hasConflict ||= blocked;
+                cells.push({
+                    c: c + inset, r: r + inset, w: 1 - 2 * inset, h: 1 - 2 * inset,
+                    fill: blocked ? this._cGhostBad : this._cGhostOk,
+                    stroke: blocked ? this._cGhostEdgeBad : null,
+                });
+            }
+        }
+        // 预算、解锁和港口临河要求会拦住整块地，没有单独的冲突格。
+        if (!ok && !hasConflict) {
+            for (const cell of cells) cell.fill = this._cGhostBad;
+        }
+        const outset = 0.045;
+        cells.push({ c: col - outset, r: row - outset, w: def.width + 2 * outset, h: def.height + 2 * outset, fill: null,
+            stroke: ok ? this._cGhostEdgeOk : this._cGhostEdgeBad });
+        this.decal3D('ghost', cells);
+    }
+
+    showDemolition(target: PlacedBuilding): void {
+        // 描边略超出占地，让贴着地块边缘的楼体也能露出红线。
+        const outset = 0.075;
+        this.decal3D?.('ghost', [{
+            c: target.col - outset, r: target.row - outset,
+            w: target.def.width + 2 * outset, h: target.def.height + 2 * outset,
+            fill: this._cGhostBad, stroke: this._cGhostEdgeBad,
         }]);
     }
 

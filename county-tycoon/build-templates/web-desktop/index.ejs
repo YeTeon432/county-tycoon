@@ -15,6 +15,24 @@
       background: #26362d;
     }
 
+    #startup {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      gap: 12px;
+      padding: 20px;
+      background: #26362d;
+      color: #fff4d7;
+      font: 16px/1.5 system-ui, sans-serif;
+      text-align: center;
+    }
+    #startup strong { font-size: 24px; }
+    #startup progress { accent-color: #e6ad64; width: 160px; }
+    #startup button { font: inherit; padding: 6px 18px; cursor: pointer; }
+
     #GameDiv {
       border: 0;
       border-radius: 0;
@@ -28,12 +46,32 @@
   </style>
 </head>
 <body>
+  <div id="startup">
+    <strong>我在县城当县长</strong>
+    <span id="startup-status" role="status">正在加载游戏引擎…</span>
+    <progress aria-label="正在加载"></progress>
+    <button type="button" hidden onclick="location.reload()">重新加载</button>
+  </div>
   <div id="GameDiv" cc_exact_fit_screen="false">
     <div id="Cocos3dGameContainer">
       <canvas id="GameCanvas" tabindex="0" aria-label="我在县城当县长"></canvas>
     </div>
   </div>
   <script>
+    const startup = document.getElementById('startup');
+    const statusText = document.getElementById('startup-status');
+    const retry = startup.querySelector('button');
+    // 慢速连接仍可继续加载，玩家也可以手动重试。
+    const slowTimer = setTimeout(() => {
+      if (startup.isConnected) retry.hidden = false;
+    }, 20000);
+
+    function startupFailed() {
+      clearTimeout(slowTimer);
+      statusText.textContent = '游戏启动失败，请检查网络连接后重试。';
+      startup.querySelector('progress').hidden = true;
+      retry.hidden = false;
+    }
     const frame = document.getElementById('GameDiv');
     const designWidth = <%= previewWidth %>;
     const designHeight = <%= previewHeight %>;
@@ -50,12 +88,18 @@
     frame.addEventListener('contextmenu', (event) => event.preventDefault());
   </script>
   <% if (polyfillsBundleFile) { %>
-  <script src="<%= polyfillsBundleFile %>"></script>
+  <script src="<%= polyfillsBundleFile %>" onerror="startupFailed()"></script>
   <% } %>
-  <script src="<%= systemJsBundleFile %>"></script>
+  <script src="<%= systemJsBundleFile %>" onerror="startupFailed()"></script>
   <script src="<%= importMapFile %>" type="systemjs-importmap"></script>
   <script>
-    System.import('cc').then(({ game, settings, ResolutionPolicy }) => {
+    Promise.resolve().then(() => System.import('cc')).then(({ director, game, settings, ResolutionPolicy }) => {
+      statusText.textContent = '正在加载城镇地图和建筑…';
+      director.once('town-load-error', startupFailed);
+      director.once('town-ready', () => {
+        clearTimeout(slowTimer);
+        startup.remove();
+      });
       game.onPostBaseInitDelegate.add(() => {
         settings.overrideSettings('screen', 'landscapeWebLayout', true);
         settings.overrideSettings('screen', 'designResolution', {
@@ -65,7 +109,10 @@
         });
       });
       return System.import('<%= indexJsName.startsWith("./") ? indexJsName : "./" + indexJsName %>');
-    }).catch((error) => console.error(error));
+    }).catch((error) => {
+      console.error(error);
+      startupFailed();
+    });
   </script>
 </body>
 </html>

@@ -161,7 +161,11 @@ export class World3D extends Component {
             this._actorMat = mat;
         });
         resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands'], Material, (err, mats) => {
-            if (err) { console.error('[World3D] 材质', err.message); return; }
+            if (err) {
+                console.error('[World3D] 材质', err.message);
+                director.emit('town-load-error');
+                return;
+            }
             const by = (n: string) => mats.find((m) => m.name === n)!;
             this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands') };
             const street = new Material();
@@ -174,10 +178,14 @@ export class World3D extends Component {
             this._decalPending.forEach((list, layer) => this.setDecals(layer, list));
             this._decalPending.clear();
             resources.loadDir('models3d', Prefab, (e2, list) => {
-                if (e2) console.error('[World3D] 模型', e2.message);
+                if (e2) {
+                    console.error('[World3D] 模型', e2.message);
+                    director.emit('town-load-error');
+                }
                 for (const p of list ?? []) this._prefabs.set(p.name, p);
                 this.redraw();
                 if (this.onReady) this.onReady();
+                if (!e2) director.emit('town-ready');
             });
         });
     }

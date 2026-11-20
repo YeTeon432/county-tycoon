@@ -1,6 +1,7 @@
 {
   "platform": "web-desktop",
   "debug": false,
+  "md5Cache": true,
   "packages": {
     "web-desktop": {
       "resolution": {

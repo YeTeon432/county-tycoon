@@ -150,4 +150,7 @@ os.makedirs(out_dir, exist_ok=True)
 for name, w, h, facing, fn, actor in lib._SPRITES:
     if actor or (only and name not in only):
         continue
+    # 单格山模型只用于旧版美术预览，游戏里的山脊由 Highlands 生成。
+    if script == 'terrain_obj' and name in ('terrain-mountain-0', 'terrain-mountain-1', 'terrain-mountain-2'):
+        continue
     export(name, w, h, fn)

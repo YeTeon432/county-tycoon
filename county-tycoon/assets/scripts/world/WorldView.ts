@@ -103,6 +103,7 @@ export class WorldView extends Component {
     private _selected: BuildingDef | null = null;
     /** 当前是否处于拆除模式 */
     private _demolishing = false;
+    private _alwaysShowGrid = false;
     /** 鼠标当前指到哪一格，-1 表示不在图上 */
     private _hoverCol = -1;
     private _hoverRow = -1;
@@ -287,6 +288,15 @@ export class WorldView extends Component {
         return this._demolishing;
     }
 
+    get alwaysShowGrid(): boolean {
+        return this._alwaysShowGrid;
+    }
+
+    set alwaysShowGrid(on: boolean) {
+        this._alwaysShowGrid = on;
+        this.updateGridVisibility();
+    }
+
     /** 选择要放置的建筑（同时退出拆除模式） */
     selectBuilding(def: BuildingDef | null): void {
         this._selected = def;
@@ -304,9 +314,13 @@ export class WorldView extends Component {
     private resetEditPreview(): void {
         this._hoverCol = this._hoverRow = -1;
         this._hoverDemolition = this._pendingDemolition = null;
-        this._3d?.setGridVisible(!!this._selected || this._demolishing);
+        this.updateGridVisibility();
         this.setPending(null);
         this._3d?.setDemolitionTarget(null);
+    }
+
+    private updateGridVisibility(): void {
+        this._3d?.setGridVisible(this._alwaysShowGrid || !!this._selected || this._demolishing);
     }
 
     private registerInput(): void {

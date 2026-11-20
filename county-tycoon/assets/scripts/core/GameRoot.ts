@@ -17,8 +17,10 @@ import { WorldView } from '../world/WorldView';
 import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
 import { PlaceControls } from '../world/PlaceControls';
 import { TopBar } from '../ui/TopBar';
+import { getPlatform } from '../platform/Platform';
 
 const { ccclass } = _decorator;
+const MAP_GRID_PREFERENCE_KEY = 'county-map-grid';
 
 /**
  * 2D 顶点缓冲每块的大小（T212）。默认 144 KB ≈ 1024 个精灵一块；地面 64×64 = 4096 个精灵就要 4 块，
@@ -148,6 +150,13 @@ export class GameRoot extends Component {
         if (this._bar) ui.attachBuildingBar(this._bar);
         if (view) ui.setArt(view.art);   // 底栏缩略图 + 居民头像
         if (view) {
+            const platform = getPlatform();
+            view.alwaysShowGrid = platform.getItem(MAP_GRID_PREFERENCE_KEY) === '1';
+            ui.getGridPreference = () => view.alwaysShowGrid;
+            ui.setGridPreference = (on) => {
+                view.alwaysShowGrid = on;
+                if (!platform.setItem(MAP_GRID_PREFERENCE_KEY, on ? '1' : '0')) ui.say('网格设置未能保存');
+            };
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
             const sim = this._sim;
@@ -438,11 +447,16 @@ export class GameRoot extends Component {
         InputGuard.add(envBtn.node);
 
         // 「环境」上方的视角按钮每次平滑转一档。
+        let controlsTop = envBtn.node.position.y + 26;
         if (this._view && this._view.canRotateView) {
             const rotBtn = makeRoundButton(this.node, 'RotateBtn', 'rotate', 64, () => { if (this._view) this._view.rotateView(1); });
-            rotBtn.node.setPosition(zp.x, envBtn.node.position.y + 26 + 12 + 32, 0);
+            rotBtn.node.setPosition(zp.x, controlsTop + 12 + 32, 0);
             InputGuard.add(rotBtn.node);
+            controlsTop = rotBtn.node.position.y + 32;
         }
+        const settingsBtn = makeButton(this.node, 'SettingsBtn', '设置', 96, 52, 'white', () => this._ui?.openSettings());
+        settingsBtn.node.setPosition(zp.x, controlsTop + 12 + 26, 0);
+        InputGuard.add(settingsBtn.node);
     }
 
 }

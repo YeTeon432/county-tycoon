@@ -1,6 +1,6 @@
 import { _decorator, Component, Layers, Node, UITransform, SpriteFrame } from 'cc';
 import { ArtLibrary, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
-import { bridgeName, grassName, neighborMask, RoadKind, roadName, terrainName, variantOf } from '../core/GroundFrames';
+import { bridgeName, grassName, neighborMask, RoadKind, roadName, terrainName } from '../core/GroundFrames';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 
 const { ccclass } = _decorator;
@@ -62,10 +62,9 @@ export class GridMap extends Component {
         const model = this._model;
         const art = this._art;
         if (!model || !art) return;
-        const apron = art.groundByName('gravel-apron');
+        const apron = art.groundByName('asphalt-apron');
         const earth = art.groundByName('entrance-earth');
         const paving = art.groundByName('entrance-paving');
-        const concrete = art.groundByName('entrance-concrete') ?? paving;
         for (const b of model.allBuildings()) {
             if (b.def.road === 'dirt' && apron) {
                 for (const { dc, dr, turn } of ROAD_EDGES) {
@@ -75,7 +74,7 @@ export class GridMap extends Component {
                 }
             }
             if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || b.def.terrain || !b.facing) continue;
-            const frame = b.def.id === 'hut' ? earth : b.def.category === '工业' ? concrete : paving;
+            const frame = b.def.id === 'hut' ? earth : paving;
             const entrance = frame && this.entranceOverlay(b, b.facing, frame);
             if (entrance) yield entrance;
         }
@@ -92,7 +91,7 @@ export class GridMap extends Component {
         const street = boundary - (dc + dr < 0 ? 1 : 0);
         const isDirt = (along: number) => (dc ? this.roadKind(street, along) : this.roadKind(along, street)) === 'dirt';
         const door = start + span / 2 + (DOOR_OFFSET[b.def.id] ?? 0) * (dr || -dc);
-        const width = span === 1 ? 0.40 : 0.66;
+        const width = span === 1 ? 0.43 : 0.72;
         let along = Infinity;
         for (let i = start; i < start + span; i++) {
             if (!isDirt(i)) continue;
@@ -119,10 +118,7 @@ export class GridMap extends Component {
         const kind = this.roadKind(col, row);
         if (kind) {
             const mask = neighborMask((c, r) => this.roadKind(c, r) !== null, col, row);
-            const name = roadName(kind, mask);
-            const variant = kind === 'dirt' ? variantOf(col, row, 3) : 0;
-            return (variant ? art.groundByName(`${name}-${variant}`) : null)
-                ?? art.groundByName(name) ?? art.ground(GROUND_ROAD_BASE[kind] + mask);
+            return art.groundByName(roadName(kind, mask)) ?? art.ground(GROUND_ROAD_BASE[kind] + mask);
         }
 
         // 装饰地块：flat 且有 decoFrame 名字（T218）

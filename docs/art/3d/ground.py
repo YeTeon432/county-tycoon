@@ -7,8 +7,7 @@
   36~51  水 36+mask（mask = 四邻是陆地的位，有岸）              52 bridge-gx  53 bridge-gy
   54~56  mountain-0..2 石地   57~58 ore-0..1 矿点   59~62 forest-0..3 林地   63~64 farm-0..1   65 pond
   66 dirt-tile 泥土地   67 flagstone 石板路   68 flower-bed 花坛（T218，玩家可铺的装饰地块）
-  69 entrance-earth  70 entrance-paving  71 gravel-apron  72 entrance-concrete
-  73~104 土路的两套纹理变体，各 16 种接法
+  69 entrance-earth  70 entrance-paving  71 asphalt-apron（半透明贴地叠层，沿 +v 朝门面或柏油路）
 道路 mask 位：1 左上邻(col-1)  2 右上邻(row-1)  4 右下邻(col+1)  8 左下邻(row+1)
 
 画法：每个像素反算格内坐标 (u, v)（u 沿 gx 往右下、v 沿 gy 往左下，0..1），按 (u, v) 取色。
@@ -30,12 +29,9 @@ def hx(s):
 C = {k: hx(v) for k, v in {
     'grass': '#79da6a', 'grass_d': '#6cc95e', 'grass_l': '#8ee67c', 'flower_w': '#fdfdf2', 'flower_y': '#ffd84a',
     'flower_p': '#ff8fb8',
-    'pave': '#e2e6e4', 'pave_d': '#cfd5d4', 'curb': '#f4f7f6',
-    'walk': '#c9c4b7', 'walk_d': '#aba89e', 'road_curb': '#dfdacd', 'asphalt': '#5c5e60', 'asphalt_d': '#515356',
-    'line': '#ddd8c4', 'zebra': '#d9d7cb',
+    'pave': '#e2e6e4', 'pave_d': '#cfd5d4', 'curb': '#f4f7f6', 'asphalt': '#5f6a78', 'asphalt_d': '#56606d',
+    'line': '#fbfbf3', 'zebra': '#eef0ec',
     'dirt': '#d5b98a', 'dirt_d': '#c3a273', 'dirt_l': '#e2caa0',
-    'road_dirt': '#cbb284', 'road_dirt_d': '#b79b70', 'road_dirt_l': '#dac397',
-    'road_grass': '#82c663', 'gravel': '#b0a79a', 'gravel_d': '#8c8479',
     'water': '#3f98ea', 'water_d': '#3583d6', 'water_l': '#7cc4ff', 'sand': '#e8dcae', 'sand_d': '#d6c690',
     'deck': '#c99a63', 'deck_d': '#a97b48', 'rail': '#8a5f36', 'stone': '#a3abb0', 'stone_d': '#8c949a',
     'stone_l': '#bcc3c6', 'ore': '#f0b43a', 'ore_d': '#b77a22', 'forest': '#5db35f', 'forest_d': '#4c9c50',
@@ -118,11 +114,10 @@ def arms(mask):
     """mask → 四个方向是否连通：(-u, -v, +u, +v)"""
     return bool(mask & 1), bool(mask & 2), bool(mask & 4), bool(mask & 8)
 
-DIRT_HALF = 0.30
-CITY_HALF = 0.31
+ROAD_HALF = 0.32
 
-def road_depth(du, dv, exits, half, rounding, cap_corner=None):
-    """距车道边缘的有符号距离，路内为正；开放端延伸到格边。"""
+def road_depth(du, dv, exits, half, rounding):
+    """距车道边缘的有符号距离，路内为正。开放端延伸到格边，封闭端自然收圆。"""
     nu, nv, pu, pv = exits
     u, v = abs(du), abs(dv)
     along_u = pu if du > 0 else nu
@@ -133,134 +128,103 @@ def road_depth(du, dv, exits, half, rounding, cap_corner=None):
         return min(max(a, b), -rounding) + math.hypot(max(rounding + a, 0), max(rounding + b, 0))
     if along_u: return half - v
     if along_v: return half - u
-    if cap_corner is None:
-        return half - math.hypot(u, v)
-    # 城市端头保留笔直的一截路缘，两边接圆角。
-    a, b = u - half + cap_corner, v - half + cap_corner
-    return cap_corner - min(0.0, max(a, b)) - math.hypot(max(a, 0), max(b, 0))
+    return half - math.hypot(u, v)
 
 def asphalt(u, v):
-    grain = per_noise(u, v, 7, ((13, 19), (17, 11), (23, 13)))
-    return mix(C['asphalt_d'], C['asphalt'], 0.76 + 0.09 * grain)
+    t = per_noise(u, v, 7, ((5, 3), (3, 5), (7, 2))) * 0.5 + 0.5
+    return mix(C['asphalt_d'], C['asphalt'], t)
 
 def city_fn(mask):
     exits = arms(mask)
     nu, nv, pu, pv = exits
+    straight_u = mask == 5
+    straight_v = mask == 10
     junction = sum(exits) >= 3
     grass = grass_fn(31)
-    approaches = [(du, dv) for open_, du, dv in ((nu,-1,0), (nv,0,-1), (pu,1,0), (pv,0,1)) if open_]
     def f(u, v):
         du, dv = u - 0.5, v - 0.5
-        d = road_depth(du, dv, exits, CITY_HALF, 0.11, cap_corner=0.12)
-        if d < -0.131:
+        d = road_depth(du, dv, exits, ROAD_HALF, 0.115)
+        if d < -0.173:
             return grass(u, v)
         if d < -0.026:
-            # 暖灰砖铺面和一线贴地阴影。
-            row = int(v * 7)
-            seam = (u * 7 + 0.5 * (row % 2)) % 1 < 0.039 or (v * 7) % 1 < 0.042
-            return mix(C['walk'], C['walk_d'], 0.46 if seam or d < -0.119 else 0.09)
+            # 错缝方砖，靠草地留一线阴影。
+            row = int(v * 8)
+            seam = (u * 8 + 0.5 * (row % 2)) % 1 < 0.042 or (v * 8) % 1 < 0.042
+            return C['pave_d'] if seam or d < -0.164 else C['pave']
         if d < 0:
-            joint = (max(abs(du), abs(dv)) * 12) % 1 < 0.053
-            return mix(C['road_curb'], C['walk_d'], 0.48 if joint or d > -0.007 else 0.10)
+            return C['curb'] if d < -0.007 else C['pave_d']
         c = asphalt(u, v)
-        if d < 0.016:
-            return mix(c, C['asphalt_d'], 0.84)
-        if (mask == 5 and abs(dv) < 0.013 and 0.25 < (u * 3) % 1 < 0.74
-            or mask == 10 and abs(du) < 0.013 and 0.25 < (v * 3) % 1 < 0.74):
-            return C['line']
+        if d < 0.025:
+            c = mix(C['asphalt_d'], c, d / 0.025)
+        if straight_u and abs(dv) < 0.014 and 0.22 < (u * 4) % 1 < 0.73:
+            c = C['line']
+        if straight_v and abs(du) < 0.014 and 0.22 < (v * 4) % 1 < 0.73:
+            c = C['line']
         if junction:
-            for dc, dr in approaches:
-                outward, across = du * dc + dv * dr, du * dr - dv * dc
-                if 0.328 < outward < 0.398 and abs(across) < 0.228 and (across * 11 + 0.5) % 1 < 0.60:
-                    return C['zebra']
+            for open_, outward, across in ((nu, -du, dv), (pu, du, dv), (nv, -dv, du), (pv, dv, du)):
+                if open_ and 0.31 < outward < 0.40 and abs(across) < 0.26 and (across * 12) % 1 < 0.54:
+                    c = C['zebra']
         return c
     return f
 
-def dirt_fn(mask, variant=0):
+def dirt_fn(mask):
     exits = arms(mask)
     nu, nv, pu, pv = exits
     grass = grass_fn(31)
-    pebbles = scatter(113 + variant * 17, 10, 0.07, 0.93)
-    bend = mask not in (5, 10)
+    pebbles = scatter(77, 10, 0.02, 0.98)
     def f(u, v):
         du, dv = u - 0.5, v - 0.5
-        d = road_depth(du, dv, exits, DIRT_HALF, 0.10)
-        # 每套土路用不同的起伏；近格边回到同一个轮廓和底色。
-        seam = min(1.0, min(u, v, 1 - u, 1 - v) * 5)
-        low = per_noise(u, v, 37 + variant * 11, ((1, 0), (0, 1), (2, 1)))
-        grain = per_noise(u, v, 13, ((17, 11), (23, 17), (13, 19)))
-        d += seam * (0.018 * low + 0.006 * grain)
-        if d < -0.021:
+        d = road_depth(du, dv, exits, ROAD_HALF, 0.10)
+        # 自然起伏在格边淡出，两格能对上；草肩比路面更暗。
+        edge_fade = min(1.0, min(u, v, 1 - u, 1 - v) * 9)
+        noise = per_noise(u, v, 13)
+        d += edge_fade * (0.022 * noise + 0.017 * math.sin(6.283 * (3 * u - 4 * v)))
+        if d <= -0.027:
             return grass(u, v)
-
-        road = mix(C['road_dirt_d'], C['road_dirt'], 0.70 + seam * low * 0.10 + grain * 0.05)
-        # 车轮压实两道土，车辙接近路口时淡出。
-        u_open = pu if du >= 0 else nu
-        v_open = pv if dv >= 0 else nv
-        track_u = (1 - abs(abs(dv) - 0.118) / 0.074) * min(1.0, abs(du) * 2.8 if bend else 1.0) if u_open else 0.0
-        track_v = (1 - abs(abs(du) - 0.118) / 0.074) * min(1.0, abs(dv) * 2.8 if bend else 1.0) if v_open else 0.0
-        c = mix(road, C['road_dirt_l'], max(track_u, track_v) * 0.38)
+        c = mix(C['dirt_d'], C['dirt'], 0.82 + 0.24 * noise)
+        track_u = (pu if du >= 0 else nu) and abs(abs(dv) - 0.135) < 0.027
+        track_v = (pv if dv >= 0 else nv) and abs(abs(du) - 0.135) < 0.027
+        if track_u or track_v:
+            middle = min(1.0, max(abs(du), abs(dv)) * 5)
+            c = mix(c, C['dirt_d'], 0.36 * middle)
         for cu, cv, k in pebbles:
-            a, b = u - cu, v - cv
-            radius = 0.007 + 0.007 * k
-            if d > 0.035 and a * a + b * b < radius * radius:
-                c = mix(c, C['road_dirt_l'] if k > 0.55 else C['road_dirt_d'], 0.48)
-        if d < 0.055:
-            shoulder = mix(C['road_grass'], C['road_dirt_d'], 0.38 + 0.25 * low * seam)
-            c = mix(shoulder, c, (d + 0.015) / 0.070)
-            c = mix(grass(u, v), c, (d + 0.021) / 0.043)
+            a, b = pdist(u, v, cu, cv)
+            if (a - b) ** 2 + ((a + b) * 2) ** 2 < 0.00016 + 0.00022 * k:
+                c = mix(c, C['dirt_l'] if k > 0.42 else C['dirt_d'], 0.8)
+        if d < 0.045:
+            c = mix(C['dirt_d'], c, (d + 0.006) / 0.05)
+        if d < 0.008:
+            c = mix(grass(u, v), c, (d + 0.027) / 0.035)
         return c
     return f
 
-def entrance_fn(surface):
-    """+v 端抵住门前地块，-v 端接到土路路肩。"""
-    slab_base, slab_joint = hx('#b5af9f'), hx('#928d81')
-    concrete_base, concrete_joint = hx('#a9aaa2'), hx('#93958d')
+def entrance_fn(paved):
+    """+v 端抵住门前地块，-v 端和土路的车辙相融。"""
+    paving_dark, paving_light = hx('#a69d89'), hx('#c6c0ad')
     def f(u, v):
+        noise = per_noise(u, v, 43)
         across = abs(u - 0.5)
-        fine = per_noise(u, v, 43, ((9, 7), (13, 11), (11, 17)))
-        if surface == 'earth':
-            half = 0.27 + 0.045 * (1 - v)
-            d = half - across + 0.03 * fine
-            opacity = max(0.0, min(1.0, d / 0.10, (v - 0.15) / 0.30))
-            color = mix(C['road_dirt_d'], C['road_dirt'], 0.67 + 0.15 * fine + 0.12 * v)
+        half = (0.35 if paved else 0.30) + 0.09 * (1 - v) + 0.045 * noise
+        opacity = min(1.0, max(0.0, (half - across) * (19 if paved else 10)))
+        opacity *= min(1.0, max(0.0, (v - (0.24 if paved else 0.07)) * (9 if paved else 3)))
+        if paved:
+            seam = (v * 3.0) % 1 < 0.045 or (u * 2 + (0.5 if int(v * 3) % 2 else 0)) % 1 < 0.036
+            color = mix(paving_dark, paving_light, 0.33 if seam else 0.88 + 0.12 * noise)
         else:
-            # 铺面门口略宽，临路一端收成斜角；石板和水泥用不同的分缝。
-            d = min(0.34 - across, 0.39 - across - max(0.0, 0.57 - v), v - 0.3)
-            opacity = max(0.0, min(1.0, d * 34))
-            if surface == 'concrete':
-                seam = abs(v - 0.68) < 0.008
-                color = mix(concrete_base, concrete_joint, 0.65 if seam else 0.11 + 0.07 * fine)
-            else:
-                row = int((v - 0.32) * 4)
-                joint = ((u + row % 2 * 0.12) * 3.5) % 1 < 0.035 or ((v - 0.32) * 4) % 1 < 0.035
-                shade = 0.20 if row % 2 else 0.06
-                color = mix(slab_base, slab_joint, 0.55 if joint else shade + 0.07 * fine)
+            color = mix(C['dirt_d'], C['dirt_l'], 0.49 + 0.25 * noise + 0.16 * v)
         return (*color, 255 * opacity)
     return f
 
-def gravel_apron_fn():
-    """靠柏油路的短碎石带。格边就是柏油的直线接缝。"""
-    stones = scatter(127, 38, 0.0, 1.0)
-    # 按横向分桶，每个像素只检查自己附近的石粒。
-    bands = [[(x, 0.83 + y * 0.17, k) for x, y, k in stones if abs((i + 0.5) / 12 - x) < 0.065]
-             for i in range(12)]
-    def f(u, v):
-        if v < 0.8:
-            return (*C['gravel'], 0)
-        across = abs(u - 0.5)
-        edge = 0.84 + 0.075 * (across / CITY_HALF) ** 2
-        depth = min(1.0, max(0.0, (v - edge) * 24))
-        opacity = depth * min(1.0, max(0.0, (CITY_HALF - across) * 95))
-        color = mix(C['gravel'], C['road_dirt'], 0.24 + (1 - v) * 1.5)
-        if v > 0.966:
-            color = mix(C['gravel_d'], color, 0.50)
-        for cu, cv, k in bands[min(11, int(u * 12))]:
-            radius = 0.004 + 0.007 * k
-            if (u - cu) ** 2 + (v - cv) ** 2 < radius * radius:
-                color = mix(color, C['gravel_d'] if k < 0.57 else C['road_dirt_l'], 0.60)
-        return (*color, 255 * opacity)
-    return f
+def asphalt_apron(u, v):
+    """柏油贴着混铺的格边，一小段碎石肩过渡到土路。"""
+    into_dirt = 1 - v
+    noise = per_noise(u, v, 29)
+    shoulder = ROAD_HALF - abs(u - 0.5)
+    fade = into_dirt * (0.82 + 0.16 * noise)
+    opacity = min(1.0, max(0.0, (0.31 + 0.19 * noise - fade - max(0.0, -shoulder) * 1.8) * 10))
+    opacity *= min(1.0, max(0.0, (shoulder + 0.01 - 0.12 * fade) * 75))
+    color = mix(asphalt(u, v), C['dirt_d'], fade * 3.2)
+    return (*color, 255 * opacity)
 
 # ---------------------------------------------------------------- 水
 def water_base(u, v, seed=3):
@@ -443,14 +407,10 @@ for i in range(4): add(f'forest-{i}', forest_fn(400 + i))
 for i in range(2): add(f'farm-{i}', farm_fn(i))
 add('pond', pond_fn())
 add('dirt-tile', dirt_tile_fn()); add('flagstone', flagstone_fn()); add('flower-bed', flower_bed_fn())
-add('entrance-earth', entrance_fn('earth'), translucent=True)
-add('entrance-paving', entrance_fn('paving'), translucent=True)
-add('gravel-apron', gravel_apron_fn(), translucent=True)
-add('entrance-concrete', entrance_fn('concrete'), translucent=True)
-for variant in (1, 2):
-    for mask in range(16):
-        add(f'dirt-{mask}-{variant}', dirt_fn(mask, variant))
-assert len(frames) == 105, len(frames)
+add('entrance-earth', entrance_fn(False), translucent=True)
+add('entrance-paving', entrance_fn(True), translucent=True)
+add('asphalt-apron', asphalt_apron, translucent=True)
+assert len(frames) == 72, len(frames)
 
 COLS = 16                       # 每行 16 帧 → 图集宽 2048（手机 GPU 纹理上限常见 4096）
 rows = (len(frames) + COLS - 1) // COLS

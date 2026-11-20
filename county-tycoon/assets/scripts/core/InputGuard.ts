@@ -1,4 +1,4 @@
-import { Node, UITransform, Vec3, Rect } from 'cc';
+import { Node, UITransform } from 'cc';
 
 /**
  * 输入遮挡登记。
@@ -12,30 +12,34 @@ import { Node, UITransform, Vec3, Rect } from 'cc';
  * 所以直接用 touch 的 UI 坐标就能比。
  */
 export class InputGuard {
-    private static _blockers: Node[] = [];
-    private static readonly _tmpRect = new Rect();
+    private static readonly _blockers = new Map<Node, 'region' | 'panel'>();
 
     /** 登记一块会吃点击的区域 */
-    static add(node: Node): void {
-        if (this._blockers.indexOf(node) < 0) {
-            this._blockers.push(node);
-        }
+    static add(node: Node, kind: 'region' | 'panel' = 'region'): void {
+        this._blockers.set(node, kind);
     }
 
     /** 注销 */
     static remove(node: Node): void {
-        const i = this._blockers.indexOf(node);
-        if (i >= 0) this._blockers.splice(i, 1);
+        this._blockers.delete(node);
+    }
+
+    /** 抽屉打开和收起动画期间，遮罩上的手势也不能缩放地图。 */
+    static get blocksMapZoom(): boolean {
+        for (const [node, kind] of this._blockers) {
+            if (kind === 'panel' && node.isValid && node.activeInHierarchy) return true;
+        }
+        return false;
     }
 
     /** 这个位置（UI 坐标）是否被 UI 挡住 */
     static isBlocked(x: number, y: number): boolean {
-        for (let i = this._blockers.length - 1; i >= 0; i--) {
-            const node = this._blockers[i];
-            if (!node || !node.isValid || !node.activeInHierarchy) {
-                this._blockers.splice(i, 1);
+        for (const node of this._blockers.keys()) {
+            if (!node.isValid) {
+                this._blockers.delete(node);
                 continue;
             }
+            if (!node.activeInHierarchy) continue;
             const trans = node.getComponent(UITransform);
             if (!trans) continue;
             // 世界包围盒；UI 坐标系和世界坐标系在设计分辨率下一致，直接比即可
@@ -50,6 +54,6 @@ export class InputGuard {
 
     /** 换场景/重开时清空，避免残留失效节点 */
     static clear(): void {
-        this._blockers.length = 0;
+        this._blockers.clear();
     }
 }

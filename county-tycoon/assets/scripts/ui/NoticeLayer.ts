@@ -2,6 +2,7 @@ import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
+import { usesLandscapeWebLayout } from '../platform/Platform';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
 import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
@@ -120,7 +121,7 @@ export class NoticeLayer extends Component {
         this._hornDot = dot;
 
         // 展开的长条
-        const bw = W - 32 - 120;
+        const bw = (usesLandscapeWebLayout() ? Math.min(W, 720) : W) - 32 - 120;
         const bar = makePanelNode(this.node, 'Bar', bw, NoticeLayer.BAR_H);
         bar.setPosition(-W / 2 + 16 + bw / 2, y, 0);
         bar.active = false;
@@ -185,7 +186,7 @@ export class NoticeLayer extends Component {
         this._unread = false;
         if (this._hornDot) this._hornDot.active = false;
         const vis = view.getVisibleSize();
-        const W = vis.width - 32;
+        const W = (usesLandscapeWebLayout() ? Math.min(vis.width, 720) : vis.width) - 32;
         const items = this._history.slice(-12).reverse();
         const rowH = 40;
         const H = Math.max(1, items.length) * rowH + 56;

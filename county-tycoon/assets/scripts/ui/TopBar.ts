@@ -1,7 +1,7 @@
 import { _decorator, Component, Graphics, Label, Layers, Node, Sprite, tween, Tween, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
-import { getPlatform } from '../platform/Platform';
+import { getPlatform, usesLandscapeWebLayout } from '../platform/Platform';
 import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
@@ -58,7 +58,7 @@ export class TopBar extends Component {
     build(sim: SimApi): void {
         this._sim = sim;
         const visible = view.getVisibleSize();
-        const w = visible.width - 28;
+        const w = (usesLandscapeWebLayout() ? Math.min(visible.width, 720) : visible.width) - 28;
         const h = TopBar.BODY_HEIGHT - 16;
         this.node.layer = Layers.Enum.UI_2D;
         const trans = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);

@@ -78,6 +78,9 @@ export class World3D extends Component {
     private readonly _demolitionColor = new Color(255, 132, 119, 255);
     private _decalMat: Material | null = null;
     private readonly _decals = new Map<DecalLayer, Node>();
+    private readonly _decalCapacity = new Map<DecalLayer, number>();
+    /** 扩容后保留旧网格到场景销毁，原生渲染线程可能还在用它。 */
+    private readonly _retiredDecalMeshes: Mesh[] = [];
     /** 材质还没到时先记下，到了再画 */
     private readonly _decalPending = new Map<DecalLayer, readonly Decal[]>();
     /** 模型、材质都到了 */
@@ -365,9 +368,13 @@ export class World3D extends Component {
         let node = this._decals.get(layer);
         const pos: number[] = [], col: number[] = [], idx: number[] = [];
         const y = DECAL_Y[layer];
+        const minPos = new Vec3(Infinity, y, Infinity);
+        const maxPos = new Vec3(-Infinity, y, -Infinity);
         const quad = (x0: number, z0: number, x1: number, z1: number, c: Color) => {
             const i = pos.length / 3;
             pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
+            minPos.x = Math.min(minPos.x, x0); minPos.z = Math.min(minPos.z, z0);
+            maxPos.x = Math.max(maxPos.x, x1); maxPos.z = Math.max(maxPos.z, z1);
             for (let k = 0; k < 4; k++) col.push(c.r / 255, c.g / 255, c.b / 255, c.a / 255);
             // 从上往下看是顺时针 → 正面朝上（同地面网格）
             idx.push(i, i + 2, i + 1, i, i + 3, i + 2);
@@ -384,22 +391,42 @@ export class World3D extends Component {
             }
         }
         if (idx.length === 0) { if (node) node.active = false; return; }
-        if (!node) {
+        const quads = idx.length / 6;
+        const capacity = this._decalCapacity.get(layer) ?? 0;
+        // 2×2 占地的四个冲突格和外框最多 24 个四边形。
+        const nextCapacity = Math.max(capacity, layer === 'ghost' ? 32 : 1, 2 ** Math.ceil(Math.log2(quads)));
+        const geometry = {
+            positions: new Float32Array(pos),
+            colors: new Float32Array(col),
+            ...(nextCapacity * 4 <= 0x10000 ? { indices16: new Uint16Array(idx) } : { indices32: new Uint32Array(idx) }),
+            minPos, maxPos,
+        };
+        let mr: MeshRenderer;
+        if (!node || quads > capacity) {
+            if (node) {
+                node.active = false;
+                this._retiredDecalMeshes.push(node.getComponent(MeshRenderer)!.mesh!);
+                node.destroy();
+            }
             node = this.child(this.node, `Decal-${layer}`);
-            const mr = node.addComponent(MeshRenderer);
+            mr = node.addComponent(MeshRenderer);
             mr.shadowCastingMode = 0;
-            mr.setMaterial(mat, 0);
+            mr.setSharedMaterial(mat, 0);
+            mr.mesh = utils.MeshUtils.createDynamicMesh(0, geometry, undefined,
+                { maxSubMeshes: 1, maxSubMeshVertices: nextCapacity * 4, maxSubMeshIndices: nextCapacity * 6 });
             this._decals.set(layer, node);
+            this._decalCapacity.set(layer, nextCapacity);
+        } else {
+            mr = node.getComponent(MeshRenderer)!;
+            mr.mesh!.updateSubMesh(0, geometry);
         }
-        const mr = node.getComponent(MeshRenderer)!;
-        const previousMesh = mr.mesh;
-        mr.mesh = utils.MeshUtils.createMesh({ positions: pos, colors: col, indices: idx });
-        previousMesh?.destroy();
         node.active = true;
+        mr.onGeometryChanged();
     }
 
     protected onDestroy(): void {
         for (const node of this._decals.values()) node.getComponent(MeshRenderer)?.mesh?.destroy();
+        for (const mesh of this._retiredDecalMeshes) mesh.destroy();
         for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
         this._decalMat?.destroy();
     }

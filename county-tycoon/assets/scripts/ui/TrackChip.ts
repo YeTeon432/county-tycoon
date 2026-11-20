@@ -1,11 +1,9 @@
-import { _decorator, Color, Component, EventTouch, Label, Layers, Node, UITransform, view } from 'cc';
+import { _decorator, Component, EventTouch, Label, Layers, Node, UITransform, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { BuildingBar } from './BuildingBar';
 import { drawGraphicsOnEnable, drawHudTile, makeIcon, makeLabel, makeLabelLeft, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
-
-const C_PERSON = new Color(242, 140, 40, 255);
 
 /**
  * 追踪条（T425）：底栏上方居中。
@@ -38,7 +36,7 @@ export class TrackChip extends Component {
         drawGraphicsOnEnable(node, (g) => {
             drawHudTile(g, -W / 2, -H / 2, W, H, 14, UI_HUD.base, UI_HUD.rim);
             // 左边是姓氏，右边是回家和关闭按钮。
-            g.fillColor = C_PERSON;
+            g.fillColor = UI_HUD.accent;
             g.circle(bx, 0, 24);
             g.fill();
             g.fillColor = UI_PALETTE.blue;
@@ -49,7 +47,7 @@ export class TrackChip extends Component {
             g.fill();
         });
 
-        chip._badge = makeLabel(node, 'Badge', '', UI_FONT.body, UI_PALETTE.white);
+        chip._badge = makeLabel(node, 'Badge', '', UI_FONT.body, UI_HUD.onAccent);
         chip._badge.isBold = true;
         chip._badge.node.setPosition(bx, 0, 0);
         chip._text = makeLabelLeft(node, 'Text', '', UI_FONT.small, UI_HUD.text, W - 8 - 48 - 12 - 120);

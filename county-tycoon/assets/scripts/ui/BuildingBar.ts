@@ -216,7 +216,7 @@ export class BuildingBar extends Component {
         g.roundRect(-W / 2 + 2, H / 2 - railH - r, W - 4, railH + r - 2, r);
         g.fill();
         // 用货架的平边盖住工具台下边的圆角。
-        g.fillColor = UI_HUD.goldRim;
+        g.fillColor = UI_HUD.accent;
         g.rect(-W / 2, H / 2 - railH - 4, W, 4);
         g.fill();
         g.fillColor = UI_HUD.paper;
@@ -260,14 +260,14 @@ export class BuildingBar extends Component {
             g.lineTo(7, 2); g.lineTo(7, 11); g.lineTo(11, 11); g.lineTo(12, -9);
             g.close();
             g.fill();
-            g.fillColor = UI_HUD.text;
+            g.fillColor = UI_HUD.onAccent;
             g.rect(-8, -5, 4, 4);
             g.rect(0, -5, 4, 4);
         } else {
             g.fillColor = new Color(151, 123, 81);
             g.moveTo(-12, -10); g.lineTo(-5, 10); g.lineTo(5, 10); g.lineTo(12, -10); g.close();
             g.fill();
-            g.fillColor = UI_HUD.text;
+            g.fillColor = UI_HUD.onAccent;
             g.rect(-1, -7, 2, 5);
             g.rect(-1, 1, 2, 5);
         }
@@ -291,9 +291,9 @@ export class BuildingBar extends Component {
         for (const t of this._tabs) {
             const on = t.key === this._tab;
             t.g.clear();
-            drawHudTile(t.g, -t.w / 2, -h / 2, t.w, h, 10, on ? UI_PALETTE.yellow : UI_HUD.key,
-                on ? UI_HUD.goldRim : UI_HUD.rim);
-            t.label.color = on ? UI_HUD.rim : UI_HUD.text;
+            drawHudTile(t.g, -t.w / 2, -h / 2, t.w, h, 10, on ? UI_HUD.accent : UI_HUD.key,
+                on ? UI_HUD.accentRim : UI_HUD.rim);
+            t.label.color = on ? UI_HUD.onAccent : UI_HUD.text;
         }
         for (const c of this._cards) c.node.active = c.tab === this._tab && !this.isHidden(c.def);
         this.applyScroll();
@@ -496,7 +496,7 @@ export class BuildingBar extends Component {
         const iconH = c.holders[2];   // 对勾和金币一层（都是小图标，放哪层都行）
         let check = iconH.getChildByName('Icon_check');
         if (!check && on) {
-            const s = makeIcon(iconH, 'check', 18, UI_HUD.rim);
+            const s = makeIcon(iconH, 'check', 18, UI_HUD.text);
             s.node.setPosition(BuildingBar.ITEM_W / 2 - 14, BuildingBar.ITEM_H / 2 - 14, 0);
             check = s.node;
         }
@@ -581,15 +581,15 @@ export class BuildingBar extends Component {
         const node = makePanelNode(this.node, 'DemolishBtn', w, h);
         node.setPosition(x, y, 0);
         const g = node.addComponent(Graphics);
-        const icon = makeIcon(node, 'demolish', 24, UI_HUD.danger);
+        const icon = makeIcon(node, 'demolish', 24, UI_COLOR.down);
         icon.node.setPosition(0, 13, 0);
-        const label = makeLabel(node, 'Txt', '拆除', 20, UI_HUD.danger, w - 6);
+        const label = makeLabel(node, 'Txt', '拆除', 20, UI_COLOR.down, w - 6);
         label.node.setPosition(0, -14, 0);
         label.isBold = true;
         this._drawDemolish = () => {
             g.clear();
             drawHudTile(g, -w / 2, -h / 2, w, h, 10, this._demolishMode ? UI_PALETTE.coral : UI_HUD.recess, UI_HUD.rim);
-            label.color = icon.color = this._demolishMode ? UI_HUD.text : UI_HUD.danger;
+            label.color = icon.color = this._demolishMode ? UI_HUD.onAccent : UI_COLOR.down;
         };
         this._drawDemolish();
         node.on(Node.EventType.TOUCH_END, () => {
@@ -610,7 +610,7 @@ export class BuildingBar extends Component {
         node.active = false;
         drawGraphicsOnEnable(node, (g) => {
             drawHudTile(g, -width / 2, -height / 2, width, height, 12, UI_HUD.base, UI_HUD.rim);
-            g.fillColor = UI_PALETTE.yellow;
+            g.fillColor = UI_HUD.accent;
             g.roundRect(-width / 2 + 10, -17, 4, 34, 2);
             g.fill();
         });

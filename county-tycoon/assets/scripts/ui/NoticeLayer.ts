@@ -139,10 +139,10 @@ export class NoticeLayer extends Component {
 
     /** 小喇叭图标（Graphics 画，不用图） */
     private drawHorn(g: Graphics): void {
-        g.fillColor = UI_PALETTE.yellow;
+        g.fillColor = UI_HUD.accent;
         g.moveTo(-10, -5); g.lineTo(-4, -5); g.lineTo(6, -12); g.lineTo(6, 12); g.lineTo(-4, 5); g.lineTo(-10, 5); g.close();
         g.fill();
-        g.strokeColor = UI_PALETTE.yellow;
+        g.strokeColor = UI_HUD.accent;
         g.lineWidth = 2.5;
         g.arc(8, 0, 7, -0.9, 0.9, true);
         g.stroke();
@@ -152,9 +152,9 @@ export class NoticeLayer extends Component {
         const bar = this._bar, label = this._barText;
         if (!bar || !label) return;
         label.string = text;
-        label.color = kind === 'leave' || kind === 'warn' || kind === 'layoff' ? UI_HUD.danger
-            : kind === 'arrive' || kind === 'stay' || kind === 'wishDone' || kind === 'research' || kind === 'street' || kind === 'deal' || kind === 'renovate' ? UI_HUD.mint
-                : kind === 'wish' ? UI_PALETTE.yellow : UI_HUD.text;
+        label.color = kind === 'leave' || kind === 'warn' || kind === 'layoff' ? UI_COLOR.down
+            : kind === 'arrive' || kind === 'stay' || kind === 'wishDone' || kind === 'research' || kind === 'street' || kind === 'deal' || kind === 'renovate' ? UI_COLOR.up
+                : kind === 'wish' ? UI_HUD.accent : UI_HUD.text;
         bar.active = true;
         InputGuard.add(bar);
         const op = bar.getComponent(UIOpacity)!;

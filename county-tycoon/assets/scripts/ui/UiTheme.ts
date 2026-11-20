@@ -6,7 +6,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 /**
  * 经营界面的统一外观（支线 B）。
  *
- * 地图上的控制台用深绿和暖黄，展开的详情面板用浅色纸面。
+ * 地图上的工具台用麦色和陶砖橙，详情面板用暖白纸面。
  */
 
 const hex = (s: string, a = 255): Color => {
@@ -24,23 +24,24 @@ export const UI_PALETTE = {
     /** 珊瑚红：警告、负数、拆除 */
     coral: hex('#b74331'),
     /** 正文 */
-    ink: hex('#27352e'),
+    ink: hex('#3e2d22'),
     /** 次要文字 */
-    sub: hex('#596861'),
+    sub: hex('#6b5140'),
     white: hex('#ffffff'),
 };
 
 export const UI_HUD = {
-    rim: hex('#142e29'),
-    base: hex('#22443a'),
-    recess: hex('#19362f'),
-    key: hex('#32594d'),
-    text: hex('#fff6dd'),
-    dim: hex('#c2d9cb'),
-    mint: hex('#a9e09d'),
-    danger: hex('#ff9c83'),
+    rim: hex('#9a6b46'),
+    base: hex('#f0d4a7'),
+    recess: hex('#fff2d9'),
+    key: hex('#fce7c4'),
+    accent: hex('#a34e29'),
+    accentRim: hex('#78371e'),
+    onAccent: hex('#fff8ec'),
+    text: UI_PALETTE.ink,
+    dim: UI_PALETTE.sub,
     goldRim: hex('#bb8a39'),
-    paper: hex('#f0e5cc'),
+    paper: hex('#f2e3c7'),
     well: hex('#fff8e9'),
 };
 

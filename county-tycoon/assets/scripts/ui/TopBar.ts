@@ -6,7 +6,7 @@ import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
     drawGraphicsOnEnable, drawHudTile, drawShadow, formatNumber, IconName, makeIcon, makeLabel, makeLabelLeft,
-    makePanelNode, setIcon, UI_HUD, UI_PALETTE,
+    makePanelNode, setIcon, UI_COLOR, UI_HUD,
 } from './UiTheme';
 
 const { ccclass } = _decorator;
@@ -164,10 +164,10 @@ export class TopBar extends Component {
         dot.setPosition(w / 2 - 8, 18, 0);
         dot.active = false;
         drawGraphicsOnEnable(dot, (g) => {
-            g.fillColor = UI_HUD.rim;
+            g.fillColor = UI_HUD.key;
             g.circle(0, 0, 8);
             g.fill();
-            g.fillColor = UI_HUD.danger;
+            g.fillColor = UI_COLOR.down;
             g.circle(0, 0, 5);
             g.fill();
         });
@@ -179,18 +179,18 @@ export class TopBar extends Component {
         if (this._centerDot) this._centerDot.active = pendingDeal || ready;
         if (this._goalText) {
             this._goalText.string = pendingDeal ? '招商待交地' : ready ? '可申请升级' : total ? `发展目标 ${done}/${total}` : '发展中心';
-            this._goalText.color = ready || pendingDeal ? UI_PALETTE.yellow : UI_HUD.text;
+            this._goalText.color = ready || pendingDeal ? UI_HUD.accent : UI_HUD.text;
         }
         const progress = total ? done / total : 0;
         const g = this._goalMeter;
         if (!g || progress === this._goalProgress) return;
         this._goalProgress = progress;
         g.clear();
-        g.fillColor = UI_HUD.rim;
+        g.fillColor = UI_COLOR.border;
         g.roundRect(-38, -5, 76, 10, 5);
         g.fill();
         if (progress > 0) {
-            g.fillColor = UI_PALETTE.yellow;
+            g.fillColor = UI_HUD.accent;
             const width = 76 * progress;
             g.roundRect(-38, -5, width, 10, Math.min(5, width / 2));
             g.fill();
@@ -215,14 +215,14 @@ export class TopBar extends Component {
         if (this._mood) {
             this._mood.string = sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—';
             this._mood.color = sum.population === 0 ? UI_HUD.dim
-                : sum.avgMood >= 60 ? UI_HUD.mint : sum.avgMood >= 40 ? UI_PALETTE.yellow : UI_HUD.danger;
+                : sum.avgMood >= 60 ? UI_COLOR.up : sum.avgMood >= 40 ? UI_COLOR.gold : UI_COLOR.down;
         }
     }
 
     private setFundsText(v: number): void {
         if (!this._funds) return;
         this._funds.string = `¥${formatNumber(v)}`;
-        this._funds.color = v < 0 ? UI_HUD.danger : UI_PALETTE.yellow;
+        this._funds.color = v < 0 ? UI_COLOR.down : UI_COLOR.gold;
     }
 
     setSpeed(speed: Speed): void {
@@ -287,11 +287,11 @@ export class TopBar extends Component {
     private refreshSpeedButtons(): void {
         if (this._playIcon) {
             setIcon(this._playIcon, this._speed === 0 ? 'play' : 'pause');
-            this._playIcon.color = this._speed === 0 ? UI_PALETTE.yellow : UI_HUD.text;
+            this._playIcon.color = this._speed === 0 ? UI_HUD.accent : UI_HUD.text;
         }
         if (this._speedText) {
             this._speedText.string = this._speed === 0 ? '暂停' : `×${this._speed}`;
-            this._speedText.color = this._speed === 1 ? UI_HUD.text : UI_PALETTE.yellow;
+            this._speedText.color = this._speed === 1 ? UI_HUD.text : UI_HUD.accent;
         }
     }
 

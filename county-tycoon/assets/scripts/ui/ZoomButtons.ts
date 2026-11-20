@@ -1,6 +1,6 @@
 import { _decorator, Color, Component, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
-import { drawHudTile, IconName, makeIcon, makeLabel, makePanelNode, UI_HUD, UI_PALETTE } from './UiTheme';
+import { drawHudTile, IconName, makeIcon, makeLabel, makePanelNode, UI_HUD } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -38,8 +38,8 @@ export class ZoomButtons extends Component {
             const draw = (active: boolean) => {
                 graphics.clear();
                 drawHudTile(graphics, -keyW / 2, -keyH / 2, keyW, keyH, 9,
-                    active ? UI_PALETTE.yellow : UI_HUD.key, active ? UI_HUD.goldRim : UI_HUD.rim);
-                if (label) label.color = active ? UI_HUD.rim : UI_HUD.text;
+                    active ? UI_HUD.accent : UI_HUD.key, active ? UI_HUD.accentRim : UI_HUD.rim);
+                if (label) label.color = active ? UI_HUD.onAccent : UI_HUD.text;
             };
             draw(false);
             node.on(Node.EventType.TOUCH_END, onTap, this);
@@ -60,7 +60,7 @@ export class ZoomButtons extends Component {
 
     refresh(zoom: number, index: number, count: number): void {
         if (this._label) this._label.string = `×${Math.round(zoom * 10) / 10}`;
-        const disabled = new Color(127, 158, 144);
+        const disabled = new Color(160, 134, 109);
         if (this._plus) this._plus.color = index < count - 1 ? UI_HUD.text : disabled;
         if (this._minus) this._minus.color = index > 0 ? UI_HUD.text : disabled;
     }

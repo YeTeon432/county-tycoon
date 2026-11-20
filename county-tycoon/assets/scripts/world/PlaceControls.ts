@@ -48,11 +48,11 @@ export class PlaceControls extends Component {
         row.setPosition(0, 22, 0);
 
         this._rotate = makeBtn(row, '↻ 换朝向', 156, UI_HUD.base, UI_HUD.text, -122, () => view.rotatePending());
-        this._ok = makeBtn(row, '✓ 确定', 156, UI_PALETTE.green, UI_HUD.text, 44, () => {
+        this._ok = makeBtn(row, '✓ 确定', 156, UI_PALETTE.green, UI_HUD.onAccent, 44, () => {
             if (view.pendingDemolition) view.confirmDemolition();
             else view.confirmPending();
         });
-        this._cancel = makeBtn(row, '✕', 64, UI_HUD.base, UI_HUD.danger, 170, () => view.cancelPending());
+        this._cancel = makeBtn(row, '✕', 64, UI_HUD.base, UI_COLOR.down, 170, () => view.cancelPending());
 
         const rn = new Node('Reason');
         rn.layer = Layers.Enum.UI_2D;
@@ -68,7 +68,7 @@ export class PlaceControls extends Component {
         this._reason = ln.addComponent(Label);
         this._reason.fontSize = 22;
         this._reason.lineHeight = 28;
-        this._reason.color = UI_HUD.text;
+        this._reason.color = UI_HUD.onAccent;
         this._reason.horizontalAlign = Label.HorizontalAlign.CENTER;
         this._reason.verticalAlign = Label.VerticalAlign.CENTER;
         this._reason.overflow = Label.Overflow.SHRINK;

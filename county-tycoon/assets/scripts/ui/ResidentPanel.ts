@@ -24,6 +24,7 @@ const VEHICLE_NAME: Record<string, string> = { walk: '步行', ebike: '电动车
  */
 @ccclass('ResidentPanel')
 export class ResidentPanel extends Panel {
+    protected cardH = 980;
 
     private _sim: SimApi | null = null;
     private _residentId = 0;
@@ -39,7 +40,7 @@ export class ResidentPanel extends Panel {
     static show(parent: Node, sim: SimApi, model: TownModel, residentId: number, onTrack?: (id: number, focusHome?: boolean) => void): ResidentPanel | null {
         const r = sim.resident(residentId);
         if (!r) return null;
-        const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`, 'residents');
+        const panel = Panel.open(ResidentPanel, parent, r.name, `${r.gender === 'M' ? '男' : '女'} · ${r.age} 岁`);
         panel._sim = sim;
         panel._model = model;
         panel._onTrack = onTrack ?? null;

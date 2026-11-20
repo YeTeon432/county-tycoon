@@ -3,10 +3,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport, TownLevel } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
-import { ManagementPage, Panel } from './Panel';
-import { NoticeHistoryPanel } from './NoticeHistoryPanel';
 import { Portrait } from './Portrait';
-import { BuildCatalogPanel } from './BuildCatalogPanel';
 import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
 import { IntroCards } from './IntroCards';
@@ -91,8 +88,6 @@ export class UiRoot extends Component {
     private _listPanel: ResidentListPanel | null = null;
     /** 月度账单 */
     private _reportPanel: MonthReportPanel | null = null;
-    private _catalogPanel: BuildCatalogPanel | null = null;
-    private _historyPanel: NoticeHistoryPanel | null = null;
     private _settingsPanel: SettingsPanel | null = null;
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
@@ -131,13 +126,6 @@ export class UiRoot extends Component {
         this.buildClock();
         this.buildTrackChip();
         this._notices = NoticeLayer.create(this.node, this.sim);
-        this._notices.onOpenHistory = () => this.openHistory();
-        this._notices.onHistoryChanged = () => {
-            if (this._historyPanel?.node.activeInHierarchy) {
-                this._historyPanel.refresh();
-                this._notices?.markRead();
-            }
-        };
         this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
@@ -161,7 +149,6 @@ export class UiRoot extends Component {
     attachBuildingBar(bar: BuildingBar): void {
         this._bar = bar;
         if (this.sim) bar.bindSim(this.sim);
-        bar.onOpenCatalog = () => this.openCatalog();
         bar.onNotice = (text) => this.setPlacementHint(text);
         bar.setHint(this._hint);
     }
@@ -170,7 +157,7 @@ export class UiRoot extends Component {
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
         Portrait.setArt(art);
-        Panel.setArt(art);
+        CenterPanel.setArt(art);
     }
 
     /**
@@ -245,7 +232,7 @@ export class UiRoot extends Component {
         const ready = goals.length > 0 && done === goals.length;
         bar.setGoals(done, goals.length, !!sim.state.pendingDeal);
         if (ready && !this._goalsReady) {
-            this._notices?.say('info', '发展目标全部完成，可在县发展中心申请升级');
+            this._notices?.say('info', '发展目标全部完成，可在发展中心申请升级');
         }
         this._goalsReady = ready;
     }
@@ -311,38 +298,7 @@ export class UiRoot extends Component {
         layer.layer = Layers.Enum.UI_2D;
         layer.addComponent(UITransform);
         this.node.addChild(layer);
-        layer.on('open-management-page', (page: ManagementPage) => {
-            switch (page) {
-                case 'build': this.openCatalog(); break;
-                case 'center': this.openCenter(); break;
-                case 'residents': this.openResidentList(); break;
-                case 'report': this.openReport(); break;
-                case 'notices': this.openHistory(); break;
-                case 'settings': this.openSettings(); break;
-            }
-        });
         this._panelLayer = layer;
-    }
-
-    private openCatalog(): void {
-        const bar = this._bar;
-        if (!bar || !this._panelLayer) return;
-        this.closeTopPanel();
-        const page = BuildCatalogPanel.show(this._panelLayer, bar, (id) => {
-            this.closeTopPanel();
-            bar.selectById(id);
-        });
-        page.onClosed = () => { this._catalogPanel = null; };
-        this._catalogPanel = page;
-    }
-
-    private openHistory(): void {
-        if (!this._panelLayer || !this._notices) return;
-        this.closeTopPanel();
-        this._notices.markRead();
-        const page = NoticeHistoryPanel.show(this._panelLayer, this._notices.history);
-        page.onClosed = () => { this._historyPanel = null; };
-        this._historyPanel = page;
     }
 
     openSettings(): void {
@@ -367,11 +323,10 @@ export class UiRoot extends Component {
         this._lastReport = report;
         if (this._reportPanel) this.openReport();
         if (this._notices && report.notices) this._notices.push(report.notices);
-        // 研究完成：底栏多出新卡片；开着的县发展中心面板也刷新
+        // 研究完成：底栏多出新卡片；开着的发展中心面板也刷新
         if (report.notices && report.notices.some((n) => n.kind === 'research')) {
             if (this._bar) this._bar.refreshUnlocks();
         }
-        this._catalogPanel?.refresh();
         this.refreshOpenPanels();
         if (this._topBar) {
             this._topBar.refresh();
@@ -420,7 +375,7 @@ export class UiRoot extends Component {
 
         // 同一时间只留一个面板：先关掉旧的（居民档案叠在建筑详情上面时另说，见 openResident）
         this.closeTopPanel();
-        // 县发展中心：打开它自己的面板（目标 / 研究 / 招商 / 特色街道，D026）
+        // 发展中心：打开它自己的面板（目标 / 研究 / 招商 / 特色街道，D026）
         const placed = this.model.allBuildings().find((b) => b.uid === uid);
         if (placed && placed.def.id === 'center' && this.sim.goals) {
             this.openCenter('goals', uid);
@@ -583,12 +538,12 @@ export class UiRoot extends Component {
         this._trackChip.setText(doing ? `${r.name} · ${doing}` : r.name);
     }
 
-    /** 打开县发展中心面板 */
+    /** 打开发展中心面板 */
     openCenter(tab: 'goals' | 'research' | 'invest' | 'streets' = 'goals', uid?: number): void {
         const layer = this._panelLayer;
         if (!this.sim || !layer) return;
         this.closeTopPanel();
-        // 换朝向：点楼进来的用那栋楼；从「目标」小牌进来的找地图上的县发展中心
+        // 换朝向：点楼进来的用那栋楼；从「目标」小牌进来的找地图上的发展中心
         const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
@@ -612,7 +567,7 @@ export class UiRoot extends Component {
 
     private onLevelUp(lv: TownLevel): void {
         const name: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
-        if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去县发展中心看看新目标吧。');
+        if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去发展中心看看新目标吧。');
         if (this._bar) this._bar.refreshUnlocks();
         if (this._topBar) this._topBar.refresh();
     }
@@ -622,8 +577,6 @@ export class UiRoot extends Component {
             node.active = false;
             node.destroy();
         }
-        this._catalogPanel = null;
-        this._historyPanel = null;
         this._settingsPanel = null;
         this._centerPanel = null;
         this._reportPanel = null;

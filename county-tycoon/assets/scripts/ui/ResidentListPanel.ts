@@ -39,6 +39,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
  */
 @ccclass('ResidentListPanel')
 export class ResidentListPanel extends Panel {
+    protected cardH = 1140;
     private _sim: SimApi | null = null;
     private _model: TownModel | null = null;
     private _sort: SortKey = 'salary';
@@ -58,7 +59,7 @@ export class ResidentListPanel extends Panel {
         model: TownModel,
         onResidentTap: (id: number) => void,
     ): ResidentListPanel {
-        const panel = Panel.open(ResidentListPanel, parent, '居民总览', '', 'residents');
+        const panel = Panel.open(ResidentListPanel, parent, '居民总览', '');
         panel._sim = sim;
         panel._model = model;
         panel._onResidentTap = onResidentTap;

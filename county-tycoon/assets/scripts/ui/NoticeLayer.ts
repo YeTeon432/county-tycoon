@@ -3,7 +3,6 @@ import { InputGuard } from '../core/InputGuard';
 import { getPlatform } from '../platform/Platform';
 import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
-import { NoticeEntry } from './NoticeHistoryPanel';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
 import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
@@ -14,7 +13,7 @@ const { ccclass } = _decorator;
  * 公告栏 + 大公示（D026，DESIGN 16.4 / 16.5）。
  *
  * - 公告栏：顶栏下面、左上角一条县城消息。新消息滑进来停 4 秒，然后收成一个小喇叭（有没看过的消息时带红点）。
- *   点喇叭 / 长条 = 打开最近 30 条公告。没有消息时，开局前几天轮播玩法提示。
+ *   点喇叭 / 长条 = 展开最近 12 条公告。没有消息时，开局前几天轮播玩法提示。
  * - 大公示：有人来 / 有人走时屏幕中间弹一张卡片（头像 + 名字 + 一句话 + 理由），2.5 秒自动消失，点一下立刻关；
  *   不暂停游戏。同一批多张排队，一次超过 3 张就合并成「今天来了 N 位新居民」。
  *
@@ -40,9 +39,8 @@ export class NoticeLayer extends Component {
     private _barText: Label | null = null;
     private _horn: Node | null = null;
     private _hornDot: Node | null = null;
-    readonly history: NoticeEntry[] = [];
-    onOpenHistory: (() => void) | null = null;
-    onHistoryChanged: (() => void) | null = null;
+    private history: { kind: Notice['kind']; text: string }[] = [];
+    private _list: Node | null = null;
     private _queue: { kind: Notice['kind']; text: string }[] = [];
     private _showing = 0;
 
@@ -90,10 +88,10 @@ export class NoticeLayer extends Component {
 
     /** 往公告栏发一条（界面自己的提示也走这里，比如「建设资金不够」） */
     say(kind: Notice['kind'], text: string): void {
-        this.history.push({ kind, text, month: this._sim?.state.month ?? 0 });
+        this.history.push({ kind, text });
         if (this.history.length > 30) this.history.shift();
         if (this._hornDot) this._hornDot.active = true;
-        this.onHistoryChanged?.();
+
         this._queue.push({ kind, text });
         this._tipsLeft = 0;   // 有真消息了就不再轮播提示
     }
@@ -116,7 +114,7 @@ export class NoticeLayer extends Component {
             g.circle(0, 0, 7);
             g.fill();
         });
-        horn.on(Node.EventType.TOUCH_END, () => this.onOpenHistory?.(), this);
+        horn.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
         InputGuard.add(horn);
         this._horn = horn;
         this._hornDot = dot;
@@ -134,9 +132,10 @@ export class NoticeLayer extends Component {
         this._barText = makeLabelLeft(bar, 'Txt', '', UI_FONT.small, UI_HUD.text, bw - 60);
         this._barText.node.setPosition(-bw / 2 + 46, 0, 0);
         bar.addComponent(UIOpacity).opacity = 0;
-        bar.on(Node.EventType.TOUCH_END, () => this.onOpenHistory?.(), this);
+        bar.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
         this._bar = bar;
         const align = () => {
+            this.closeList();
             const { width, height } = view.getVisibleSize();
             const y = height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H / 2;
             this.node.getComponent(UITransform)!.setContentSize(width, height);
@@ -192,8 +191,47 @@ export class NoticeLayer extends Component {
         }).start();
     }
 
-    markRead(): void {
+    /** 展开 / 收起最近 12 条 */
+    private toggleList(): void {
+        if (this._list) { this.closeList(); return; }
         if (this._hornDot) this._hornDot.active = false;
+        const vis = view.getVisibleSize();
+        const W = Math.min(vis.width, 720) - 32;
+        const items = this.history.slice(-12).reverse();
+        const rowH = 40;
+        const H = Math.max(1, items.length) * rowH + 56;
+        const box = makePanelNode(this.node, 'List', W, H);
+        const top = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 8;
+        const left = this._horn?.position.x ?? (-vis.width / 2 + 38);
+        box.setPosition(left - 22 + W / 2, top - H / 2, 0);
+        const g = box.addComponent(Graphics);
+        drawShadow(g, -W / 2, -H / 2, W, H, 20, 3);
+        g.fillColor = UI_COLOR.panel;
+        g.roundRect(-W / 2, -H / 2, W, H, 20);
+        g.fill();
+        const title = makeLabelLeft(box, 'Title', '县里的消息', UI_FONT.body, UI_COLOR.text, W - 40);
+        title.isBold = true;
+        title.node.setPosition(-W / 2 + 20, H / 2 - 28, 0);
+        if (!items.length) {
+            const l = makeLabelLeft(box, 'Empty', '还没有消息', UI_FONT.small, UI_COLOR.textDim, W - 40);
+            l.node.setPosition(-W / 2 + 20, H / 2 - 28 - rowH, 0);
+        }
+        items.forEach((it, i) => {
+            const l = makeLabelLeft(box, 'Row', it.text, UI_FONT.small,
+                it.kind === 'leave' || it.kind === 'warn' || it.kind === 'layoff' ? UI_COLOR.down
+                    : it.kind === 'arrive' || it.kind === 'stay' ? UI_COLOR.up : UI_COLOR.text, W - 40);
+            l.node.setPosition(-W / 2 + 20, H / 2 - 28 - rowH * (i + 1), 0);
+        });
+        box.on(Node.EventType.TOUCH_END, () => this.closeList(), this);
+        InputGuard.add(box);
+        this._list = box;
+    }
+
+    private closeList(): void {
+        if (!this._list) return;
+        InputGuard.remove(this._list);
+        this._list.destroy();
+        this._list = null;
     }
 
     // ───────────────────────── 升级庆祝（全屏，点了才关） ─────────────────────────
@@ -363,6 +401,7 @@ export class NoticeLayer extends Component {
 
     protected onDestroy(): void {
         view.targetOff(this);
+        if (this._list) InputGuard.remove(this._list);
         if (this._horn) InputGuard.remove(this._horn);
         if (this._bar) InputGuard.remove(this._bar);
         if (this._card) InputGuard.remove(this._card);

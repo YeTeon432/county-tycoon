@@ -42,12 +42,13 @@ const EXPENSE_ROWS: { key: keyof MonthlyReport['expense']; label: string }[] = [
 
 @ccclass('MonthReportPanel')
 export class MonthReportPanel extends Panel {
+    protected cardH = 1060;
 
     private _report: MonthlyReport | null = null;
     private _sim: SimApi | null = null;
 
     static show(parent: Node, sim: SimApi, report: MonthlyReport | null): MonthReportPanel {
-        const panel = Panel.open(MonthReportPanel, parent, '月度账单', monthLabel(report?.month ?? sim.state.month), 'report');
+        const panel = Panel.open(MonthReportPanel, parent, '月度账单', monthLabel(report?.month ?? sim.state.month));
         panel._sim = sim;
         panel._report = report;
         panel.renderPage = () => panel.fill();

@@ -364,7 +364,7 @@ export class GameRoot extends Component {
         // 所以上下找一排：9 格土路 + 路南 4 栋都放得下的最近一排
         const sp = model.terrain ? model.terrain.spawn : { col: Math.floor(model.width / 2), row: Math.floor(model.height / 2) };
         const workshop0 = def('workshop'), breakfast0 = def('breakfast'), center0 = def('center');
-        // 县发展中心（D026）：路北侧正中，2×2，开局镜头对准它
+        // 发展中心（D026）：路北侧正中，2×2，开局镜头对准它
         const fits = (cx: number, cy: number) => {
             for (let c = cx - 4; c <= cx + 4; c++) if (!model.canPlace(road, c, cy)) return false;
             const lots: [BuildingDef | undefined, number][] = [[house, cx - 1], [house, cx + 1], [workshop0, cx + 3], [breakfast0, cx - 3]];

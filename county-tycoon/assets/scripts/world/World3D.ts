@@ -214,11 +214,10 @@ export class World3D extends Component {
      * 影子平铺在地上（屏幕上看是同一个椭圆）。屏幕上 1 个 2D 世界单位 = 3D 里 1 / (hw·√2)。
      */
     private drawActors(q: Quat, back: Vec3): void {
-        const src = this.actorSource, mat = this._actorMat;
-        const list = src && mat ? src() : null;
+        const list = this.actorSource?.();
         const order = this._aOrder;
         order.length = 0;
-        if (list) for (const a of list) if (a.frame && a.alpha > 0.01) order.push(a);
+        if (this._actorMat && list) for (const a of list) if (a.frame && a.alpha > 0.01) order.push(a);
         // 远的先画：沿相机方向的距离（back 指向相机，点积越大越近）
         const bx = back.x, bz = back.z;
         order.sort((a, b) => (a.gx * bx + a.gy * bz) - (b.gx * bx + b.gy * bz));

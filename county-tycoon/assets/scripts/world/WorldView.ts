@@ -227,7 +227,7 @@ export class WorldView extends Component {
             w3.onReady = () => { if (this._buildings) this._buildings.refresh3D(); };
         }
 
-        // 行人、车、金币：人和车挂进建筑层一起排序，金币飘在最上面
+        // 行人、车、金币：LifeLayer 管日程与特效，World3D 画人车
         const lifeNode = LifeLayer.create(iso, model, this._art, this._buildings!);
         world.addChild(lifeNode);
         this._life = lifeNode.getComponent(LifeLayer);
@@ -323,13 +323,15 @@ export class WorldView extends Component {
         if (this._3d && this._3d.isValid) this._3d.node.destroy();
     }
 
-    /** 3D 相机每帧对齐 2D 的平移 / 缩放 / 视角（放在 lateUpdate：拖动、惯性、转视角都在 update 里改完了） */
-    protected lateUpdate(): void {
+    /** 移动、惯性和转向更新完后，用同一帧的状态画地图、人车和追踪标记。 */
+    protected lateUpdate(dt: number): void {
         const w3 = this._3d, world = this._world;
-        if (!w3 || !world) return;
-        const p = world.position;
-        w3.syncCamera(p.x, p.y, this._zoom, this._viewAngle);
-        w3.setHidden(this._building);
+        if (w3 && world) {
+            const p = world.position;
+            w3.syncCamera(p.x, p.y, this._zoom, this._viewAngle);
+            w3.setHidden(this._building);
+        }
+        this.updateTrack(dt);
     }
 
     /**
@@ -486,7 +488,6 @@ export class WorldView extends Component {
         this.clampPosition();
 
         if (this._buildings) this._buildings.relayout(spin !== 0);
-        if (this._life) this._life.relayout();
         if (!this._turn) {
             this._hoverCol = -1; this._hoverRow = -1;
             this.refreshGhost();
@@ -587,7 +588,6 @@ export class WorldView extends Component {
         this.syncConstruction(dt);
         this.stepTurn(dt);
         this.stepPan(dt);
-        this.updateTrack(dt);
         if (this._touches.size > 0) return;
         const v = Math.hypot(this._velX, this._velY);
         if (v < 8) { this._velX = 0; this._velY = 0; return; }

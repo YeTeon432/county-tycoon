@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, JsonAsset, Label, Layers, Node, Sprite, SpriteFrame, Tween, UIOpacity, UITransform, Vec2, Vec3, resources, tween } from 'cc';
+import { _decorator, Color, Component, Graphics, JsonAsset, Label, Layers, Node, Sprite, Tween, UIOpacity, UITransform, Vec3, resources, tween } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { DayClock } from '../core/DayClock';
 import { IsoMath } from '../core/IsoMath';
@@ -26,7 +26,7 @@ const { ccclass } = _decorator;
  * - 速度 = 交通工具基础速度 × 道路倍率 × 个人差异（config/traffic.json）；路太长时会「赶路」走快一点
  *   （最多 trip.maxHurry 倍），不然步行 10 格要 17 秒，约占半个白天。
  * - 跟着游戏倍速走：暂停时人也停下，两倍速时人走得也快。
- * - 节点挂进 BuildingLayer 的 Objects，和建筑共用前后排序（gx+gy），被楼挡住时会真的被挡住。
+ * - World3D 按本帧相机画人车并处理楼的遮挡；这里的节点只承载头顶特效。
  * - 图只画了两个朝向，另外两个左右翻转（docs/art/gen/life.py 顶部有约定）。
  * - 纯表现层：不读不写任何经营数值。
  */
@@ -74,7 +74,7 @@ const SHADOW: Record<Kind, { frame: string; settle: number }> = {
 interface Agent {
     kind: Kind;
     node: Node;
-    sprite: Sprite;
+    opacity: UIOpacity;
     skin: number;
     /** 行人的外观名（D023，如 'woman1'）；有新图时按它取帧，没有就退回 ped<skin> */
     look: string | null;
@@ -91,7 +91,7 @@ interface Agent {
     residentId: number;
     /** 要去的楼 */
     to: number;
-    /** 3D 版（T540f）每帧交给 World3D 的画法；place() 里更新 */
+    /** 行进位置和本帧交给 World3D 的画法 */
     view: Actor3D;
 }
 
@@ -205,19 +205,15 @@ export class LifeLayer extends Component {
     /** 某种建筑的客单价（T219 飘字）；返回 0 = 不飘 */
     priceOf: ((defId: string) => number) | null = null;
 
-    /**
-     * 人车由 World3D 画成 3D 里的纸片（T540f，能被楼挡住），这里的 2D 精灵只算位置、选帧，不显示。
-     * 气泡、金币、飘字还是 2D，压在最上面。
-     */
     private readonly _views: Actor3D[] = [];
 
-    /** 3D 版每帧要画的人车（World3D.actorSource） */
+    /** 移动和相机更新完后，按本帧视角准备人车和头顶气泡。 */
     actors3D(): readonly Actor3D[] {
         const out = this._views;
         out.length = 0;
         for (const a of this._agents) {
-            const op = a.node.getComponent(UIOpacity);
-            a.view.alpha = op ? op.opacity / 255 : 1;
+            this.layoutActor(a);
+            a.view.alpha = a.opacity.opacity / 255;
             out.push(a.view);
         }
         return out;
@@ -237,9 +233,8 @@ export class LifeLayer extends Component {
         if (!p) return null;
         const a = p.agent;
         if (a && a.node.isValid) {
-            const body = a.node.getChildByName('Body');
-            const h = body ? body.getComponent(UITransform)!.height : 12;
-            return { walking: true, x: a.node.position.x, y: a.node.position.y + h, uid: null, to: a.to };
+            const pos = this._iso!.toLocal(a.view.gx, a.view.gy);
+            return { walking: true, x: pos.x, y: pos.y + (a.view.h || 12), uid: null, to: a.to };
         }
         const uid = p.loc ?? this._info.get(id)?.homeId ?? null;
         return { walking: false, x: 0, y: 0, uid, to: null };
@@ -269,14 +264,11 @@ export class LifeLayer extends Component {
         this._townDirty = true;
     }
 
-    /** 视角转了（D031）：所有人车按新视角重摆一次（暂停时也要对） */
-    relayout(): void {
-        for (const a of this._agents) this.place(a);
-    }
-
     protected update(dt: number): void {
         const art = this._art;
         if (!art || !art.loaded || !this._layer || !this._model) return;
+        // 和日程时钟用同一个时间上限，慢帧里也要走完已经过去的游戏时间。
+        let walkTime = Math.min(dt, 0.5);
         dt = Math.min(dt, 0.1);
 
         if (this._townDirty) this.rescanTown();
@@ -298,10 +290,11 @@ export class LifeLayer extends Component {
             while (!p.agent && p.next < p.trips.length && hour >= p.trips[p.next].at) this.depart(p);
         });
 
-        const g = dt * DayClock.speed();
-        if (g > 0) {
-            for (let i = this._agents.length - 1; i >= 0; i--) this.step(this._agents[i], g, i);
-            this._layer.sortAll();
+        const speed = DayClock.speed();
+        while (speed > 0 && walkTime > 0 && this._agents.length > 0) {
+            const step = Math.min(walkTime, 0.1);
+            walkTime -= step;
+            for (let i = this._agents.length - 1; i >= 0; i--) this.step(this._agents[i], step * speed, i);
         }
 
         // 对话气泡：每 0.4 秒检测一次两个行人是否靠近
@@ -513,12 +506,12 @@ export class LifeLayer extends Component {
         const p = this._people.get(a.residentId);
         if (p && p.agent === a) { p.agent = null; p.loc = a.to; }
         const node = a.node;
-        const op = node.getComponent(UIOpacity);
-        if (op && coin) {
-            Tween.stopAllByTarget(op);
-            tween(op).to(LifeLayer.FADE, { opacity: 0 }).call(() => this._layer!.removeActor(node)).start();
+        const op = a.opacity;
+        Tween.stopAllByTarget(op);
+        if (coin) {
+            tween(op).to(LifeLayer.FADE, { opacity: 0 }).call(() => node.destroy()).start();
         } else {
-            this._layer!.removeActor(node);
+            node.destroy();
         }
         if (coin) {
             const b = this.buildingByUid(a.to);
@@ -609,38 +602,17 @@ export class LifeLayer extends Component {
 
         const node = new Node(`A_${kind}`);
         node.layer = Layers.Enum.UI_2D;
-        node.addComponent(UITransform).setAnchorPoint(new Vec2(0.5, 0));
+        node.addComponent(UITransform);
         const op = node.addComponent(UIOpacity);
         op.opacity = 0;
         tween(op).to(LifeLayer.FADE, { opacity: 255 }).start();
-        // 影子先加、身体后加：同一节点下后加的画在上面
         const sh = this._art!.get(SHADOW[kind].frame);
-        if (sh) {
-            const sn = new Node('Shadow');
-            sn.layer = Layers.Enum.UI_2D;
-            const sz = this._art!.worldSize(sh);
-            sn.addComponent(UITransform).setContentSize(sz.width, sz.height);
-            const ss = sn.addComponent(Sprite);
-            ss.sizeMode = Sprite.SizeMode.CUSTOM;
-            ss.spriteFrame = sh;
-            ss.enabled = false;
-            sn.setPosition(0, SHADOW[kind].settle, 0);
-            node.addChild(sn);
-        }
-        const body = new Node('Body');
-        body.layer = Layers.Enum.UI_2D;
-        body.addComponent(UITransform).setAnchorPoint(new Vec2(0.5, 0));
-        const sprite = body.addComponent(Sprite);
-        sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-        sprite.trim = false;
-        sprite.enabled = false;
-        node.addChild(body);
         const shSize = sh ? this._art!.worldSize(sh) : { width: 0, height: 0 };
 
         const w = this._model!.width;
         const c0 = path[0], c1 = path.length > 1 ? path[1] : path[0];
         const a: Agent = {
-            kind, node, sprite, skin, look, path, i: 0,
+            kind, node, opacity: op, skin, look, path, i: 0,
             col: c0 % w, row: Math.floor(c0 / w), tc: c1 % w, tr: Math.floor(c1 / w), t: 0,
             speed: base * hurry,
             side: R(2) < 0.5 ? 1 : -1,
@@ -652,9 +624,10 @@ export class LifeLayer extends Component {
                 shadow: sh, sw: shSize.width, sh: shSize.height, settle: SHADOW[kind].settle, alpha: 0,
             },
         };
-        this._layer!.addActor(node, 0);
+        this.node.addChild(node);
+        node.setSiblingIndex(0);   // 金币和飘字压在头顶特效上面
         this._agents.push(a);
-        this.place(a);
+        this.updatePosition(a);
         return a;
     }
 
@@ -678,7 +651,15 @@ export class LifeLayer extends Component {
             a.anim += d;    // 步伐按走过的距离算，快的人迈得快、停下就不迈，脚不打滑
             while (a.t >= 1) {
                 a.i++;
-                if (a.i >= a.path.length - 1) { this.place(a); this.arrive(index, true); return; }
+                if (a.i >= a.path.length - 1) {
+                    if (a.node.children.length > 0) {
+                        a.t = 1;
+                        this.updatePosition(a);
+                        this.positionChat(a);
+                    }
+                    this.arrive(index, true);
+                    return;
+                }
                 a.t -= 1;
                 const c0 = a.path[a.i], c1 = a.path[a.i + 1];
                 a.col = c0 % w; a.row = Math.floor(c0 / w);
@@ -689,7 +670,7 @@ export class LifeLayer extends Component {
             a.t += dt;
             if (a.t >= 0.6) { this.arrive(index, true); return; }
         }
-        this.place(a);
+        this.updatePosition(a);
     }
 
     /** 车道偏移：行人走人行道，车靠一侧（垂直于行进方向，对向自动分两边） */
@@ -698,18 +679,17 @@ export class LifeLayer extends Component {
         return a.kind === 'car' ? 0.14 : 0.2;
     }
 
-    private place(a: Agent): void {
-        const iso = this._iso!, art = this._art!;
+    private updatePosition(a: Agent): void {
         const dx = a.tc - a.col, dy = a.tr - a.row;
         const off = this.lane(a);
         // 垂直方向 (-dy, dx)
-        const gx = a.col + 0.5 + dx * a.t + (-dy) * off;
-        const gy = a.row + 0.5 + dy * a.t + dx * off;
-        iso.toLocal(gx, gy, this._p);
-        // 不取整：D021 起是 3D 预渲染图（线性过滤），取整到世界像素在 ×4 缩放下会一跳 4 个屏幕像素，走路一抽一抽
-        a.node.setPosition(this._p.x, this._p.y, 0);
-        this._layer!.setActorDepth(a.node, iso.depthAt(gx, gy));
+        a.view.gx = a.col + 0.5 + dx * a.t - dy * off;
+        a.view.gy = a.row + 0.5 + dy * a.t + dx * off;
+    }
 
+    private layoutActor(a: Agent): void {
+        const iso = this._iso!, art = this._art!, v = a.view;
+        const dx = a.tc - a.col, dy = a.tr - a.row;
         // 朝向看的是屏幕上往哪走（D031 转视角后按视图方向）：
         // +vx 正面，+vy 正面翻转，-vx 背面，-vy 背面翻转（车：沿 vy 翻转）
         const [vdx, vdy] = iso.viewDir(dx, dy);
@@ -729,21 +709,21 @@ export class LifeLayer extends Component {
             name = `car${a.skin}`;
         }
         const frame = art.get(name);
-        if (frame && a.sprite.spriteFrame !== frame) {
-            a.sprite.spriteFrame = frame;
+        if (frame && v.frame !== frame) {
+            v.frame = frame;
             const sz = art.worldSize(frame);
-            a.sprite.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);
-            a.node.getComponent(UITransform)!.setContentSize(sz.width, sz.height);   // 点人判定用
-        }
-        const sx = flip ? -1 : 1;
-        if (a.node.scale.x !== sx) a.node.setScale(sx, 1, 1);
-        const v = a.view;
-        v.gx = gx; v.gy = gy; v.flip = flip;
-        if (v.frame !== a.sprite.spriteFrame) {
-            v.frame = a.sprite.spriteFrame;
-            const sz = v.frame ? art.worldSize(v.frame) : { width: 0, height: 0 };
             v.w = sz.width; v.h = sz.height;
         }
+        v.flip = flip;
+        if (a.node.children.length > 0) this.positionChat(a);
+    }
+
+    private positionChat(a: Agent): void {
+        const v = a.view;
+        this._iso!.toLocal(v.gx, v.gy, this._p);
+        a.node.setPosition(this._p.x, this._p.y, 0);
+        const sx = v.flip ? -1 : 1;
+        if (a.node.scale.x !== sx) a.node.setScale(sx, 1, 1);
     }
 
     // ---------------- 金币 ----------------
@@ -760,7 +740,7 @@ export class LifeLayer extends Component {
         node.addComponent(UITransform).setContentSize(sz.width, sz.height);
         const s = node.addComponent(Sprite);
         s.sizeMode = Sprite.SizeMode.CUSTOM;
-        s.spriteFrame = frame as SpriteFrame;
+        s.spriteFrame = frame;
         this.node.addChild(node);
         const p = bn.position;
         const y0 = Math.round(p.y + h * 0.85);

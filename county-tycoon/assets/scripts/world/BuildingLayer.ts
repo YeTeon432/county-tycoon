@@ -32,7 +32,7 @@ export class BuildingLayer extends Component {
     private _reach: ReachDraw | null = null;
     /** uid -> 节点。重画时只增删有变化的 */
     private readonly _nodes = new Map<number, Node>();
-    /** 节点 -> 前后排序键（建筑和会动的东西共用，见 sortAll） */
+    /** 节点 -> 建筑前后排序键 */
     private readonly _depth = new Map<Node, number>();
     /** uid -> 楼（算包围盒要占地和 id） */
     private readonly _placed = new Map<number, PlacedBuilding>();
@@ -517,24 +517,8 @@ export class BuildingLayer extends Component {
         return Math.abs(dx) <= 16 && Math.abs(dy) <= 16;
     }
 
-    /** 会动的东西（行人、车）挂进同一个父节点，才能和建筑互相遮挡 */
-    addActor(node: Node, depth: number): void {
-        this._objRoot!.addChild(node);
-        this._depth.set(node, depth);
-    }
-
-    setActorDepth(node: Node, depth: number): void {
-        this._depth.set(node, depth);
-    }
-
-    removeActor(node: Node): void {
-        this._depth.delete(node);
-        node.removeFromParent();
-        node.destroy();
-    }
-
-    /** 按排序键重排所有子节点；只动顺序变了的，每帧调也不贵 */
-    sortAll(): void {
+    /** 按排序键重排建筑的 2D 标记。 */
+    private sortAll(): void {
         const root = this._objRoot;
         if (!root) return;
         const kids = root.children.slice();

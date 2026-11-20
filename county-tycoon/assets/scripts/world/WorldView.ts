@@ -224,6 +224,7 @@ export class WorldView extends Component {
             const w3 = World3D.create(iso, model, bg);
             this._3d = w3;
             w3.groundFrame = (c, r) => map.modelFrame(c, r);
+            w3.streetOverlays = () => map.roadOverlays();
             this._buildings!.heightOf = (id) => w3.heightOf(id);
             // 工地、塔吊、放置预览也是 3D 模型（T540e）
             this._buildings!.site3D = (uid, site) => w3.setSite(uid, site);

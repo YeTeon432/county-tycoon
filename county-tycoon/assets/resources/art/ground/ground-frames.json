@@ -71,6 +71,9 @@
   "pond": 65,
   "dirt-tile": 66,
   "flagstone": 67,
-  "flower-bed": 68
+  "flower-bed": 68,
+  "entrance-earth": 69,
+  "entrance-paving": 70,
+  "asphalt-apron": 71
  }
 }

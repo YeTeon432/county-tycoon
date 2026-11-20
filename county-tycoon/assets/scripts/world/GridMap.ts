@@ -1,9 +1,26 @@
 import { _decorator, Component, Layers, Node, UITransform, SpriteFrame } from 'cc';
 import { ArtLibrary, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
-import { bridgeName, grassName, neighborMask, roadName, terrainName } from '../core/GroundFrames';
-import { TownModel } from '../core/TownModel';
+import { bridgeName, grassName, neighborMask, RoadKind, roadName, terrainName } from '../core/GroundFrames';
+import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 
 const { ccclass } = _decorator;
+
+export interface GroundQuad {
+    frame: SpriteFrame;
+    c: number; r: number;
+    width: number; length: number;
+    turn: number;
+}
+
+// 叠层贴图的正向是 +row，转角和建筑门面一致。
+const ROAD_EDGES = [
+    { facing: 'L', dc: 0, dr: 1, turn: 0 },
+    { facing: 'R', dc: 1, dr: 0, turn: 1 },
+    { facing: 'UR', dc: 0, dr: -1, turn: 2 },
+    { facing: 'UL', dc: -1, dr: 0, turn: 3 },
+] as const;
+// 开局这几种模型的门偏离院子中线，按模型正面的坐标修正。
+const DOOR_OFFSET: Partial<Record<string, number>> = { hut: -0.195, breakfast: 0.24, workshop: -0.16 };
 
 /**
  * 地面每格用哪一帧（D014 / T322）：道路（土路 / 城市道路）、装饰地块、地形（河、桥、山、矿、树林……）、草地。
@@ -40,6 +57,55 @@ export class GridMap extends Component {
         return this.frameFor(col, row);
     }
 
+    /** 混铺接头和沿街门前的小径，在实际建好的地块上生成。 */
+    *roadOverlays(): Iterable<GroundQuad> {
+        const model = this._model;
+        const art = this._art;
+        if (!model || !art) return;
+        const apron = art.groundByName('asphalt-apron');
+        const earth = art.groundByName('entrance-earth');
+        const paving = art.groundByName('entrance-paving');
+        for (const b of model.allBuildings()) {
+            if (b.def.road === 'dirt' && apron) {
+                for (const { dc, dr, turn } of ROAD_EDGES) {
+                    if (this.roadKind(b.col + dc, b.row + dr) === 'city') {
+                        yield { frame: apron, c: b.col + 0.5, r: b.row + 0.5, width: 1, length: 1, turn };
+                    }
+                }
+            }
+            if (b.def.flat || b.def.id === 'tree' || b.def.id === 'farm' || b.def.terrain || !b.facing) continue;
+            const frame = b.def.id === 'hut' ? earth : paving;
+            const entrance = frame && this.entranceOverlay(b, b.facing, frame);
+            if (entrance) yield entrance;
+        }
+    }
+
+    private entranceOverlay(b: PlacedBuilding, facing: Facing, frame: SpriteFrame): GroundQuad | null {
+        const edge = ROAD_EDGES.find((side) => side.facing === facing);
+        if (!edge) return null;
+        const { dc, dr, turn } = edge;
+        const start = dc ? b.row : b.col;
+        const span = dc ? b.def.height : b.def.width;
+        const boundary = dc ? b.col + (dc > 0 ? b.def.width : 0)
+            : b.row + (dr > 0 ? b.def.height : 0);
+        const street = boundary - (dc + dr < 0 ? 1 : 0);
+        const isDirt = (along: number) => (dc ? this.roadKind(street, along) : this.roadKind(along, street)) === 'dirt';
+        const door = start + span / 2 + (DOOR_OFFSET[b.def.id] ?? 0) * (dr || -dc);
+        const width = span === 1 ? 0.43 : 0.72;
+        let along = Infinity;
+        for (let i = start; i < start + span; i++) {
+            if (!isDirt(i)) continue;
+            const min = i + (isDirt(i - 1) ? 0 : width / 2);
+            const max = i + 1 - (isDirt(i + 1) ? 0 : width / 2);
+            const candidate = Math.max(min, Math.min(max, door));
+            if (Math.abs(candidate - door) < Math.abs(along - door)) along = candidate;
+        }
+        if (!Number.isFinite(along)) return null;
+        // 跨过地块边一小截，碰到土坯房向内缩的院子底座。
+        const across = boundary + 0.22 * (dc + dr);
+        return { frame, c: dc ? across : along, r: dc ? along : across, width, length: 0.56, turn: (turn + 2) % 4 };
+    }
+
     private get _terrain() {
         return this._model ? this._model.terrain : null;
     }
@@ -51,11 +117,8 @@ export class GridMap extends Component {
         // 道路优先：道路是玩家放的建筑，盖在地形上面
         const kind = this.roadKind(col, row);
         if (kind) {
-            const name = roadName(kind, this.viewMask((c, r) => this.isRoad(c, r), col, row));
-            if (art.hasGroundNames) {
-                return art.groundByName(name) ?? art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
-            }
-            return art.ground(GROUND_ROAD_BASE[kind] + this.roadMask(col, row));
+            const mask = neighborMask((c, r) => this.roadKind(c, r) !== null, col, row);
+            return art.groundByName(roadName(kind, mask)) ?? art.ground(GROUND_ROAD_BASE[kind] + mask);
         }
 
         // 装饰地块：flat 且有 decoFrame 名字（T218）
@@ -122,10 +185,6 @@ export class GridMap extends Component {
         return type === 'river' || type === 'bridge';
     }
 
-    private roadMask(col: number, row: number): number {
-        return this.viewMask((c, r) => this.isRoad(c, r), col, row);
-    }
-
     /** 四邻 mask 按模型坐标数（3D 地面不跟视角换图，转视角由相机做） */
     private viewMask(test: (c: number, r: number) => boolean, col: number, row: number): number {
         return neighborMask(test, col, row);
@@ -148,13 +207,7 @@ export class GridMap extends Component {
         return Number(grassName(col, row, GROUND_GRASS_FRAMES).split('-')[1]);
     }
 
-    private roadKind(col: number, row: number): 'city' | 'dirt' | null {
-        const b = this._model ? this._model.getAt(col, row) : null;
-        if (!b || !b.def.flat) return null;
-        return b.def.road ?? 'city';
-    }
-
-    private isRoad(col: number, row: number): boolean {
-        return this.roadKind(col, row) !== null;
+    private roadKind(col: number, row: number): RoadKind | null {
+        return this._model?.getAt(col, row)?.def.road ?? null;
     }
 }

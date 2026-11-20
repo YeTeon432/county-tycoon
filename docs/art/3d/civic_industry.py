@@ -551,6 +551,81 @@ def center():
     prism(1.36, 0.24, Z0 + 0.37, 0.50, 0.16, 0.055, roof)
 
 
+@sprite('center-town', 2, 2)
+def center_town():
+    """镇上两层服务楼：一层沿街办事大厅，楼上成排办公室，红砖翼墙接青瓦雨棚。"""
+    lot(2, 2)
+    wall, brick, trim = '#f1dfbb', '#b46850', '#f8eed7'
+    box(0.06, 0.06, Z0, 1.88, 1.84, 0.03, '#d6c6a8')
+    floor = Z0 + 0.08
+    box(0.12, 0.66, Z0, 1.76, 1.17, 0.08, 'curb')
+    box(0.16, 0.77, floor, 1.68, 1.02, 0.95, wall, bevel=0.009)
+    for x in (0.16, 1.63):
+        box(x, 0.74, floor, 0.21, 1.06, 1.02, brick)
+    box(0.13, 0.73, floor + 0.46, 1.74, 1.08, 0.048, trim)
+    box(0.10, 0.69, floor + 0.97, 1.80, 1.15, 0.06, '#496568')
+    parapet(0.13, 0.72, floor + 1.03, 1.74, 1.09, h=0.055, m=trim)
+    for x in (0.41, 0.73, 1.05, 1.37):
+        window_front(x, floor + 0.59, 0.22, 0.27, 0.77)
+    for y in (0.88, 1.30):
+        for z in (0.14, 0.61):
+            window_side(y, floor + z, 0.31, 0.24, 1.84)
+    for x in (0.40, 1.32):
+        window_front(x, floor + 0.11, 0.27, 0.23, 0.77)
+    box(0.78, 0.75, floor, 0.44, 0.04, 0.36, 'glass_dark')
+    for x in (0.69, 1.27):
+        box(x, 0.48, floor, 0.05, 0.05, 0.37, brick)
+    box(0.59, 0.44, floor + 0.37, 0.82, 0.36, 0.09, '#496568')
+    text('发展中心', 1.0, 0.429, floor + 0.414, 0.087, 'sign_yellow', 'front')
+    for y, h in ((0.32, 0.045), (0.41, 0.075)):
+        box(0.65, y, Z0, 0.70, 0.10, h, 'curb')
+    for x in (0.32, 1.68):
+        box(x - 0.17, 0.18, Z0 + 0.03, 0.34, 0.30, 0.07, brick)
+        tree(x, 0.33, 0.65, Z0 + 0.10)
+
+
+@sprite('center-county', 2, 2)
+def center_county():
+    """发展中心：白框 + 玻璃幕墙的现代公共建筑（中间 5 层、两翼 3 层），门前广场 + 旗杆。"""
+    lot(2, 2)
+    box(0, 0, Z0, 2, 0.95, 0.004, M('#e6e0d2'))
+    wall = M('#fbfbf8'); glass = M('#6db4ea', rough=0.05, metal=0.3)
+    by = 0.98
+    # 两翼
+    for wx in (0.14, 1.36):
+        box(wx, by + 0.1, Z0, 0.5, 0.78, 3 * FH, wall, bevel=0.005)
+        curtain_front(wx + 0.05, Z0 + 0.06, 0.4, 3 * FH - 0.12, by + 0.1, 3, 3, glass=glass)
+        parapet(wx, by + 0.1, Z0 + 3 * FH, 0.5, 0.78, h=0.04, m=wall)
+    curtain_side(by + 0.18, Z0 + 0.06, 0.62, 3 * FH - 0.12, 1.86, 4, 3, glass=glass)
+    # 中楼
+    cx0, csx, ch = 0.64, 0.72, 5 * FH
+    box(cx0, by, Z0, csx, 0.86, ch, wall, bevel=0.005)
+    curtain_front(cx0 + 0.06, Z0 + 0.34, csx - 0.12, ch - 0.42, by, 4, 4, glass=glass)
+    curtain_side(by + 0.06, Z0 + 3 * FH + 0.05, 0.74, 2 * FH - 0.12, cx0 + csx, 4, 2, glass=glass)
+    box(cx0 - 0.04, by - 0.04, Z0 + ch, csx + 0.08, 0.94, 0.05, wall)                   # 挑檐
+    box(cx0 + 0.12, by + 0.3, Z0 + ch + 0.05, csx - 0.24, 0.4, 0.12, M('#d5dbe2'))       # 屋顶设备间
+    # 入口门厅 + 大雨棚 + 招牌
+    box(cx0 + 0.16, by - 0.012, Z0, csx - 0.32, 0.014, 0.26, 'glass_dark')
+    box(cx0 - 0.02, by - 0.28, Z0 + 0.28, csx + 0.04, 0.28, 0.1, wall)
+    for px in (cx0 + 0.02, cx0 + csx - 0.05):
+        box(px, by - 0.26, Z0, 0.03, 0.03, 0.28, wall)
+    text('发展中心', cx0 + csx / 2, by - 0.284, Z0 + 0.33, 0.09, M('#c8372d'), 'front')
+    # 台阶
+    for k in range(3):
+        box(cx0 + 0.02 - k * 0.04, by - 0.3 - k * 0.05, Z0, csx - 0.04 + k * 0.08, 0.06, 0.03 - k * 0.01, 'curb')
+    # 广场：旗杆 + 花坛 + 树
+    flagpole(1.0, 0.36, Z0, 1.3)
+    cyl(1.0, 0.36, Z0, 0.14, 0.04, 'curb', 24)
+    for (fx, fy) in [(0.3, 0.4), (1.7, 0.4)]:
+        box(fx - 0.18, fy - 0.12, Z0, 0.36, 0.24, 0.06, 'curb')
+        box(fx - 0.16, fy - 0.1, Z0 + 0.06, 0.32, 0.2, 0.005, 'grass')
+        for k in range(3):
+            bush(fx - 0.1 + k * 0.1, fy, 0.05, Z0 + 0.06, ['red', 'yellow', 'pink'][k])
+    tree(0.12, 0.85, 0.8, Z0); tree(1.88, 0.85, 0.8, Z0)
+    for lx in (0.6, 1.4):
+        lamp(lx, 0.12, Z0, 0.55)
+
+
 @sprite('school', 2, 2)
 def school():
     """学校：米黄墙红坡顶三层教学楼 + 中间楼梯塔，前面红色跑道操场，旗杆。"""

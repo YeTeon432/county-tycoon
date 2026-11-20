@@ -190,9 +190,22 @@ export class World3D extends Component {
         });
     }
 
+    private _centerArtId = 'center';
+
+    setCenterArtId(id: string): boolean {
+        if (this._centerArtId === id) return false;
+        this._centerArtId = id;
+        if (this.ready) this.syncBuildings();
+        return true;
+    }
+
+    private modelId(id: string): string {
+        return id === 'center' ? this._centerArtId : id;
+    }
+
     /** 有没有这栋楼的 3D 模型 */
     has(defId: string): boolean {
-        return this._prefabs.has(defId);
+        return this._prefabs.has(this.modelId(defId));
     }
 
     private readonly _heights = new Map<string, number>();
@@ -201,6 +214,7 @@ export class World3D extends Component {
      * 取 glb 网格包围盒的最高点；模型还没加载到返回 0（调用方自己估一个）。
      */
     heightOf(id: string): number {
+        id = this.modelId(id);
         const hit = this._heights.get(id);
         if (hit !== undefined) return hit;
         const pf = this._prefabs.get(id);
@@ -520,14 +534,15 @@ export class World3D extends Component {
             this._minePreview = mine;
             this.updateOutcrops();
         }
-        if (!p || !this._mats || !this._prefabs.has(p.id)) {
+        const id = p ? this.modelId(p.id) : null;
+        if (!p || !id || !this._mats || !this._prefabs.has(id)) {
             if (cur) { cur.node.destroy(); this._preview = null; }
             return;
         }
-        const key = `${p.id}|${p.col},${p.row}|${p.facing ?? ''}`;
+        const key = `${id}|${p.col},${p.row}|${p.facing ?? ''}`;
         if (cur && cur.key === key && cur.ok === p.ok) return;
         if (cur) cur.node.destroy();
-        const node = this.place(p.id, p.col, p.row, p.w, p.h, World3D.TURN[p.facing ?? 'L'] ?? 0);
+        const node = this.place(id, p.col, p.row, p.w, p.h, World3D.TURN[p.facing ?? 'L'] ?? 0);
         if (!node) { this._preview = null; return; }
         node.name = 'Preview';
         let mats = this._previewMats.get(p.ok);
@@ -585,13 +600,14 @@ export class World3D extends Component {
     private syncBuildings(): void {
         const alive = new Set<number>();
         for (const b of this._model.allBuildings()) {
-            if (b.def.flat || !this._prefabs.has(b.def.id)) continue;
+            const id = this.modelId(b.def.id);
+            if (b.def.flat || !this._prefabs.has(id)) continue;
             alive.add(b.uid);
-            const key = `${b.def.id}|${b.col},${b.row}|${b.facing ?? ''}`;
+            const key = `${id}|${b.col},${b.row}|${b.facing ?? ''}`;
             const cur = this._nodes.get(b.uid);
             if (cur && cur.key === key) continue;
             if (cur) cur.node.destroy();
-            const node = this.place(b.def.id, b.col, b.row, b.def.width, b.def.height, World3D.TURN[b.facing ?? 'L']);
+            const node = this.place(id, b.col, b.row, b.def.width, b.def.height, World3D.TURN[b.facing ?? 'L']);
             if (!node) continue;
             node.active = !this._hidden.has(b.uid);
             this._nodes.set(b.uid, { node, key });

@@ -1,7 +1,7 @@
 import { DayClock } from './DayClock';
 import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx, screen, view as gameView, ResolutionPolicy } from 'cc';
 import { Spike3D } from '../spike/Spike3D';
-import { BuildingDef, loadBuildingConfig } from '../core/BuildingConfig';
+import { BuildingDef, centerArtId, loadBuildingConfig } from '../core/BuildingConfig';
 import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
@@ -154,11 +154,13 @@ export class GameRoot extends Component {
         this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
         this._saver.startAutoSave();
         sim.onMonth = () => {
+            this.syncCenterAppearance();
             this.save();
             if (this._branchSource !== undefined) this.updatePlacementHint();
         };
 
         this.buildWorld(world, model);
+        this.syncCenterAppearance();
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
         this._defs = buildings;
         this.buildBar(buildings);
@@ -205,6 +207,10 @@ export class GameRoot extends Component {
             DayClock.speed = () => (ui.clock ? ui.clock.speed : 1);
             // 第三、四批（D026）：环境图层、特色街道小旗、招商选址
             if (sim) {
+                ui.onTownUpgraded = () => {
+                    this.syncCenterAppearance();
+                    this.save();
+                };
                 ui.onResidentChanged = () => this.save();
                 view.envAt = sim.envAt ? (c, r) => sim.envAt!(c, r) : null;
                 view.envOfDef = sim.buildingEnv ? (id) => sim.buildingEnv!(id) : null;
@@ -336,6 +342,11 @@ export class GameRoot extends Component {
         if (!reach.roads.length) return `这里不挨路，居民走不过来；挨着路盖才有覆盖范围`;
         const more = reach.byVehicle ? '；有车的居民走得更远' : '';
         return `沿路 ${reach.radius} 格内（蓝色）能服务 ${reach.homes.length} 栋住宅（黄框）${more}`;
+    }
+
+    private syncCenterAppearance(): void {
+        const view = this._view;
+        if (this._sim && view?.setCenterArtId(centerArtId(this._sim.state.level))) this._bar?.setArt(view.art);
     }
 
     /** 住户翻盖完（模拟层把 defId 换了），地图上也换成新楼（D026） */

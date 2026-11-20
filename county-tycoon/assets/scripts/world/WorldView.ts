@@ -270,6 +270,13 @@ export class WorldView extends Component {
         return this._config ? this._config.zoomLevels : [];
     }
 
+    setCenterArtId(id: string): boolean {
+        if (!this._3d?.setCenterArtId(id)) return false;
+        this._buildings?.refresh3D();
+        if (this._pending?.def.id === 'center') this.setPending(this._pending);
+        return true;
+    }
+
     /** 建筑或马路有变化：地面（马路拼接）和建筑层都要重画 */
     redrawTown(): void {
         if (this._buildings) this._buildings.redraw();

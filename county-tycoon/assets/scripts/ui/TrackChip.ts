@@ -1,14 +1,14 @@
 import { _decorator, Color, Component, EventTouch, Label, Layers, Node, UITransform, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { BuildingBar } from './BuildingBar';
-import { drawGraphicsOnEnable, drawShadow, makeIcon, makeLabel, makeLabelLeft, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawHudTile, makeIcon, makeLabel, makeLabelLeft, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
 const C_PERSON = new Color(242, 140, 40, 255);
 
 /**
- * 追踪条（T425）：底栏上面居中一条白色胶囊。
+ * 追踪条（T425）：底栏上方居中。
  *   [橙圆·姓]  张三 · 在超市上班        [家] [×]
  * 点左边（人）→ 镜头移到他；点「家」→ 镜头移到他家；点 × → 结束追踪。
  * 子节点不各自接点击（Cocos 的点击会往父节点冒泡，点 × 也会触发「移到他」），整条一个回调按 x 分区。
@@ -36,10 +36,7 @@ export class TrackChip extends Component {
 
         const bx = -W / 2 + 8 + 24;
         drawGraphicsOnEnable(node, (g) => {
-            drawShadow(g, -W / 2, -H / 2, W, H, H / 2, 2);
-            g.fillColor = UI_COLOR.panel;
-            g.roundRect(-W / 2, -H / 2, W, H, H / 2);
-            g.fill();
+            drawHudTile(g, -W / 2, -H / 2, W, H, 14, UI_HUD.base, UI_HUD.rim);
             // 左边是姓氏，右边是回家和关闭按钮。
             g.fillColor = C_PERSON;
             g.circle(bx, 0, 24);
@@ -47,7 +44,7 @@ export class TrackChip extends Component {
             g.fillColor = UI_PALETTE.blue;
             g.circle(W / 2 - 8 - 22 - 52, 0, 22);
             g.fill();
-            g.fillColor = UI_COLOR.block;
+            g.fillColor = UI_HUD.recess;
             g.circle(W / 2 - 8 - 22, 0, 22);
             g.fill();
         });
@@ -55,10 +52,10 @@ export class TrackChip extends Component {
         chip._badge = makeLabel(node, 'Badge', '', UI_FONT.body, UI_PALETTE.white);
         chip._badge.isBold = true;
         chip._badge.node.setPosition(bx, 0, 0);
-        chip._text = makeLabelLeft(node, 'Text', '', UI_FONT.small, UI_COLOR.text, W - 8 - 48 - 12 - 120);
+        chip._text = makeLabelLeft(node, 'Text', '', UI_FONT.small, UI_HUD.text, W - 8 - 48 - 12 - 120);
         chip._text.node.setPosition(bx + 24 + 12, 0, 0);
         makeIcon(node, 'home', 26, UI_PALETTE.white).node.setPosition(W / 2 - 8 - 22 - 52, 0, 0);
-        makeIcon(node, 'close', 22, UI_COLOR.textDim).node.setPosition(W / 2 - 8 - 22, 0, 0);
+        makeIcon(node, 'close', 22, UI_HUD.text).node.setPosition(W / 2 - 8 - 22, 0, 0);
 
         node.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
             const p = node.getComponent(UITransform)!.convertToNodeSpaceAR(e.getUILocation().toVec3());
@@ -71,14 +68,15 @@ export class TrackChip extends Component {
     }
 
     /** 底栏上面、居中 */
-    layout(): void {
+    layout(showToolHint = false): void {
         const vis = view.getVisibleSize();
-        this.node.setPosition(0, -vis.height / 2 + BuildingBar.BAR_HEIGHT + 24 + TrackChip.H / 2, 0);
+        const toolReserve = showToolHint ? BuildingBar.HINT_RESERVE : 0;
+        this.node.setPosition(0, -vis.height / 2 + BuildingBar.BAR_HEIGHT + toolReserve + 24 + TrackChip.H / 2, 0);
     }
 
     /** 地图可见区域底边要让多少（追踪箭头别躲到这条后面） */
     static get bottomReserve(): number {
-        return BuildingBar.BAR_HEIGHT + 24 + TrackChip.H + 16;
+        return BuildingBar.BAR_HEIGHT + BuildingBar.HINT_RESERVE + 24 + TrackChip.H + 16;
     }
 
     show(name: string): void {

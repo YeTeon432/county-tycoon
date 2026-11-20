@@ -53,8 +53,6 @@ export class UiRoot extends Component {
     requestToggleFacing: ((uid: number) => boolean) | null = null;
     /** 招商供地：让玩家去地图上选址（GameRoot 接到底栏 + WorldView） */
     requestPlace: ((defId: string) => boolean) | null = null;
-    /** 环境视图开关（GameRoot 接到 WorldView），返回开着没 */
-    toggleEnvView: (() => boolean) | null = null;
     getGridPreference: (() => boolean) | null = null;
     setGridPreference: ((on: boolean) => void) | null = null;
     /** 居民追踪（T425，GameRoot 接到 WorldView）：开始 / 结束（null） */
@@ -68,6 +66,7 @@ export class UiRoot extends Component {
     private _trackT = 0;
     /** 当前的放置/拆除提示（GameRoot 和建筑栏会调 setPlacementHint） */
     private _hint = '';
+    private _goalsReady = false;
 
     private _topBar: TopBar | null = null;
     private _clock: TimeController | null = null;
@@ -127,7 +126,7 @@ export class UiRoot extends Component {
         this.buildPanelLayer();
         // 公告栏 + 大公示（D026）：压在面板上面、开场卡片下面
         this._notices = NoticeLayer.create(this.node, this.sim);
-        this._notices.onGoalsTap = () => this.openCenter('goals');
+        this.refreshCenterStatus();
         this.buildIntroLayer();
 
         // 建造栏是 GameRoot 建的，在 UiRoot 之前：直接找到它，接上模拟层和贴图
@@ -150,6 +149,7 @@ export class UiRoot extends Component {
         this._bar = bar;
         if (this.sim) bar.bindSim(this.sim);
         bar.onNotice = (text) => this.setPlacementHint(text);
+        bar.setHint(this._hint);
     }
 
     /** 给建造栏缩略图用的贴图仓库（WorldView 那一份）。集成在 WorldView 加 `get art()` 后调这个最干净 */
@@ -222,24 +222,22 @@ export class UiRoot extends Component {
         return this.model ? this.model.allBuildings().filter((b) => !b.def.flat).length : 0;
     }
 
-    /**
-     * 盖好一栋楼（集成可以在 WorldView.onBuilt 成功后调；不调也行，update 里会数楼）。
-     * 第一次盖非道路的楼 → 收起开局箭头。
-     */
-    /**
-     * 县发展中心按钮的红点：发展目标全完成可以升级，或者有签了约还没交地的招商（D032）。
-     * 月底、盖楼、招商面板改动后都调。
-     */
-    refreshCenterDot(): void {
+    private refreshCenterStatus(): void {
         const sim = this.sim, bar = this._topBar;
         if (!sim || !bar) return;
-        const g = sim.goals ? sim.goals() : [];
-        const ready = g.length > 0 && g.every((x) => x.done);
-        bar.setCenterReady(ready || !!sim.state.pendingDeal);
+        const goals = sim.goals?.() ?? [];
+        const done = goals.filter((goal) => goal.done).length;
+        const ready = goals.length > 0 && done === goals.length;
+        bar.setGoals(done, goals.length, !!sim.state.pendingDeal);
+        if (ready && !this._goalsReady) {
+            this._notices?.say('info', '发展目标全部完成，可在县发展中心申请升级');
+        }
+        this._goalsReady = ready;
     }
 
+    /** 首次盖好非道路建筑时收起开局箭头。 */
     notifyBuilt(): void {
-        this.refreshCenterDot();
+        this.refreshCenterStatus();
         if (this._topBar) this._topBar.refresh();
         if (!this._waitFirstBuild) return;
         if (this.countBuildings() > this._baseBuildings) {
@@ -254,13 +252,12 @@ export class UiRoot extends Component {
         this._tick += dt;
         if (this._tick < 0.5) return;
         this._tick = 0;
-        if (this._topBar) this._topBar.refresh();
-        if (this._waitFirstBuild) this.notifyBuilt();
-        if (this._notices && this.sim && this.sim.goals) {
-            const g = this.sim.goals();
-            this._notices.setGoals(g.filter((x) => x.done).length, g.length);
+        if (this._waitFirstBuild) {
+            this.notifyBuilt();
+        } else {
+            this._topBar?.refresh();
+            this.refreshCenterStatus();
         }
-        this.refreshCenterDot();
         if (this._bar && !this._bar.hasArt) this.findSiblings();
     }
 
@@ -385,13 +382,12 @@ export class UiRoot extends Component {
     }
 
     /**
-     * 顶栏第二行左侧的提示文字（原来在旧 HUD 里）：
-     * 「选建筑点地块放置」/「放置：火锅店」/「拆除模式：点建筑移除」。
-     * GameRoot 在选建筑、进拆除、放下建筑之后调它。
+     * 建造工具台上方的操作提示，空闲时收起。
      */
     setPlacementHint(text: string): void {
         this._hint = text;
-        if (this._topBar) this._topBar.setHint(text);
+        this._bar?.setHint(text);
+        this._trackChip?.layout(!!text);
     }
 
     /** 公告栏发一条（GameRoot 用：存档失败等） */
@@ -453,6 +449,10 @@ export class UiRoot extends Component {
     /** 地图可见区域上下各让多少（追踪箭头贴边时别躲到顶栏 / 底栏后面） */
     get mapInsets(): { top: number; bottom: number } {
         return { top: TopBar.HEIGHT + 90, bottom: TrackChip.bottomReserve };
+    }
+
+    get trackingResident(): boolean {
+        return this._trackId !== null;
     }
 
     /** 档案里点了「追踪」：关掉所有面板，地图上标出这个人和他家 */
@@ -519,7 +519,7 @@ export class UiRoot extends Component {
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
         p.onHint = (t) => { if (this._notices) this._notices.say('info', t); };
-        p.onChanged = () => { if (this._topBar) this._topBar.refresh(); this.refreshCenterDot(); };
+        p.onChanged = () => { if (this._topBar) this._topBar.refresh(); this.refreshCenterStatus(); };
         p.onUpgraded = (lv) => this.onLevelUp(lv);
         if (this._bar) { const defs = this._bar.defs; p.nameOf = (id) => defs.find((d) => d.id === id)?.name ?? id; p.fill(); }
         p.onPlace = (defId) => {

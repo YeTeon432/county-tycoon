@@ -6,11 +6,7 @@ import { ArtLibrary } from '../core/ArtLibrary';
 /**
  * 经营界面的统一外观（支线 B）。
  *
- * D022 / DESIGN 8.2 起是明亮风：白色圆角卡片 + 柔和投影，正文深灰，四个主色。
- * 颜色、字号、画按钮的函数集中在这里，改一处就是全局，别的面板（含集成的 world/PlaceControls）都从这拿。
- *
- * 老的导出（UI_COLOR 的键名、UI_FONT、makeLabel、drawPanel、makePill……）签名都没变，
- * 只是值换成了新配色，旧代码不用改就能变亮。
+ * 地图上的控制台用深绿和暖黄，展开的详情面板用浅色纸面。
  */
 
 const hex = (s: string, a = 255): Color => {
@@ -18,42 +14,55 @@ const hex = (s: string, a = 255): Color => {
     return new Color((v >> 16) & 255, (v >> 8) & 255, v & 255, a);
 };
 
-/** DESIGN 8.2 的四个主色 + 文字色 */
 export const UI_PALETTE = {
     /** 草绿：确定、正向数值 */
-    green: hex('#4cae4c'),
-    /** 天蓝：信息、选中 */
-    blue: hex('#3a86d6'),
+    green: hex('#397451'),
+    /** 青蓝：信息、选中 */
+    blue: hex('#286b81'),
     /** 暖黄：资金、强调（填充用；白底上写字用 UI_COLOR.gold，更深一点才看得清） */
-    yellow: hex('#f6c938'),
+    yellow: hex('#f4cb68'),
     /** 珊瑚红：警告、负数、拆除 */
-    coral: hex('#e8574a'),
+    coral: hex('#b74331'),
     /** 正文 */
-    ink: hex('#33363d'),
+    ink: hex('#27352e'),
     /** 次要文字 */
-    sub: hex('#8a8f99'),
+    sub: hex('#596861'),
     white: hex('#ffffff'),
 };
 
+export const UI_HUD = {
+    rim: hex('#142e29'),
+    base: hex('#22443a'),
+    recess: hex('#19362f'),
+    key: hex('#32594d'),
+    text: hex('#fff6dd'),
+    dim: hex('#c2d9cb'),
+    mint: hex('#a9e09d'),
+    danger: hex('#ff9c83'),
+    goldRim: hex('#bb8a39'),
+    paper: hex('#f0e5cc'),
+    well: hex('#fff8e9'),
+};
+
 export const UI_COLOR = {
-    /** 面板 / 卡片底色：白 */
-    panel: hex('#ffffff'),
-    /** 卡片里的次级块（数值格、输入区）：很浅的灰蓝 */
-    block: hex('#f4f6f9'),
+    /** 面板 / 卡片底色 */
+    panel: hex('#fffaee'),
+    /** 卡片里的次级块（数值格、输入区） */
+    block: hex('#f4eddd'),
     /** 按钮常态（浅灰底，配深灰字） */
-    button: hex('#f0f2f5'),
+    button: hex('#ede4d2'),
     /** 按钮选中（天蓝底，配白字） */
-    buttonActive: hex('#3a86d6'),
+    buttonActive: UI_PALETTE.blue,
     /** 卡片描边 */
-    border: hex('#e3e6eb'),
+    border: hex('#d6c8ab'),
     /** 分隔线 */
-    borderDim: hex('#eef0f3'),
+    borderDim: hex('#e7dcc5'),
     /** 正文 */
     text: UI_PALETTE.ink,
     /** 次要文字：单位、说明 */
     textDim: UI_PALETTE.sub,
-    /** 白底上的金额 / 强调字（暖黄写字太浅，压深一档） */
-    gold: hex('#d39a00'),
+    /** 浅底上的金额 / 强调字 */
+    gold: hex('#8b5a17'),
     /** 上涨 / 正数 */
     up: UI_PALETTE.green,
     /** 下跌 / 负数 / 警告 */
@@ -88,6 +97,18 @@ export const UI_FONT = {
 export const UI_RADIUS = 16;
 /** 抽屉顶部的圆角，比卡片大一点，像一张从下面推上来的纸 */
 export const UI_SHEET_RADIUS = 28;
+
+/** 控制台和工具键的边缘与台面。保留 Graphics，供成组的按键共用。 */
+export function drawHudTile(
+    g: Graphics, x: number, y: number, w: number, h: number, radius: number, fill: Color, edge: Color,
+): void {
+    g.fillColor = edge;
+    g.roundRect(x, y - 4, w, h + 4, radius);
+    g.fill();
+    g.fillColor = fill;
+    g.roundRect(x + 2, y + 2, w - 4, h - 4, radius - 2);
+    g.fill();
+}
 
 /**
  * 造一个居中的文字节点（Label 只能挂在有 UITransform 的节点上）。

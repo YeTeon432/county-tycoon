@@ -6,8 +6,6 @@ import { TownModel } from '../core/TownModel';
 import { WorldConfig, loadWorldConfig } from '../core/WorldConfig';
 import { BuildingBar } from '../ui/BuildingBar';
 import { ZoomButtons } from '../ui/ZoomButtons';
-import { InputGuard } from './InputGuard';
-import { makeButton, makeRoundButton } from '../ui/UiTheme';
 import { UiRoot } from '../ui/UiRoot';
 import { SimApi } from '../core/sim/SimApi';
 import { createSimulation, loadSimJson } from '../core/SimLoader';
@@ -17,6 +15,7 @@ import { WorldView } from '../world/WorldView';
 import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
 import { PlaceControls } from '../world/PlaceControls';
 import { TopBar } from '../ui/TopBar';
+import { TrackChip } from '../ui/TrackChip';
 import { getPlatform } from '../platform/Platform';
 
 const { ccclass } = _decorator;
@@ -206,7 +205,6 @@ export class GameRoot extends Component {
                     this.updatePlacementHint();
                     return ok;
                 };
-                ui.toggleEnvView = () => { view.envView = !view.envView; return view.envView; };
             }
             // 施工进度（D026）：工地半透明 + 进度条
             if (sim) {
@@ -235,7 +233,6 @@ export class GameRoot extends Component {
                     return m;
                 };
             }
-            // 放置 / 拆除的提示文字，原来在旧 HUD 里，现在归顶栏第二行
             // 点地块的回调比预览挪位置早一步：等这一帧预览挪好了再读（不然提示的是上一个位置）
             view.onCellTapped = () => this.scheduleOnce(() => this.updatePlacementHint(), 0);
             // 盖 / 拆之后也存一次：玩家盖完楼直接关页面不会丢
@@ -270,7 +267,7 @@ export class GameRoot extends Component {
                 ? `修路：${view.selectedBuilding.name}，点地块直接铺`
                 : this.homeHint(view.selectedBuilding.id) ?? `放置：${view.selectedBuilding.name}，点地块预览，按「确定」盖下`);
         } else {
-            ui.setPlacementHint('');   // 空闲：顶栏第二行显示就业率和均薪（T212）；操作说明交给开场卡片和小提示
+            ui.setPlacementHint('');
         }
     }
 
@@ -394,7 +391,9 @@ export class GameRoot extends Component {
         const n = new Node('PlaceControls');
         n.layer = Layers.Enum.UI_2D;
         this.node.addChild(n);
-        n.addComponent(PlaceControls).setup(view, TopBar.HEIGHT, BuildingBar.BAR_HEIGHT);
+        const toolInset = BuildingBar.BAR_HEIGHT + BuildingBar.HINT_RESERVE;
+        const trackInset = TrackChip.bottomReserve;
+        n.addComponent(PlaceControls).setup(view, TopBar.HEIGHT + 58, () => this._ui?.trackingResident ? trackInset : toolInset);
     }
 
     /** 底部建筑选择栏 */
@@ -416,47 +415,28 @@ export class GameRoot extends Component {
             this.updatePlacementHint();
         };
 
-        // 右侧缩放按钮
+        // 地图工具台
         const zoomNode = new Node('ZoomButtons');
         zoomNode.layer = Layers.Enum.UI_2D;
         this.node.addChild(zoomNode);
         const zoomBtns = zoomNode.addComponent(ZoomButtons);
+        zoomBtns.onStep = (delta) => this._view?.zoomStep(delta);
+        if (this._view?.canRotateView) zoomBtns.onRotate = () => this._view?.rotateView(1);
+        zoomBtns.onSettings = () => this._ui?.openSettings();
+        zoomBtns.onEnvironment = () => {
+            const v = this._view;
+            if (!v) return false;
+            v.envView = !v.envView;
+            if (v.envView) this._ui?.setPlacementHint('环境视图：绿 = 环境好，红 = 有污染。树和广场能改善环境');
+            else this.updatePlacementHint();
+            return v.envView;
+        };
         zoomBtns.build(BuildingBar.BAR_HEIGHT);
-        zoomBtns.onStep = (d) => { if (this._view) this._view.zoomStep(d); };
         const refreshZoom = () => {
             const v = this._view;
             if (v) zoomBtns.refresh(v.zoom, v.zoomIndex, v.zoomLevels.length);
         };
         refreshZoom();
-
-        if (this._view) {
-            this._view.onZoomChanged = () => refreshZoom();
-        }
-
-        // 缩放按钮上面：「环境」视图开关（D026，DESIGN 22）
-        const zp = zoomNode.position;
-        const envBtn = makeButton(this.node, 'EnvBtn', '环境', 96, 52, 'white', () => {
-            const v = this._view;
-            if (!v) return;
-            v.envView = !v.envView;
-            envBtn.setStyle(v.envView ? 'primary' : 'white');
-            if (v.envView && this._ui) this._ui.setPlacementHint('环境视图：绿 = 环境好，红 = 有污染（工厂、矿场）。树和广场能改善');
-            else this.updatePlacementHint();
-        });
-        envBtn.node.setPosition(zp.x - 0, zp.y + ZoomButtons.totalHeight() / 2 + 24 + 26, 0);
-        InputGuard.add(envBtn.node);
-
-        // 「环境」上方的视角按钮每次平滑转一档。
-        let controlsTop = envBtn.node.position.y + 26;
-        if (this._view && this._view.canRotateView) {
-            const rotBtn = makeRoundButton(this.node, 'RotateBtn', 'rotate', 64, () => { if (this._view) this._view.rotateView(1); });
-            rotBtn.node.setPosition(zp.x, controlsTop + 12 + 32, 0);
-            InputGuard.add(rotBtn.node);
-            controlsTop = rotBtn.node.position.y + 32;
-        }
-        const settingsBtn = makeButton(this.node, 'SettingsBtn', '设置', 96, 52, 'white', () => this._ui?.openSettings());
-        settingsBtn.node.setPosition(zp.x, controlsTop + 12 + 26, 0);
-        InputGuard.add(settingsBtn.node);
+        if (this._view) this._view.onZoomChanged = refreshZoom;
     }
-
 }

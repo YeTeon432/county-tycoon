@@ -1,4 +1,4 @@
-import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, Tween, tween, Vec2, Vec3 } from 'cc';
+import { _decorator, Component, Graphics, Layers, Node, UITransform, UIOpacity, Color, tween, Vec2, Vec3 } from 'cc';
 import { BuildingDef } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
@@ -17,7 +17,7 @@ export interface ReachDraw {
  * 建筑层（等距，D014；T540h 起只剩「看不见的那一半」）。
  *
  * 楼、山树、工地、塔吊、放置预览、贴地色块都由 World3D 画成 3D（D033）。这里每栋楼留一个**看不见的 2D 节点**：
- *   - 原点 = 占地菱形的最下顶点，锚点 (0.5, 0)，大小 = 3D 包围盒（占地 × 模型高度）投到屏幕上的外框；
+ *   - 原点 = 投影外框底边中点，锚点 (0.5, 0)，大小 = 3D 包围盒（占地 × 模型高度）投到屏幕上的外框；
  *   - 点楼按包围盒投影的六边形判定（T540h，取代 T424 的画面蒙版：转到任何角度都对）；
  *   - 楼顶气泡、小旗、施工进度条、完工尘土挂在它下面，按它的高度摆。
  * 3D 相机和 2D 坐标严格对齐（World3D.syncCamera），所以这些 2D 东西和 3D 楼在屏幕上对得上。
@@ -36,7 +36,7 @@ export class BuildingLayer extends Component {
     private readonly _depth = new Map<Node, number>();
     /** uid -> 楼（算包围盒要占地和 id） */
     private readonly _placed = new Map<number, PlacedBuilding>();
-    /** uid -> 包围盒投影的凸多边形（节点本地坐标，[x0, y0, x1, y1, ...] 逆时针） */
+    /** uid -> 点楼时缓存的投影凸包（节点本地坐标，[x0, y0, x1, y1, ...] 逆时针） */
     private readonly _hull = new Map<number, number[]>();
     /** uid -> 上次算包围盒时的 id + 位置（翻盖换了 id 要重算） */
     private readonly _key = new Map<number, string>();
@@ -108,7 +108,6 @@ export class BuildingLayer extends Component {
     }
 
     private syncNode(b: PlacedBuilding): void {
-        const iso = this._iso!;
         let node = this._nodes.get(b.uid);
         const old = this._placed.get(b.uid);
         if (!node) {
@@ -120,9 +119,6 @@ export class BuildingLayer extends Component {
         }
         this._key.set(b.uid, `${b.def.id}|${b.col},${b.row}`);
         this._placed.set(b.uid, b);
-        this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
-        const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
-        node.setPosition(p.x, p.y, 0);
         this.applyShape(b.uid);
     }
 
@@ -141,50 +137,43 @@ export class BuildingLayer extends Component {
         return h > 0 ? h : 0.6 + 0.3 * Math.max(b.def.width, b.def.height);
     }
 
-    /** 放置确认条的高度用：这种楼在屏幕上有多高（2D 单位，从占地最下顶点量） */
-    visualHeight(id: string, w: number, h: number): number {
-        const iso = this._iso;
-        const hh = iso ? iso.hh : 8;
-        const H = this.heightOf ? this.heightOf(id) : 0;
-        return (w + h) * hh + (H > 0 ? H : 1) * this.vk;
+    /** 放置确认条用：模型高度在画面上投出多少 2D 单位。 */
+    previewRoofHeight(id: string): number {
+        const h = this.heightOf?.(id) ?? 0;
+        return (h > 0 ? h : 1) * this.vk;
     }
 
     /**
-     * 按 3D 包围盒（占地 × 高度）算节点大小和点击用的六边形；位置、视角、施工阶段、模型加载变了都要重算。
-     * 楼顶气泡 / 小旗跟着挪。
+     * 用投影外框定位楼顶标记。详细的点击多边形等到点楼时再算。
      */
-    private applyShape(uid: number): void {
+    private applyShape(uid: number, live = false): void {
         const node = this._nodes.get(uid), b = this._placed.get(uid), iso = this._iso;
         if (!node || !b || !iso) return;
-        const V = this.height3D(uid) * this.vk;
-        const pts: [number, number][] = [];
-        const p = { x: 0, y: 0 };
-        const ox = node.position.x, oy = node.position.y;
-        for (const [c, r] of [[b.col, b.row], [b.col + b.def.width, b.row], [b.col + b.def.width, b.row + b.def.height], [b.col, b.row + b.def.height]]) {
-            iso.toLocal(c, r, p);
-            pts.push([p.x - ox, p.y - oy], [p.x - ox, p.y - oy + V]);
-        }
-        const hull = BuildingLayer.convexHull(pts);
-        this._hull.set(uid, hull);
-        let minX = 0, maxX = 0, maxY = 0;
-        for (let i = 0; i < hull.length; i += 2) {
-            minX = Math.min(minX, hull[i]); maxX = Math.max(maxX, hull[i]); maxY = Math.max(maxY, hull[i + 1]);
-        }
+        const box = iso.footprintBounds(b.col, b.row, b.def.width, b.def.height);
+        const h = box.top - box.bottom + this.height3D(uid) * this.vk;
+        node.setPosition(box.x, box.bottom, 0);
+        this._hull.delete(uid);
+        if (!live) this._depth.set(node, -(box.top + box.bottom) / 2);
         const ui = node.getComponent(UITransform)!;
-        const w = Math.max(-minX, maxX) * 2;
-        const h0 = ui.contentSize.height;
-        ui.setContentSize(w, maxY);
-        if (Math.abs(h0 - maxY) < 0.01) return;
-        // 气泡按新高度重建（心愿气泡的上下浮动是绝对坐标，挪不了，只能重来）
-        const alert = node.getChildByName('Alert');
-        if (alert) {
-            const kind = (alert as any)._kind as 'leave' | 'wish';
-            alert.removeFromParent();
-            alert.destroy();
-            this.setAlert(uid, kind);
+        ui.setContentSize(box.width, h);
+        node.getChildByName('Alert')?.setPosition(0, h + 12, 0);
+        node.getChildByName('Flag')?.setPosition(-box.width * 0.28, h - 4, 0);
+    }
+
+    private hitHull(uid: number, node: Node): number[] | undefined {
+        const cached = this._hull.get(uid);
+        if (cached) return cached;
+        const b = this._placed.get(uid), iso = this._iso;
+        if (!b || !iso) return;
+        const { x, y } = node.position;
+        const height = this.height3D(uid) * this.vk;
+        const points: [number, number][] = [];
+        for (const p of iso.footprint(b.col, b.row, b.def.width, b.def.height)) {
+            points.push([p.x - x, p.y - y], [p.x - x, p.y - y + height]);
         }
-        const flag = node.getChildByName('Flag');
-        if (flag) flag.setPosition(-w * 0.28, maxY - 4, 0);
+        const hull = BuildingLayer.convexHull(points);
+        this._hull.set(uid, hull);
+        return hull;
     }
 
     /** 凸包（Andrew 单调链），返回逆时针的 [x0, y0, x1, y1, ...] */
@@ -272,7 +261,7 @@ export class BuildingLayer extends Component {
 
     /**
      * 完工：楼从矮一点弹到原样（3D 楼由 World3D 弹）+ 脚下一圈尘土散开。
-     * 尘土以「占地菱形中心」为圆心（节点原点是最下顶点，直接画会飘到楼前的地上）。
+     * 尘土以占地中心为圆心。
      */
     private playTopOut(node: Node, info?: { n: number; w: number; h: number; col: number; row: number }): void {
         const iso = this._iso;
@@ -309,15 +298,15 @@ export class BuildingLayer extends Component {
     setAlert(uid: number, kind: 'leave' | 'wish' | null): void {
         const node = this._nodes.get(uid);
         if (!node) return;
-        let b = node.getChildByName('Alert');
-        if (b && b.name === 'Alert' && (b as any)._kind !== kind) { b.destroy(); b = null; }
-        if (!kind) { if (b) b.destroy(); return; }
-        if (b) return;
-        if (kind === 'wish') { this.wishBubble(node); return; }
-        b = BuildingLayer.makeChild(node, 'Alert');
+        const old = node.getChildByName('Alert');
+        if (old && (old as any)._kind === kind) return;
+        if (old) { old.removeFromParent(); old.destroy(); }
+        if (!kind) return;
+        const b = BuildingLayer.makeChild(node, 'Alert');
         (b as any)._kind = kind;
         const ui = node.getComponent(UITransform)!;
-        b.setPosition(0, ui.contentSize.height * (1 - ui.anchorY) + 12, 0);
+        b.setPosition(0, ui.contentSize.height + 12, 0);
+        if (kind === 'wish') { this.wishBubble(b); return; }
         const g = b.addComponent(Graphics);
         g.fillColor = new Color(255, 255, 255, 255);
         g.circle(0, 0, 7.5);
@@ -337,12 +326,8 @@ export class BuildingLayer extends Component {
      * 心愿气泡：蓝底对话框 + 白色五角星，上下浮 + 一呼一吸地放大缩小。
      * 不用「…」：行人闲聊气泡（LifeLayer）以前也是「…」，玩家会把两者看混。
      */
-    private wishBubble(node: Node): void {
-        const b = BuildingLayer.makeChild(node, 'Alert');
-        (b as any)._kind = 'wish';
-        const ui = node.getComponent(UITransform)!;
-        const y0 = ui.contentSize.height * (1 - ui.anchorY) + 12;
-        b.setPosition(0, y0, 0);
+    private wishBubble(anchor: Node): void {
+        const b = BuildingLayer.makeChild(anchor, 'Wish');
         const g = b.addComponent(Graphics);
         g.fillColor = new Color(255, 255, 255, 255);
         g.roundRect(-9.5, -6.5, 19, 13, 6);
@@ -362,7 +347,7 @@ export class BuildingLayer extends Component {
         }
         g.close();
         g.fill();
-        tween(b).repeatForever(tween(b).to(0.8, { position: new Vec3(0, y0 + 2, 0) }).to(0.8, { position: new Vec3(0, y0, 0) })).start();
+        tween(b).repeatForever(tween(b).to(0.8, { position: new Vec3(0, 2, 0) }).to(0.8, { position: new Vec3(0, 0, 0) })).start();
         tween(b).repeatForever(tween(b).to(0.5, { scale: new Vec3(1.12, 1.12, 1) }).to(0.5, { scale: new Vec3(1, 1, 1) }).delay(0.6)).start();
     }
 
@@ -417,21 +402,11 @@ export class BuildingLayer extends Component {
     }
 
     /**
-     * 视角转了（D031）：节点挪到新位置、重算前后顺序和点击六边形。楼本身由 3D 相机转，贴地色块跟着地面走。
-     * live：跟手转的每一帧都调，停稳后再调一次（live = false）。
+     * 转动时更新楼顶标记的位置，停稳时更新标记和点击的前后顺序。
      */
-    relayout(_live = false): void {
-        const iso = this._iso;
-        if (!iso) return;
-        this._placed.forEach((b, uid) => {
-            const node = this._nodes.get(uid);
-            if (!node) return;
-            const p = iso.footBottom(b.col, b.row, b.def.width, b.def.height);
-            node.setPosition(p.x, p.y, 0);
-            this._depth.set(node, iso.depth(b.col, b.row, b.def.width, b.def.height));
-            this.applyShape(uid);
-        });
-        this.sortAll();
+    relayout(live: boolean): void {
+        this._placed.forEach((_b, uid) => this.applyShape(uid, live));
+        if (!live) this.sortAll();
     }
 
     /** 某栋建筑的节点（金币特效找位置用） */
@@ -477,12 +452,12 @@ export class BuildingLayer extends Component {
 
     /** 这栋楼（或工地）的包围盒 / 楼顶气泡有没有盖住这一点 */
     private nodeHit(node: Node, x: number, y: number): boolean {
-        const uid = BuildingLayer.uidOf(node);
-        const hull = this._hull.get(uid);
-        if (!hull) return false;
         const dx = x - node.position.x, dy = y - node.position.y;
-        const h = node.getComponent(UITransform)!.contentSize.height;
-        if (node.getChildByName('Alert') && Math.abs(dx) <= 16 && Math.abs(dy - h - 12) <= 16) return true;
+        const { width, height } = node.getComponent(UITransform)!.contentSize;
+        if (node.getChildByName('Alert') && Math.abs(dx) <= 16 && Math.abs(dy - height - 12) <= 16) return true;
+        if (Math.abs(dx) > width / 2 || dy < 0 || dy > height) return false;
+        const hull = this.hitHull(BuildingLayer.uidOf(node), node);
+        if (!hull) return false;
         // 逆时针凸多边形：点在每条边的左边
         const n = hull.length;
         for (let i = 0; i < n; i += 2) {

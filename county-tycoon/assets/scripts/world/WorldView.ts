@@ -103,6 +103,7 @@ export class WorldView extends Component {
     private _selected: BuildingDef | null = null;
     /** 当前是否处于拆除模式 */
     private _demolishing = false;
+    private _alwaysShowGrid = false;
     /** 鼠标当前指到哪一格，-1 表示不在图上 */
     private _hoverCol = -1;
     private _hoverRow = -1;
@@ -115,6 +116,9 @@ export class WorldView extends Component {
     private static readonly TAP_SLOP = 12;
     /** 惯性衰减（越大停得越快） */
     private static readonly FLING_DECAY = 5;
+    /** 镜头中心越过地图边缘时，最多再拖出几格 */
+    private static readonly EDGE_TRAVEL = 3;
+    private static readonly EDGE_RETURN_RATE = 14;
     /** 点在楼缝里时，手指附近多大范围内找楼（UI 单位，换算到地图要除以倍率；T424） */
     private static readonly PICK_SLOP = 12;
 
@@ -288,6 +292,15 @@ export class WorldView extends Component {
         return this._demolishing;
     }
 
+    get alwaysShowGrid(): boolean {
+        return this._alwaysShowGrid;
+    }
+
+    set alwaysShowGrid(on: boolean) {
+        this._alwaysShowGrid = on;
+        this.updateGridVisibility();
+    }
+
     /** 选择要放置的建筑（同时退出拆除模式） */
     selectBuilding(def: BuildingDef | null): void {
         this._selected = def;
@@ -305,9 +318,13 @@ export class WorldView extends Component {
     private resetEditPreview(): void {
         this._hoverCol = this._hoverRow = -1;
         this._hoverDemolition = this._pendingDemolition = null;
-        this._3d?.setGridVisible(!!this._selected || this._demolishing);
+        this.updateGridVisibility();
         this.setPending(null);
         this._3d?.setDemolitionTarget(null);
+    }
+
+    private updateGridVisibility(): void {
+        this._3d?.setGridVisible(this._alwaysShowGrid || !!this._selected || this._demolishing);
     }
 
     private registerInput(): void {
@@ -469,7 +486,7 @@ export class WorldView extends Component {
         if (!turn) return;
         turn.elapsed += dt;
         const t = Math.min(1, turn.elapsed / WorldView.TURN_DURATION);
-        const eased = t * (2 - t);
+        const eased = t * t * (3 - 2 * t);
         if (t === 1) this._turn = null;
         this.setViewAngle(t === 1 ? turn.to : turn.from + (turn.to - turn.from) * eased);
     }
@@ -481,8 +498,7 @@ export class WorldView extends Component {
     private setViewAngle(phi: number): void {
         const iso = this._iso, world = this._world;
         if (!iso || !world || !iso.canRotate) return;
-        const w = world.position;
-        const [gx, gy] = iso.fromLocal(-w.x / this._zoom, -w.y / this._zoom);
+        const [gx, gy] = this.gridAtCenter(world.position.x, world.position.y);
         const q = Math.PI / 2;
         const k = Math.round(phi / q);
         let spin = phi - k * q;
@@ -492,15 +508,11 @@ export class WorldView extends Component {
         iso.spin = spin;
         this._viewAngle = spin === 0 ? k * q : phi;
 
-        const p = iso.toLocal(gx, gy);
-        world.setPosition(-p.x * this._zoom, -p.y * this._zoom, w.z);
-        this.clampPosition();
+        this.centerOnGrid(gx, gy);
 
-        if (this._buildings) this._buildings.relayout(spin !== 0);
+        this._buildings?.relayout(this.rotating);
         if (!this._turn) {
-            this._hoverCol = -1; this._hoverRow = -1;
-            this._hoverDemolition = null;
-            this.refreshGhost();
+            this.clearGhost();
             this.onViewRotated?.(iso.rot);
         }
     }
@@ -595,15 +607,20 @@ export class WorldView extends Component {
 
     /** 松手后的惯性滑动 */
     protected update(dt: number): void {
-        this.syncConstruction(dt);
         this.stepTurn(dt);
+        this.syncConstruction(dt);
         this.stepPan(dt);
-        if (this._touches.size > 0) return;
+        if (this._touches.size > 0 || this.rotating || this._panTarget) return;
+        if (this.stepEdgeReturn(dt)) {
+            this._velX = 0; this._velY = 0;
+            return;
+        }
         const v = Math.hypot(this._velX, this._velY);
         if (v < 8) { this._velX = 0; this._velY = 0; return; }
         dt = Math.min(dt, 0.05);
-        this.panBy(this._velX * dt, this._velY * dt);
         const decay = Math.exp(-dt * WorldView.FLING_DECAY);
+        const travel = (1 - decay) / WorldView.FLING_DECAY;
+        this.panBy(this._velX * travel, this._velY * travel);
         this._velX *= decay; this._velY *= decay;
     }
 
@@ -750,10 +767,10 @@ export class WorldView extends Component {
         const iso = this._iso, world = this._world;
         const trans = this.node.getComponent(UITransform);
         if (!p || !iso || !world || !trans) return null;
-        const foot = iso.footBottom(p.col, p.row, p.def.width, p.def.height);
-        const h = this._buildings ? this._buildings.visualHeight(p.def.id, p.def.width, p.def.height) : (p.def.width + p.def.height) * iso.hh;
+        const box = iso.footprintBounds(p.col, p.row, p.def.width, p.def.height);
+        const roof = box.top + (this._buildings?.previewRoofHeight(p.def.id) ?? 0);
         const wp = world.position;
-        out.set(wp.x + foot.x * this._zoom, wp.y + (foot.y + h) * this._zoom, 0);
+        out.set(wp.x + box.x * this._zoom, wp.y + roof * this._zoom, 0);
         return trans.convertToWorldSpaceAR(out, out);
     }
 
@@ -891,9 +908,13 @@ export class WorldView extends Component {
 
     /** 让地图本地坐标 (x, y) 移到可见区域中间（顶栏、底栏挡住的部分不算） */
     private panToLocal(x: number, y: number): void {
+        const iso = this._iso;
+        if (!iso) return;
         const tr = this._tracker;
         const midY = tr ? (tr.insetBottom - tr.insetTop) / 2 : 0;
-        this._panTarget = { x: -x * this._zoom, y: midY - y * this._zoom };
+        const [gx, gy] = iso.fromLocal(x, y - midY / this._zoom);
+        const p = iso.toLocal(this.limitGrid(gx, iso.cols), this.limitGrid(gy, iso.rows));
+        this._panTarget = { x: -p.x * this._zoom, y: -p.y * this._zoom };
         this._velX = 0; this._velY = 0;
     }
 
@@ -901,15 +922,13 @@ export class WorldView extends Component {
         const t = this._panTarget, world = this._world;
         if (!t || !world) return;
         const p = world.position;
-        const k = 1 - Math.exp(-dt * 8);
-        const nx = p.x + (t.x - p.x) * k, ny = p.y + (t.y - p.y) * k;
-        world.setPosition(nx, ny, p.z);
-        this.clampPosition();
-        const q = world.position;
-        // 到了，或者被地图边界卡住走不动了
-        if (Math.abs(t.x - q.x) < 1 && Math.abs(t.y - q.y) < 1 || (Math.abs(q.x - nx) > 0.01 || Math.abs(q.y - ny) > 0.01) && Math.abs(q.x - p.x) < 0.5 && Math.abs(q.y - p.y) < 0.5) {
+        if (Math.hypot(t.x - p.x, t.y - p.y) < 1) {
+            world.setPosition(t.x, t.y, p.z);
             this._panTarget = null;
+            return;
         }
+        const k = 1 - Math.exp(-dt * 8);
+        world.setPosition(p.x + (t.x - p.x) * k, p.y + (t.y - p.y) * k, p.z);
     }
 
     /**
@@ -936,11 +955,11 @@ export class WorldView extends Component {
 
     /** 镜头对准某一格（开局对准出生点用） */
     focusCell(col: number, row: number): void {
-        const world = this._world, iso = this._iso;
-        if (!world || !iso) return;
-        const p = iso.toLocal(col + 0.5, row + 0.5);
-        world.setPosition(-p.x * this._zoom, -p.y * this._zoom, 0);
-        this.clampPosition();
+        const iso = this._iso;
+        if (!iso || !this._world) return;
+        this._panTarget = null;
+        this._velX = 0; this._velY = 0;
+        this.centerOnGrid(this.limitGrid(col + 0.5, iso.cols), this.limitGrid(row + 0.5, iso.rows));
     }
 
     /** 按钮用：放大 / 缩小一档 */
@@ -1084,7 +1103,8 @@ export class WorldView extends Component {
     private setZoomAround(zoom: number, anchorX: number, anchorY: number): void {
         const config = this._config;
         const world = this._world;
-        if (!config || !world) return;
+        const iso = this._iso;
+        if (!config || !world || !iso) return;
         const levels = config.zoomLevels;
         const value = Math.max(levels[0], Math.min(levels[levels.length - 1], zoom));
         if (value === this._zoom) return;
@@ -1103,20 +1123,24 @@ export class WorldView extends Component {
 
         const ratio = value / this._zoom;
         const p = world.position;
+        this._panTarget = null;
         this._zoom = value;
         this.applyTransform();
-        world.setPosition(anchorX - (anchorX - p.x) * ratio, anchorY - (anchorY - p.y) * ratio, p.z);
-        this.clampPosition();
+        const [gx, gy] = this.gridAtCenter(anchorX - (anchorX - p.x) * ratio, anchorY - (anchorY - p.y) * ratio);
+        const margin = WorldView.EDGE_TRAVEL;
+        this.centerOnGrid(this.limitGrid(gx, iso.cols, margin), this.limitGrid(gy, iso.rows, margin));
         this.onZoomChanged?.(this._zoom, this._zoomIndex);
     }
 
     /** 平移，参数是 UI 坐标下的位移 */
     panBy(dx: number, dy: number): void {
         const world = this._world;
-        if (!world) return;
+        const iso = this._iso;
+        if (!world || !iso) return;
         const p = world.position;
-        world.setPosition(p.x + dx, p.y + dy, p.z);
-        this.clampPosition();
+        const [gx, gy] = this.gridAtCenter(p.x, p.y);
+        const [nextX, nextY] = this.gridAtCenter(p.x + dx, p.y + dy);
+        this.centerOnGrid(this.resistEdge(gx, nextX, iso.cols), this.resistEdge(gy, nextY, iso.rows));
     }
 
     private applyTransform(): void {
@@ -1125,28 +1149,45 @@ export class WorldView extends Component {
         }
     }
 
-    /**
-     * 限制拖动范围：地图比屏幕大时，不让边缘被拖进屏幕露出空白；
-     * 地图比屏幕小时，直接钉在视口中间。
-     */
-    private clampPosition(): void {
-        const world = this._world;
-        const map = this._iso;
-        if (!world || !map) return;
+    /** 世界容器的位置和镜头正下方的地面坐标互相换算。 */
+    private gridAtCenter(wx: number, wy: number): [number, number] {
+        return this._iso!.fromLocal(-wx / this._zoom, -wy / this._zoom);
+    }
 
-        const visible = view.getVisibleSize();
-        const halfMapW = (map.mapWidth * this._zoom) / 2;
-        const halfMapH = (map.mapHeight * this._zoom) / 2;
+    private centerOnGrid(gx: number, gy: number): void {
+        const world = this._world!;
+        const p = this._iso!.toLocal(gx, gy);
+        world.setPosition(-p.x * this._zoom, -p.y * this._zoom, world.position.z);
+    }
 
-        // 留一点余量，让玩家看得到地图边缘
-        const limitX = Math.max(0, halfMapW - visible.width / 2);
-        const limitY = Math.max(0, halfMapH - visible.height / 2);
+    private limitGrid(value: number, size: number, margin = 0): number {
+        return Math.max(-margin, Math.min(size + margin, value));
+    }
 
+    /** 在地图内跟手；越界后越往外越难拉，反向时立刻跟手。 */
+    private resistEdge(current: number, next: number, size: number): number {
+        if (next >= 0 && next <= size) return next;
+        const edge = next < 0 ? 0 : size;
+        const dir = next < 0 ? -1 : 1;
+        const before = Math.max(0, (current - edge) * dir);
+        const after = (next - edge) * dir;
+        if (after <= before) return next;
+        const travel = WorldView.EDGE_TRAVEL;
+        const remaining = (travel - before) * Math.exp(-(after - before) / travel);
+        return edge + dir * (travel - remaining);
+    }
+
+    /** 松手后只沿越界的格子轴退回地图边缘。 */
+    private stepEdgeReturn(dt: number): boolean {
+        const world = this._world, iso = this._iso;
+        if (!world || !iso) return false;
         const p = world.position;
-        const x = Math.max(-limitX, Math.min(limitX, p.x));
-        const y = Math.max(-limitY, Math.min(limitY, p.y));
-        if (x !== p.x || y !== p.y) {
-            world.setPosition(x, y, p.z);
-        }
+        const [gx, gy] = this.gridAtCenter(p.x, p.y);
+        const x = this.limitGrid(gx, iso.cols), y = this.limitGrid(gy, iso.rows);
+        const distance = Math.hypot(gx - x, gy - y);
+        if (distance < 1e-6) return false;
+        const decay = distance < 0.002 ? 0 : Math.exp(-dt * WorldView.EDGE_RETURN_RATE);
+        this.centerOnGrid(x + (gx - x) * decay, y + (gy - y) * decay);
+        return true;
     }
 }

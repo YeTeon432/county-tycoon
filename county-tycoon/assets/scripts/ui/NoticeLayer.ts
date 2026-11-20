@@ -4,7 +4,7 @@ import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
-import { drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -108,19 +108,21 @@ export class NoticeLayer extends Component {
         // 喇叭（收起状态）
         const horn = makePanelNode(this.node, 'Horn', 44, 44);
         horn.setPosition(-W / 2 + 16 + 22, y, 0);
-        const hg = horn.addComponent(Graphics);
-        drawShadow(hg, -22, -22, 44, 44, 22, 2);
-        hg.fillColor = UI_PALETTE.white;
-        hg.circle(0, 0, 22);
-        hg.fill();
-        this.drawHorn(hg);
+        drawGraphicsOnEnable(horn, (g) => {
+            drawShadow(g, -22, -22, 44, 44, 22, 2);
+            g.fillColor = UI_PALETTE.white;
+            g.circle(0, 0, 22);
+            g.fill();
+            this.drawHorn(g);
+        });
         const dot = makePanelNode(horn, 'Dot', 14, 14);
         dot.setPosition(15, 15, 0);
-        const dg = dot.addComponent(Graphics);
-        dg.fillColor = UI_PALETTE.coral;
-        dg.circle(0, 0, 7);
-        dg.fill();
         dot.active = false;
+        drawGraphicsOnEnable(dot, (g) => {
+            g.fillColor = UI_PALETTE.coral;
+            g.circle(0, 0, 7);
+            g.fill();
+        });
         horn.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
         InputGuard.add(horn);
         this._horn = horn;
@@ -130,17 +132,18 @@ export class NoticeLayer extends Component {
         const bw = W - 32 - 120;
         const bar = makePanelNode(this.node, 'Bar', bw, NoticeLayer.BAR_H);
         bar.setPosition(-W / 2 + 16 + bw / 2, y, 0);
-        const bg = bar.addComponent(Graphics);
-        bg.fillColor = new Color(255, 255, 255, 235);
-        bg.roundRect(-bw / 2, -NoticeLayer.BAR_H / 2, bw, NoticeLayer.BAR_H, NoticeLayer.BAR_H / 2);
-        bg.fill();
+        bar.active = false;
+        drawGraphicsOnEnable(bar, (g) => {
+            g.fillColor = new Color(255, 255, 255, 235);
+            g.roundRect(-bw / 2, -NoticeLayer.BAR_H / 2, bw, NoticeLayer.BAR_H, NoticeLayer.BAR_H / 2);
+            g.fill();
+        });
         const hornIn = makePanelNode(bar, 'HornIn', 44, 44);
         hornIn.setPosition(-bw / 2 + 22, 0, 0);
-        this.drawHorn(hornIn.addComponent(Graphics));
+        drawGraphicsOnEnable(hornIn, (g) => this.drawHorn(g));
         this._barText = makeLabelLeft(bar, 'Txt', '', UI_FONT.small, UI_COLOR.text, bw - 60);
         this._barText.node.setPosition(-bw / 2 + 46, 0, 0);
         bar.addComponent(UIOpacity).opacity = 0;
-        bar.active = false;
         bar.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
         this._bar = bar;
     }

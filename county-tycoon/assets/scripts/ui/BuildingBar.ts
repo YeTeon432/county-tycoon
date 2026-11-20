@@ -8,6 +8,7 @@ import { hexToColor } from '../core/ColorUtil';
 import { InputGuard } from '../core/InputGuard';
 import { SimApi } from '../core/sim/SimApi';
 import { TownLevel } from '../core/sim/types';
+import { getPlatform } from '../platform/Platform';
 import {
     drawShadow, formatNumber, makeIcon, makeLabel, makePanelNode, makeRoundButton,
     UI_COLOR, UI_FONT, UI_PALETTE, UI_RADIUS, UI_SHEET_RADIUS,
@@ -78,8 +79,16 @@ interface Card {
  */
 @ccclass('BuildingBar')
 export class BuildingBar extends Component {
-    /** 底栏总高：上 16 + 页签 52 + 14 + 卡片 172 + 下 20 */
-    static readonly BAR_HEIGHT = 274;
+    /** 底栏总高：内容加上原生应用的屏幕底部安全区。 */
+    static get BAR_HEIGHT(): number { return 274 + BuildingBar.bottomInset(); }
+
+    private static bottomInset(): number {
+        const platform = getPlatform();
+        if (platform.name !== 'native') return 0;
+        const { screenWidth, screenHeight, safeArea } = platform.systemInfo();
+        if (screenWidth <= 0) return 0;
+        return Math.max(0, Math.round((screenHeight - safeArea.bottom) * view.getVisibleSize().width / screenWidth));
+    }
     static readonly TAB_H = 52;
     static readonly ITEM_W = 132;
     static readonly ITEM_H = 172;
@@ -138,7 +147,7 @@ export class BuildingBar extends Component {
         this.buildSheet(W, H);
         this.buildTabs(W, H);
         this._cardLayer = makePanelNode(this.node, 'Cards', W, BuildingBar.ITEM_H);
-        this._cardLayer.setPosition(0, -H / 2 + 20 + BuildingBar.ITEM_H / 2, 0);
+        this._cardLayer.setPosition(0, -H / 2 + BuildingBar.bottomInset() + 20 + BuildingBar.ITEM_H / 2, 0);
         // 金币和小锁是两张图：分两层，不然一张卡里交替出现就断批
         this._layers = ['BgLayer', 'ThumbLayer', 'CoinLayer', 'LockLayer', 'TextLayer'].map((n) => makePanelNode(this._cardLayer!, n, W, BuildingBar.ITEM_H));
         // 所有卡片的白底画在同一个 Graphics 里（一个 Graphics 一次绘制，十个就是十次）

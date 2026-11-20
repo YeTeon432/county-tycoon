@@ -1,5 +1,5 @@
 import {
-    Color, Graphics, ImageAsset, Label, Layers, Node, resources, Sprite, SpriteFrame, UITransform,
+    _decorator, Color, Component, Graphics, ImageAsset, Label, Layers, Node, resources, Sprite, SpriteFrame, UITransform,
 } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 
@@ -154,6 +154,27 @@ export function drawShadow(g: Graphics, x: number, y: number, w: number, h: numb
         g.roundRect(x - e, y - 4 - e, w + 2 * e, h + 2 * e, radius + e);
         g.fill();
     }
+}
+
+@_decorator.ccclass('RedrawOnEnable')
+class RedrawOnEnable extends Component {
+    redraw: (() => void) | null = null;
+
+    protected onEnable(): void {
+        this.redraw?.();
+    }
+}
+
+/** 静态图形在自己或父节点重新显示时重画，避免原生渲染丢失隐藏前的绘制。 */
+export function drawGraphicsOnEnable(node: Node, draw: (g: Graphics) => void): Graphics {
+    const g = node.addComponent(Graphics);
+    const lifecycle = node.addComponent(RedrawOnEnable);
+    lifecycle.redraw = () => {
+        g.clear();
+        draw(g);
+    };
+    if (node.activeInHierarchy) lifecycle.redraw();
+    return g;
 }
 
 /** 白色圆角卡片 + 投影（居中，宽 w 高 h）。会先 clear */

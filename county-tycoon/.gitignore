@@ -7,7 +7,17 @@ temp/
 local/
 build/
 profiles/
-native
+/tools/package-private-keys/
+# Keep iOS source overrides and ignore the remaining generated native template.
+!/native/
+/native/*
+!/native/engine/
+/native/engine/*
+!/native/engine/ios/
+/native/engine/ios/*
+!/native/engine/ios/AppDelegate.mm
+!/native/engine/ios/CMakeLists.txt
+!/native/engine/ios/Info.plist
 #//////////////////////////
 # NPM
 #//////////////////////////

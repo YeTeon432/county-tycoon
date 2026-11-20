@@ -1,0 +1,11 @@
+{
+  "__type__": "cc.Material",
+  "_name": "actor-sprite",
+  "_objFlags": 0,
+  "_native": "",
+  "_effectAsset": { "__uuid__": "fdfec98a-f2ab-466d-b64a-b95ebeffd527" },
+  "_techIdx": 0,
+  "_defines": [ {} ],
+  "_states": [ {} ],
+  "_props": [ {} ]
+}

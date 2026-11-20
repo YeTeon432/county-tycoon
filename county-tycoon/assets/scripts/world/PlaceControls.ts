@@ -81,8 +81,10 @@ export class PlaceControls extends Component {
     private refresh(p: PendingPlace | null): void {
         this.node.active = !!p;
         if (!p) return;
+        // 原生渲染需要在确认条显示后绘制按钮底色，初始绘制后立即隐藏可能丢失图形。
         this._rotate!.setEnabled(p.canRotate);
         this._ok!.setEnabled(p.ok);
+        this._cancel!.setEnabled(true);
         const show = !p.ok && !!p.reason;
         this._reason!.node.parent!.active = show;
         if (show) {
@@ -131,7 +133,6 @@ const C = {
 };
 
 interface Btn {
-    node: Node;
     setEnabled: (on: boolean) => void;
 }
 
@@ -157,7 +158,8 @@ function makeBtn(parent: Node, text: string, w: number, fill: Color, fg: Color, 
     label.overflow = Label.Overflow.SHRINK;
 
     let enabled = true;
-    const draw = () => {
+    const setEnabled = (on: boolean) => {
+        enabled = on;
         g.clear();
         g.fillColor = C.shadow;
         g.roundRect(-w / 2, -h / 2 - 4, w, h, h / 2);
@@ -167,10 +169,6 @@ function makeBtn(parent: Node, text: string, w: number, fill: Color, fg: Color, 
         g.fill();
         label.color = enabled ? fg : C.white;
     };
-    draw();
     node.on(Node.EventType.TOUCH_END, () => { if (enabled) onTap(); });
-    return {
-        node,
-        setEnabled: (on: boolean) => { if (on !== enabled) { enabled = on; draw(); } },
-    };
+    return { setEnabled };
 }

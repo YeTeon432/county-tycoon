@@ -10,7 +10,7 @@
  */
 
 /** 当前跑在哪个宿主上 */
-export type PlatformName = 'wx' | 'tt' | 'web';
+export type PlatformName = 'wx' | 'tt' | 'web' | 'native';
 
 /** 安全区，单位是屏幕逻辑像素（刘海屏、底部小黑条） */
 export interface SafeArea {

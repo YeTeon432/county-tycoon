@@ -67,8 +67,8 @@ export class GameRoot extends Component {
     }
 
     protected start(): void {
-        // T540a 技术验证：网址带 ?spike3d 只看真 3D 楼，不进游戏
-        if (typeof location !== 'undefined' && location.search.indexOf('spike3d') >= 0) {
+        // 微信小游戏的 location 没有 search。浏览器带 ?spike3d 时进入 3D 技术验证场景。
+        if (typeof location !== 'undefined' && typeof location.search === 'string' && location.search.includes('spike3d')) {
             for (const c of director.getScene()!.getComponentsInChildren(Camera)) c.clearFlags = gfx.ClearFlagBit.DEPTH_STENCIL;
             const n = new Node('Spike3D');
             director.getScene()!.addChild(n);

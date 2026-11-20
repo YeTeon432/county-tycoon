@@ -1,7 +1,7 @@
-import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node, UITransform, view } from 'cc';
+import { _decorator, Color, Component, EventTouch, Label, Layers, Node, UITransform, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { BuildingBar } from './BuildingBar';
-import { drawShadow, makeIcon, makeLabel, makeLabelLeft, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawShadow, makeIcon, makeLabel, makeLabelLeft, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -30,26 +30,27 @@ export class TrackChip extends Component {
         const node = new Node('TrackChip');
         node.layer = Layers.Enum.UI_2D;
         node.addComponent(UITransform).setContentSize(W, H);
+        node.active = false;
         parent.addChild(node);
         const chip = node.addComponent(TrackChip);
 
-        const g = node.addComponent(Graphics);
-        drawShadow(g, -W / 2, -H / 2, W, H, H / 2, 2);
-        g.fillColor = UI_COLOR.panel;
-        g.roundRect(-W / 2, -H / 2, W, H, H / 2);
-        g.fill();
-        // 左：橙色圆（姓）
         const bx = -W / 2 + 8 + 24;
-        g.fillColor = C_PERSON;
-        g.circle(bx, 0, 24);
-        g.fill();
-        // 右：家（蓝圆 + 房子图标）、关闭（浅灰圆 + 叉）
-        g.fillColor = UI_PALETTE.blue;
-        g.circle(W / 2 - 8 - 22 - 52, 0, 22);
-        g.fill();
-        g.fillColor = UI_COLOR.block;
-        g.circle(W / 2 - 8 - 22, 0, 22);
-        g.fill();
+        drawGraphicsOnEnable(node, (g) => {
+            drawShadow(g, -W / 2, -H / 2, W, H, H / 2, 2);
+            g.fillColor = UI_COLOR.panel;
+            g.roundRect(-W / 2, -H / 2, W, H, H / 2);
+            g.fill();
+            // 左边是姓氏，右边是回家和关闭按钮。
+            g.fillColor = C_PERSON;
+            g.circle(bx, 0, 24);
+            g.fill();
+            g.fillColor = UI_PALETTE.blue;
+            g.circle(W / 2 - 8 - 22 - 52, 0, 22);
+            g.fill();
+            g.fillColor = UI_COLOR.block;
+            g.circle(W / 2 - 8 - 22, 0, 22);
+            g.fill();
+        });
 
         chip._badge = makeLabel(node, 'Badge', '', UI_FONT.body, UI_PALETTE.white);
         chip._badge.isBold = true;
@@ -65,7 +66,6 @@ export class TrackChip extends Component {
             else if (p.x > W / 2 - 8 - 48 - 56) chip.onFocusHome?.();
             else chip.onFocusPerson?.();
         });
-        node.active = false;
         chip.layout();
         return chip;
     }

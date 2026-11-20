@@ -85,7 +85,8 @@ export class World3D extends Component {
     private readonly _actorBatches = new Map<Texture2D, ActorBatch>();
     private readonly _aPos = new Float32Array(ACTOR_MAX * 12);
     private readonly _aUv = new Float32Array(ACTOR_MAX * 8);
-    private readonly _aCol = new Float32Array(ACTOR_MAX * 16);
+    /** 复用顶点色通道传相机空间的 XY 偏移和透明度。 */
+    private readonly _aOffsetOpacity = new Float32Array(ACTOR_MAX * 16);
     private readonly _aIdx = (() => {
         const a = new Uint16Array(ACTOR_MAX * 6);
         for (let i = 0; i < ACTOR_MAX; i++) a.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6);
@@ -123,7 +124,8 @@ export class World3D extends Component {
         const cam = camNode.addComponent(Camera);
         cam.projection = Camera.ProjectionType.ORTHO;
         cam.near = 1; cam.far = 400;
-        cam.priority = -1;                                   // 先画 3D，2D（行人、气泡、界面）压在上面
+        // 原生引擎用无符号整数存优先级。0 先画 3D，主场景的 UI 相机（1）随后叠上。
+        cam.priority = 0;
         cam.clearFlags = gfx.ClearFlagBit.ALL;
         cam.clearColor = background;
         cam.visibility = World3D.LAYER;
@@ -135,15 +137,14 @@ export class World3D extends Component {
         sun.color = new Color(255, 245, 230, 255);
         sun.visibility = World3D.LAYER;
 
+        resources.load('models3d/actor-sprite', Material, (err, mat) => {
+            if (err) { console.error('[World3D] 人车材质', err.message); return; }
+            this._actorMat = mat;
+        });
         resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit'], Material, (err, mats) => {
             if (err) { console.error('[World3D] 材质', err.message); return; }
             const by = (n: string) => mats.find((m) => m.name === n)!;
             this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit') };
-            // 人车纸片：同一个 unlit 着色器的半透明版（technique 1：深度测试、不写深度、按透明度混合），
-            // 顶点色带淡入淡出。被楼挡住靠深度测试，人和人之间按远近排好再画
-            const am = new Material();
-            am.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_TEXTURE: true, USE_VERTEX_COLOR: true } });
-            this._actorMat = am;
             // 贴地色块：同一个 unlit 半透明，不要贴图，颜色全在顶点色里
             const dm = new Material();
             dm.initialize({ effectAsset: this._mats.ground.effectAsset, technique: 1, defines: { USE_VERTEX_COLOR: true } });
@@ -224,7 +225,6 @@ export class World3D extends Component {
 
         const k = 1 / (this._iso.hw * Math.SQRT2);
         const right = Vec3.transformQuat(new Vec3(), Vec3.UNIT_X, q);
-        const up = Vec3.transformQuat(new Vec3(), Vec3.UNIT_Y, q);
         const hl = Math.hypot(bx, bz) || 1;
         const fx = -bx / hl, fz = -bz / hl;   // 地上「离相机远去」的方向，屏幕上朝上；地面在屏幕上压扁一半
 
@@ -236,11 +236,12 @@ export class World3D extends Component {
             for (const f of [a.shadow, a.frame]) if (f && textures.indexOf(texOf(f)) < 0) textures.push(texOf(f));
         }
         for (const tex of textures) {
-            const P = this._aPos, U = this._aUv, C = this._aCol;
+            const P = this._aPos, U = this._aUv, C = this._aOffsetOpacity;
             let n = 0;
             const quad = (f: SpriteFrame, flip: boolean, alpha: number,
                 x0: number, y0: number, z0: number, x1: number, y1: number, z1: number,
-                x2: number, y2: number, z2: number, x3: number, y3: number, z3: number) => {
+                x2: number, y2: number, z2: number, x3: number, y3: number, z3: number,
+                halfWidth = 0, height = 0) => {
                 if (n >= ACTOR_MAX) return;
                 // 四角顺序：左下、右下、右上、左上
                 P.set([x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3], n * 12);
@@ -249,7 +250,10 @@ export class World3D extends Component {
                 if (flip) { const t = u0; u0 = u1; u1 = t; }
                 const vt = R.y / th, vb = (R.y + R.height) / th;
                 U.set([u0, vb, u1, vb, u1, vt, u0, vt], n * 8);
-                for (let i = 0; i < 4; i++) C.set([1, 1, 1, alpha], n * 16 + i * 4);
+                C.set([
+                    -halfWidth, 0, 0, alpha, halfWidth, 0, 0, alpha,
+                    halfWidth, height, 0, alpha, -halfWidth, height, 0, alpha,
+                ], n * 16);
                 n++;
             };
             for (const a of order) {
@@ -266,12 +270,10 @@ export class World3D extends Component {
             for (const a of order) {
                 const f = a.frame!;
                 if (texOf(f) !== tex) continue;
-                const hw = a.w * k / 2, h = a.h * k;
-                const rx = right.x * hw, ry = right.y * hw, rz = right.z * hw;
-                const ux = up.x * h, uy = up.y * h, uz = up.z * h;
+                // 四个顶点都在脚下，着色器用绘制当帧的相机矩阵展开身体。
+                const x = a.gx, z = a.gy;
                 quad(f, a.flip, a.alpha,
-                    a.gx - rx, -ry, a.gy - rz, a.gx + rx, ry, a.gy + rz,
-                    a.gx + rx + ux, ry + uy, a.gy + rz + uz, a.gx - rx + ux, -ry + uy, a.gy - rz + uz);
+                    x, 0, z, x, 0, z, x, 0, z, x, 0, z, a.w * k / 2, a.h * k);
             }
             const batch = this.actorBatch(tex);
             if (n === 0) continue;
@@ -287,7 +289,7 @@ export class World3D extends Component {
         return {
             positions: this._aPos.subarray(0, n * 12),
             uvs: this._aUv.subarray(0, n * 8),
-            colors: this._aCol.subarray(0, n * 16),
+            colors: this._aOffsetOpacity.subarray(0, n * 16),
             indices16: this._aIdx.subarray(0, n * 6),
             // 包围盒给整张地图：免得被视锥剔掉
             minPos: { x: -2, y: -2, z: -2 },

@@ -10,9 +10,11 @@
  * 平台差异不要散落到业务里：微信独有的能力（登录、分享、激励视频）
  * 以后加进 IPlatform（见 types.ts），三家各写各的。
  */
+import { sys } from 'cc';
 import { IPlatform, createMiniGamePlatform, SystemInfo } from './types';
 import { createWxPlatform } from './wx';
 import { createTtPlatform } from './tt';
+import { createNativePlatform } from './native';
 import { createWebPlatform } from './web';
 
 export * from './types';
@@ -35,7 +37,7 @@ export function setPlatform(platform: IPlatform | null): void {
 
 /**
  * 按宿主全局对象判断。两家小游戏的 API 形状一样，靠对象名区分；
- * 两个都没有就是浏览器。
+ * 原生应用用引擎的存储和前后台事件，其余退回网页预览实现。
  */
 export function detectPlatform(): IPlatform {
     const host = globalThis as any;
@@ -45,6 +47,7 @@ export function detectPlatform(): IPlatform {
     if (host.tt && typeof host.tt.setStorageSync === 'function') {
         return createTtPlatform(host.tt);
     }
+    if (sys.isNative) return createNativePlatform();
     return createWebPlatform();
 }
 

@@ -5,7 +5,7 @@ import { getPlatform } from '../platform/Platform';
 import { DayClock } from '../core/DayClock';
 import { monthLabel } from '../core/sim/types';
 import {
-    drawShadow, formatNumber, IconName, makeIcon, makeLabel, makeLabelLeft, makePanelNode, makeRoundButton,
+    drawGraphicsOnEnable, drawShadow, formatNumber, IconName, makeIcon, makeLabel, makeLabelLeft, makePanelNode, makeRoundButton,
     UI_COLOR, UI_FONT, UI_PALETTE,
 } from './UiTheme';
 
@@ -201,16 +201,17 @@ export class TopBar extends Component {
         // 右下角小角标「×2 / ×3」
         const badge = makePanelNode(fast.node, 'Badge', 34, 22);
         badge.setPosition(S / 2 - 10, -S / 2 + 8, 0);
-        const bgx = badge.addComponent(Graphics);
-        bgx.fillColor = UI_PALETTE.white;
-        bgx.roundRect(-17, -11, 34, 22, 11);
-        bgx.fill();
-        bgx.fillColor = UI_PALETTE.coral;
-        bgx.roundRect(-15, -9, 30, 18, 9);
-        bgx.fill();
+        badge.active = false;
+        drawGraphicsOnEnable(badge, (g) => {
+            g.fillColor = UI_PALETTE.white;
+            g.roundRect(-17, -11, 34, 22, 11);
+            g.fill();
+            g.fillColor = UI_PALETTE.coral;
+            g.roundRect(-15, -9, 30, 18, 9);
+            g.fill();
+        });
         this._fastBadge = makeLabel(badge, 'Txt', '', 15, UI_PALETTE.white, 30);
         this._fastBadge.isBold = true;
-        badge.active = false;
         this.guard(fast.node);
 
         x -= S + GAP;
@@ -240,14 +241,15 @@ export class TopBar extends Component {
     private makeDot(parent: Node, S: number): Node {
         const dot = makePanelNode(parent, 'Dot', 22, 22);
         dot.setPosition(S / 2 - 8, S / 2 - 8, 0);
-        const dg = dot.addComponent(Graphics);
-        dg.fillColor = UI_PALETTE.white;
-        dg.circle(0, 0, 11);
-        dg.fill();
-        dg.fillColor = UI_PALETTE.coral;
-        dg.circle(0, 0, 8);
-        dg.fill();
         dot.active = false;
+        drawGraphicsOnEnable(dot, (g) => {
+            g.fillColor = UI_PALETTE.white;
+            g.circle(0, 0, 11);
+            g.fill();
+            g.fillColor = UI_PALETTE.coral;
+            g.circle(0, 0, 8);
+            g.fill();
+        });
         return dot;
     }
 

@@ -1,0 +1,54 @@
+CCEffect %{
+  techniques:
+  - passes:
+    - vert: actor-vs:vert
+      frag: actor-fs:frag
+      properties:
+        mainTexture: { value: grey }
+      depthStencilState:
+        depthTest: true
+        depthWrite: false
+      blendState:
+        targets:
+        - blend: true
+          blendSrc: src_alpha
+          blendDst: one_minus_src_alpha
+          blendDstAlpha: one_minus_src_alpha
+}%
+
+CCProgram actor-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+  // xy: offset in camera space, w: opacity. Ground shadows use zero offset.
+  in vec4 a_color;
+  out vec2 v_uv;
+  out float v_opacity;
+
+  vec4 vert () {
+    v_uv = a_texCoord;
+    v_opacity = a_color.w;
+    vec4 position = cc_matView * cc_matWorld * vec4(a_position, 1.0);
+    position.xy += a_color.xy;
+    return cc_matProj * position;
+  }
+}%
+
+CCProgram actor-fs %{
+  precision highp float;
+  #include <legacy/output-standard>
+
+  in vec2 v_uv;
+  in float v_opacity;
+  uniform sampler2D mainTexture;
+
+  vec4 frag () {
+    vec4 color = texture(mainTexture, v_uv);
+    color.rgb = SRGBToLinear(color.rgb);
+    color.a *= v_opacity;
+    return CCFragOutput(color);
+  }
+}%

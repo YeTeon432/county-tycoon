@@ -35,7 +35,7 @@ export type DecalLayer = 'env' | 'reach' | 'ghost';
 const DECAL_Y: Record<DecalLayer, number> = { env: 0.004, reach: 0.006, ghost: 0.008 };
 
 /** 一张纹理一批：人车的纸片合成一个动态网格，一次绘制 */
-interface ActorBatch { node: Node; mesh: Mesh }
+interface ActorBatch { node: Node; mesh: Mesh; renderer: MeshRenderer; quadCount: number }
 const ACTOR_MAX = 600;   // 每批最多几块纸片（人 + 影子；街上最多 60 人，留足余量）
 
 /**
@@ -279,7 +279,13 @@ export class World3D extends Component {
             if (n === 0) continue;
             used.add(tex);
             batch.mesh.updateSubMesh(0, this.actorGeometry(n));
-            if (!batch.node.active) batch.node.active = true;
+            if (!batch.node.active || batch.quadCount !== n) {
+                batch.node.active = true;
+                // updateSubMesh 更新缓冲区；原生渲染器另存一份绘制数量。
+                // 激活后同步，否则人数减少时还会画缓冲区尾部的旧人物。
+                batch.renderer.onGeometryChanged();
+                batch.quadCount = n;
+            }
         }
         this._actorBatches.forEach((b, tex) => { if (!used.has(tex) && b.node.active) b.node.active = false; });
     }
@@ -309,7 +315,7 @@ export class World3D extends Component {
         mr.setMaterial(this._actorMat!, 0);
         mr.getMaterialInstance(0)!.setProperty('mainTexture', tex);
         node.active = false;
-        b = { node, mesh };
+        b = { node, mesh, renderer: mr, quadCount: 0 };
         this._actorBatches.set(tex, b);
         return b;
     }

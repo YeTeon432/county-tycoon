@@ -35,16 +35,6 @@ export class IsoMath {
         this._topY = (this.cols + this.rows) * this.hh / 2;
     }
 
-    /** 整张地图外接矩形的宽（未缩放） */
-    get mapWidth(): number {
-        return (this.cols + this.rows) * this.hw * Math.cos(this._spin);
-    }
-
-    /** 整张地图外接矩形的高（未缩放） */
-    get mapHeight(): number {
-        return (this.cols + this.rows) * this.hh * Math.cos(this._spin);
-    }
-
     // ---------------- 视角旋转（D031） ----------------
     /**
      * 视角：0～3，每一档 = 地图在屏幕上顺时针转 90°。只改「怎么画」，格子坐标（模型、存档、模拟）都不变。
@@ -128,13 +118,6 @@ export class IsoMath {
         }
     }
 
-    /** w×h 占地在视图里的左上格和宽高（奇数档宽高对调） */
-    private viewRect(col: number, row: number, w: number, h: number): [number, number, number, number] {
-        const [ax, ay] = this.view(col, row);
-        const [bx, by] = this.view(col + w, row + h);
-        return [Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)];
-    }
-
     /** 视图连续坐标 → 地图本地坐标（不转，地面瓦片这种固定在视图格子上的东西直接用） */
     project(vx: number, vy: number, out: IsoPoint = { x: 0, y: 0 }): IsoPoint {
         out.x = (vx - vy) * this.hw - this._offX;
@@ -192,29 +175,29 @@ export class IsoMath {
         return this.project(vc, vr, out);
     }
 
-    /**
-     * w×h 占地在屏幕上的最下顶点。建筑图的"底边中点"对齐到这里，
-     * 所以建筑图宽必须是 (w+h)·半宽（ART_SPEC）。
-     */
-    footBottom(col: number, row: number, w: number, h: number, out?: IsoPoint): IsoPoint {
-        const [vx, vy, vw, vh] = this.viewRect(col, row, w, h);
-        return this.project(vx + vw, vy + vh, out);
+    /** 占地投影的外框，供楼顶标记和放置确认条定位。 */
+    footprintBounds(col: number, row: number, w: number, h: number): { x: number; bottom: number; top: number; width: number } {
+        const center = this.toLocal(col + w / 2, row + h / 2);
+        const angle = this._rot * Math.PI / 2 + this._spin;
+        const c = Math.cos(angle), s = Math.sin(angle);
+        const a = Math.abs(c - s), b = Math.abs(c + s);
+        const halfH = (w * b + h * a) * this.hh / 2;
+        return { x: center.x, bottom: center.y - halfH, top: center.y + halfH, width: (w * a + h * b) * this.hw };
     }
 
-    /** 占地菱形在屏幕上的四个顶点（上、右、下、左），画预览框用 */
+    /** 按占地四边依次投影四个角。 */
     footprint(col: number, row: number, w: number, h: number): IsoPoint[] {
-        const [vx, vy, vw, vh] = this.viewRect(col, row, w, h);
         return [
-            this.project(vx, vy),
-            this.project(vx + vw, vy),
-            this.project(vx + vw, vy + vh),
-            this.project(vx, vy + vh),
+            this.toLocal(col, row),
+            this.toLocal(col + w, row),
+            this.toLocal(col + w, row + h),
+            this.toLocal(col, row + h),
         ];
     }
 
     /**
      * 楼图锚点（占地最下顶点）相对占地中心的屏幕偏移。跟手转的时候楼身保持竖直，
-     * 整张图跟着占地中心走：位置 = toLocal(中心) + 这个偏移。静止时和 footBottom 完全一致。
+     * 整张图跟着占地中心走：位置 = toLocal(中心) + 这个偏移。
      */
     footOffset(w: number, h: number, out: IsoPoint = { x: 0, y: 0 }): IsoPoint {
         const odd = this._rot % 2 === 1;

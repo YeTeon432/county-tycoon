@@ -17,94 +17,131 @@ def house_terrace():
 
 
 def lane_house(terrace):
-    plaster = '#ffebc9' if terrace else '#fff1d9'
-    brick = '#e99072' if terrace else '#daa176'
-    trim = '#fff5db'
+    plaster = '#ffebd4' if terrace else '#fff0d6'
+    brick = '#da9a80' if terrace else '#d6ad88'
+    trim, metal = '#ede8dc', '#7e8d89'
     glass = '#a7d4d4' if terrace else '#94cbe1'
-    lot(1, 1, '#e2cbb0')
-    # 主体后退，留下整段有深度的廊道。楼梯间凸出到街面一侧。
+    lot(1, 1, '#d8cabb')
     fh = 0.29
     top = Z0 + 4 * fh
-    tower_x = 0.67 if terrace else 0.09
-    bay_x = 0.13 if terrace else 0.39
-    box(0.09, 0.32, Z0, 0.80, 0.55, 4 * fh, plaster, bevel=0.01)
-    box(tower_x, 0.18, Z0, 0.22, 0.44, 4 * fh, brick)
-    box(0.08, 0.11, Z0, 0.82, 0.22, 0.032, '#c1a387')
-    box(bay_x, 0.291, Z0 + 0.032, 0.40, 0.031, 0.231, '#9b735b')
-    window_front(bay_x + 0.21, Z0 + 0.055, 0.17, 0.19, y=0.29, frame=trim, glass=glass, sill=False)
+    tower_x = 0.65 if terrace else 0.09
+    bay_x = 0.105 if terrace else 0.35
+    # 退入楼里的门厅和阳台共用一条结构轴线，街面一侧只露梁、柱和栏杆。
+    box(0.09, 0.34, Z0, 0.80, 0.53, 4 * fh, plaster)
+    box(tower_x, 0.19, Z0, 0.24, 0.27, 4 * fh, brick)
+    box(0.09, 0.115, Z0, 0.80, 0.23, 0.018, '#c2ad98')
+    box(bay_x, 0.31, Z0 + 0.018, 0.42, 0.032, 0.225, '#95755c')
+    curtain_front(bay_x + 0.016, Z0 + 0.030, 0.21, 0.20, 0.305, 2, 1, glass='#829fa0', mull=metal)
+    for k in range(6):
+        box(bay_x + 0.25, 0.305, Z0 + 0.04 + k * 0.029, 0.146, 0.011, 0.008, '#c9b59c')
+
+    # 楼梯窗在半层处采光；侧墙窗台留滴水边和雨水立管。
+    box(tower_x + 0.055, 0.180, Z0 + 0.23, 0.115, 0.018, 0.865, '#a48e78')
+    cyl(0.907, 0.78, Z0 + 0.01, 0.009, 1.15, '#aaa99b', 8)
     for f in range(4):
         z = Z0 + f * fh
-        window_front(tower_x + 0.055, z + 0.075, 0.11, 0.16, y=0.18, frame=trim, glass=glass, sill=False)
-        window_side(0.49, z + 0.065, 0.25, 0.17, 0.89, frame=trim, glass=glass)
+        window_side(0.48, z + 0.08, 0.24, 0.133, 0.89, frame=metal, glass=glass, sill=False)
+        box(0.907, 0.62, z + 0.089, 0.008, 0.009, 0.111, metal)
+        if f == (1 if terrace else 2):
+            ac_unit(0.89, 0.486, z - 0.03, face='side')
+        if f < 3:
+            curtain_front(tower_x + 0.061, z + 0.236, 0.103, 0.164, 0.177, 1, 2, glass=glass, mull='#d5c4af')
         if f == 0:
             continue
-        window_front(bay_x + 0.055, z + 0.035, 0.34, 0.21, y=0.32, frame='#b78965', glass=glass, sill=False)
-        box(bay_x + 0.207, 0.287, z + 0.047, 0.023, 0.021, 0.186, trim)
-        # 厚楼板、矮砌墙和架空扶手，留一道背光的空隙。
-        box(bay_x - 0.03, 0.12, z, 0.51, 0.212, 0.04, trim)
-        box(bay_x - 0.03, 0.12, z + 0.04, 0.51, 0.025, 0.064, plaster)
-        for dx in (0, 0.23, 0.47):
-            box(bay_x - 0.02 + dx, 0.126, z + 0.104, 0.014, 0.014, 0.033, glass)
-        box(bay_x - 0.03, 0.12, z + 0.137, 0.51, 0.023, 0.013, '#a1775d')
-        if f == 2:
-            box(bay_x + 0.26, 0.14, z + 0.065, 0.17, 0.075, 0.055, brick)
-            bush(bay_x + 0.34, 0.174, 0.066, z + 0.11, '#8ab86b')
-    box(0.07, 0.17, top, 0.84, 0.72, 0.04, trim)
-    parapet(0.09, 0.20, top + 0.04, 0.8, 0.67, h=0.063, t=0.026, m=plaster)
+        curtain_front(bay_x + 0.023, z + 0.018, 0.413, 0.228, 0.337, 3, 1, glass=glass, mull='#c1b7a6')
+        # 阳台玻璃门位于栏杆后约两米。角部封窗和退进的顶层使两户有不同的轮廓。
+        front = 0.23 if terrace and f == 3 else 0.14
+        depth = 0.347 - front
+        box(bay_x - 0.012, front, z, 0.49, depth, 0.018, trim)
+        if not terrace and f == 2:
+            curtain_front(bay_x, z + 0.02, 0.46, fh - 0.035, front + 0.022, 4, 1,
+                          glass='#afd0ce', mull='#ddd7c7')
+            curtain_side(front + 0.022, z + 0.02, depth - 0.025, fh - 0.035, bay_x + 0.46,
+                         2, 1, glass='#8ab4be', mull='#ddd7c7')
+        else:
+            for dx in (0, 0.115, 0.23, 0.345, 0.46):
+                box(bay_x + dx, front + 0.004, z + 0.018, 0.009, 0.009, 0.091, metal)
+            for level in (0.055, 0.109):
+                box(bay_x - 0.004, front, z + level, 0.477, 0.012, 0.009, metal)
+                for dx in (0, 0.46):
+                    box(bay_x + dx, front, z + level, 0.009, depth, 0.009, metal)
+            if f == 2:
+                box(bay_x + 0.22, front + 0.022, z + 0.021, 0.19, 0.064, 0.04, '#c28566')
+                for dx in (0.26, 0.32, 0.37):
+                    bush(bay_x + dx, front + 0.055, 0.034, z + 0.062, '#91ae72')
+    box(0.078, 0.177, top, 0.824, 0.707, 0.022, trim)
+    box(0.105, 0.21, top + 0.022, 0.76, 0.634, 0.009, '#c5bdac')
+    parapet(0.088, 0.19, top + 0.022, 0.802, 0.68, h=0.055, t=0.016, m=plaster)
     if terrace:
-        box(0.27, 0.45, top + 0.04, 0.54, 0.33, 0.14, plaster)
-        prism(0.23, 0.40, top + 0.18, 0.63, 0.43, 0.12, '#e98668')
-        window_front(0.39, top + 0.058, 0.23, 0.105, y=0.45, frame=trim, glass=glass, sill=False)
+        box(0.16, 0.40, top + 0.031, 0.66, 0.39, 0.16, plaster)
+        curtain_front(0.22, top + 0.043, 0.36, 0.133, 0.40, 3, 1, glass=glass, mull=trim)
+        prism(0.13, 0.37, top + 0.191, 0.72, 0.45, 0.109, '#dc9076')
+        box(0.121, 0.584, top + 0.29, 0.737, 0.024, 0.01, '#ce856c')
+        for run in (0.052, 0.108, 0.166):
+            for y in (0.37 + run, 0.82 - run):
+                box(0.132, y, top + 0.191 + run * 0.484, 0.716, 0.009, 0.005, '#e5a48a')
     else:
-        box(0.10, 0.23, top + 0.04, 0.28, 0.41, 0.22, brick)
-        box(0.075, 0.205, top + 0.26, 0.33, 0.46, 0.04, '#bc8668')
-        window_front(0.17, top + 0.105, 0.14, 0.11, y=0.23, frame=trim, glass=glass, sill=False)
-        solar_heater(0.44, 0.53, top + 0.04, w=0.31)
+        box(0.10, 0.24, top + 0.03, 0.25, 0.44, 0.246, brick)
+        box(0.086, 0.22, top + 0.276, 0.28, 0.48, 0.024, '#b79980')
+        window_front(0.15, top + 0.105, 0.13, 0.115, y=0.24, frame=trim, glass=glass, sill=False)
+        solar_heater(0.45, 0.54, top + 0.034, w=0.29)
 
 
 @sprite('milk-tea', 1, 1)
 def milk_tea():
-    """木窗茶铺：街角取茶台、浆果色布篷、斜瓦顶和大杯招牌。"""
-    lot(1, 1, '#ebd3b2')
-    wood, cream, berry = '#a57351', '#fff1d5', '#f17977'
-    box(0.09, 0.32, Z0, 0.78, 0.55, 0.48, '#f9dca5', bevel=0.012)
-    box(0.08, 0.29, Z0, 0.81, 0.59, 0.075, '#c59974')
-    box(0.14, 0.295, Z0 + 0.075, 0.46, 0.035, 0.32, wood)
-    box(0.172, 0.283, Z0 + 0.16, 0.396, 0.018, 0.196, '#678e90')
-    box(0.119, 0.16, Z0 + 0.137, 0.51, 0.16, 0.034, '#ffe0a8')
-    for x, color in ((0.22, cream), (0.29, '#efb97e')):
-        cyl(x, 0.227, Z0 + 0.171, 0.022, 0.057, color, r2=0.027)
-    box(0.65, 0.302, Z0, 0.17, 0.025, 0.33, wood)
-    window_front(0.663, Z0 + 0.09, 0.145, 0.212, y=0.298, frame=wood, glass='#97c3c2', sill=False)
-    window_side(0.405, Z0 + 0.116, 0.36, 0.228, 0.87, frame=wood, glass='#95c6c7')
-    box(0.863, 0.48, Z0 + 0.12, 0.036, 0.024, 0.22, wood)
-    # 前檐布篷从墙面斜挑至人行道，两端用立柱承托。
-    for x in (0.115, 0.834):
-        box(x, 0.084, Z0, 0.022, 0.025, 0.34, wood)
+    """浅青金属屋面、内退的取茶窗口与独立的玻璃入口。"""
+    wood, cream, berry = '#a57351', '#fff1d5', '#e9837f'
+    wall, metal = '#f7dfb8', '#698781'
+    lot(1, 1, '#ddd0ba')
+    # 门面留空。后墙上的货架透过敞开的窗口可见，窗台从外侧一直延伸到店内。
+    box(0.09, 0.55, Z0, 0.78, 0.32, 0.45, wall)
+    for x in (0.09, 0.84):
+        box(x, 0.31, Z0, 0.03, 0.242, 0.45, wall)
+    box(0.12, 0.536, Z0 + 0.142, 0.44, 0.018, 0.25, '#aa987f')
+    box(0.13, 0.472, Z0 + 0.225, 0.39, 0.077, 0.013, cream)
+    for x, c in ((0.18, '#dcb87e'), (0.239, '#afbb8a'), (0.315, '#bc9478')):
+        cyl(x, 0.506, Z0 + 0.239, 0.021, 0.06, c, 10)
+    box(0.12, 0.315, Z0, 0.44, 0.12, 0.14, wood)
+    box(0.105, 0.255, Z0 + 0.14, 0.475, 0.218, 0.016, '#ddbb94')
+    for x in (0.22, 0.27):
+        cyl(x, 0.295, Z0 + 0.156, 0.014, 0.036, cream, r2=0.018)
+    box(0.557, 0.305, Z0, 0.026, 0.194, 0.39, wood)
+    curtain_front(0.593, Z0 + 0.014, 0.232, 0.34, 0.42, 2, 1, glass='#91babb', mull=wood)
+    box(0.695, 0.386, Z0 + 0.112, 0.009, 0.014, 0.052, metal)
+    box(0.58, 0.258, Z0, 0.257, 0.166, 0.012, '#cabaa1')
+    window_side(0.45, Z0 + 0.135, 0.31, 0.186, 0.87, frame=wood, glass='#a5c8c7', sill=False)
+
+    box(0.889, 0.61, Z0 + 0.152, 0.009, 0.012, 0.151, metal)
+    for y in (0.47, 0.725):
+        box(0.886, y, Z0, 0.051, 0.013, 0.078, metal)
+    box(0.873, 0.45, Z0 + 0.078, 0.082, 0.313, 0.015, wood)
+
+    # 招牌固定在檐口上。布篷只遮取餐窗，用细斜撑将前杆接回墙面。
+    box(0.086, 0.299, Z0 + 0.354, 0.789, 0.253, 0.096, wall)
+    box(0.114, 0.286, Z0 + 0.367, 0.485, 0.016, 0.076, wood)
+    text('奶茶', 0.355, 0.281, Z0 + 0.403, 0.069, M('#ffebc3', emit=0.35), 'front')
+    for x in (0.125, 0.546):
+        box(x - 0.003, 0.305, Z0 + 0.154, 0.017, 0.035, 0.204, wood)
+        box(x, 0.153, Z0 + 0.254, 0.009, 0.182, 0.009, metal, rot=(-0.42, 0, 0))
     for i in range(7):
         c = berry if i % 2 == 0 else cream
-        x = 0.08 + i * 0.115
-        box(x, 0.075, Z0 + 0.361, 0.115, 0.264, 0.023, c, rot=(0.27, 0, 0))
-        box(x, 0.076, Z0 + 0.303, 0.115, 0.024, 0.037, c)
-    box(0.062, 0.278, Z0 + 0.465, 0.84, 0.63, 0.045, wood)
-    prism(0.05, 0.262, Z0 + 0.51, 0.864, 0.65, 0.19, '#84bca9')
-    # 瓦垄沿两坡伸向檐口；加宽间距，远景也能读出屋面的方向。
-    for i in range(7):
-        x = 0.085 + i * 0.126
-        for y, pitch in ((0.257, 0.529), (0.581, -0.529)):
-            box(x, y - 0.023, Z0 + 0.600, 0.017, 0.376, 0.014, '#acd3b9', rot=(pitch, 0, 0))
-    box(0.038, 0.567, Z0 + 0.677, 0.888, 0.04, 0.03, '#689e92')
-    box(0.21, 0.263, Z0 + 0.407, 0.47, 0.035, 0.123, wood)
-    text('奶茶', 0.445, 0.257, Z0 + 0.464, 0.102, M('#ffdf9c', emit=0.45), 'front')
-    cx, cy, cz = 0.66, 0.59, Z0 + 0.657
-    cyl(cx, cy, cz, 0.105, 0.255, '#f1bf85', r2=0.139)
-    cyl(cx, cy, cz + 0.085, 0.123, 0.067, berry, r2=0.131)
-    for dx, dz in ((-0.050, 0.040), (0.014, 0.029), (0.06, 0.056)):
-        ball(cx + dx, cy - 0.094, cz + dz, 0.022, '#5b392e', 1)
-    cyl(cx, cy, cz + 0.255, 0.15, 0.029, cream)
-    cyl(cx + 0.028, cy, cz + 0.278, 0.014, 0.13, berry, 8, rot=(0, 0.22, 0))
-    cyl(0.908, 0.23, Z0, 0.060, 0.083, '#d38e67')
-    bush(0.908, 0.23, 0.069, Z0 + 0.083, '#94b971')
+        x = 0.10 + i * 0.07
+        box(x, 0.135, Z0 + 0.321, 0.07, 0.183, 0.007, c, rot=(0.32, 0, 0))
+        box(x, 0.139, Z0 + 0.274, 0.07, 0.008, 0.023, c)
+    # 浅坡立边金属屋面，檐口设天沟，落水管沿侧墙下行。
+    box(0.07, 0.288, Z0 + 0.447, 0.82, 0.599, 0.018, wood)
+    prism(0.056, 0.274, Z0 + 0.465, 0.85, 0.624, 0.09, '#8abaaa')
+    for i in range(8):
+        x = 0.089 + i * 0.11
+        for y, angle in ((0.43, 0.281), (0.742, -0.281)):
+            box(x, y - 0.163, Z0 + 0.51, 0.009, 0.326, 0.008, '#a7ccbf', rot=(angle, 0, 0))
+    box(0.052, 0.265, Z0 + 0.454, 0.857, 0.02, 0.016, metal)
+    cyl(0.89, 0.28, Z0, 0.009, 0.458, metal, 8)
+    # 入口旁的小杯形灯箱位于雨篷上方，从街角也能辨认。
+    box(0.766, 0.156, Z0 + 0.423, 0.016, 0.154, 0.013, metal)
+    cyl(0.774, 0.16, Z0 + 0.319, 0.036, 0.103, '#ebbe8e', r2=0.047)
+    cyl(0.774, 0.16, Z0 + 0.352, 0.041, 0.025, berry, r2=0.045)
+    cyl(0.774, 0.16, Z0 + 0.422, 0.05, 0.012, cream)
 
 
 # ================================================================ 本文件自用零件

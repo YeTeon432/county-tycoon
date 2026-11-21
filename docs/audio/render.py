@@ -14,18 +14,13 @@ def time(seconds):
     return np.arange(round(seconds * RATE)) / RATE
 
 
-def note(midi, seconds, voice='pluck'):
+def note(midi, seconds):
     t = time(seconds)
     freq = 440 * 2 ** ((midi - 69) / 12)
     phase = 2 * np.pi * freq * t
-    if voice == 'reed':
-        phase += 0.09 * np.sin(2 * np.pi * 4.6 * t)
-        signal = np.sin(phase) + 0.17 * np.sin(2 * phase) + 0.06 * np.sin(3 * phase)
-        envelope = (1 - np.exp(-t / 0.05)) * np.exp(-t / 2)
-    else:
-        signal = np.sin(phase) + 0.36 * np.sin(2.003 * phase) * np.exp(-t * 8)
-        signal += 0.20 * np.sin(3.01 * phase) * np.exp(-t * 12)
-        envelope = (1 - np.exp(-t * 260)) * np.exp(-t * (3 if voice == 'bass' else 4.8))
+    signal = np.sin(phase) + 0.36 * np.sin(2.003 * phase) * np.exp(-t * 8)
+    signal += 0.20 * np.sin(3.01 * phase) * np.exp(-t * 12)
+    envelope = (1 - np.exp(-t * 260)) * np.exp(-t * 4.8)
     return signal * envelope * np.clip((seconds - t) / 0.055, 0, 1)
 
 
@@ -68,43 +63,75 @@ def cues():
             out.writeframes(pcm(samples))
 
 
+def swell(t, duration, attack, release):
+    """A raised-cosine fade on each end, with zero slope at the joins."""
+    rise = np.sin(np.pi / 2 * np.minimum(1, t / attack)) ** 2
+    fall = np.sin(np.pi / 2 * np.minimum(1, (duration - t) / release)) ** 2
+    return rise * fall
+
+
+def strings(midi, seconds):
+    t = time(seconds)
+    phase = 2 * np.pi * 440 * 2 ** ((midi - 69) / 12) * t
+    # Slightly spread tuning and a slow bow stroke soften the held chord.
+    body = .66 * np.sin(phase) + .34 * np.sin(phase * 1.0011)
+    body += .17 * np.sin(2 * phase) + .09 * np.sin(3 * phase)
+    return body * swell(t, seconds, 2.4, 2.6)
+
+
+def flute(phrase, air):
+    """One breath per phrase. Slide into the next pitch without a new attack."""
+    seconds = sum(length for _, length in phrase)
+    t = time(seconds)
+    pitches = np.full(len(t), float(phrase[0][0]))
+    position = 0
+    for pitch, length in phrase:
+        if position:
+            glide = np.clip((t - position + .07) / .13, 0, 1)
+            pitches += (pitch - previous) * glide**2 * (3 - 2 * glide)
+        previous = pitch
+        position += length
+    freq = 440 * 2 ** ((pitches - 69) / 12)
+    freq *= 1 + .0018 * np.sin(2 * np.pi * 4.4 * t) * np.minimum(1, t)
+    phase = 2 * np.pi * np.cumsum(freq) / RATE
+    body = np.sin(phase) + .19 * np.sin(2 * phase) + .07 * np.sin(3 * phase)
+    breath = np.convolve(air.normal(size=len(t)), np.ones(8) / 8, 'same')
+    dynamics = .86 + .14 * np.sin(np.pi * t / seconds)
+    return (body + .10 * breath) * dynamics * swell(t, seconds, .54, .88)
+
+
 def theme():
-    # 24 bars in D. The middle eight answer the plucked melody with a soft reed.
-    beat = 60 / 92
-    chords = [(50, 57, 62, 66), (47, 54, 59, 62), (43, 50, 55, 59), (45, 52, 57, 64),
-              (50, 57, 62, 66), (43, 50, 59, 62), (45, 52, 57, 61), (50, 57, 62, 66)]
-    # (pitch, beats); 0 denotes a rest.
+    # Free-time D major. All score positions and lengths are in seconds.
+    duration = 76
+    chords = [(0, (50, 57, 64, 66)), (11, (47, 54, 62, 69)),
+              (20, (43, 55, 62, 69)), (30, (50, 57, 62, 66)),
+              (39, (52, 59, 62, 67)), (50, (43, 55, 62, 66)),
+              (60, (45, 57, 62, 64)), (68, (45, 54, 61, 64))]
+    # Render the tail of the last chord across the loop boundary.
+    bed = np.zeros(round((duration + 3) * RATE))
+    for i, (start, chord) in enumerate(chords):
+        end = chords[i + 1][0] if i + 1 < len(chords) else duration
+        for pitch, gain in zip(chord, (.077, .059, .042, .037)):
+            sound = strings(pitch, end - start + 2.6)
+            offset = round(start * RATE)
+            bed[offset:offset + len(sound)] += gain * sound
+    samples = bed[:duration * RATE].copy()
+    tail = bed[duration * RATE:]
+    samples[:len(tail)] += tail
+
     phrases = [
-        [(0,.5),(69,.5),(74,1),(76,.5),(78,1.5)], [(78,1),(76,.5),(74,.5),(71,1.5),(0,.5)],
-        [(67,.5),(69,.5),(71,1),(74,1.5),(71,.5)], [(69,2),(0,.5),(64,.5),(69,1)],
-        [(74,.75),(76,.25),(78,1),(81,1.5),(78,.5)], [(76,1),(74,1),(71,1.5),(67,.5)],
-        [(69,.5),(71,.5),(73,1),(76,1),(69,1)], [(74,2.5),(0,1.5)],
-        [(78,1.5),(81,.5),(83,1),(81,1)], [(78,2),(76,1),(74,1)],
-        [(79,1),(78,.5),(76,.5),(74,2)], [(76,2.5),(0,.5),(69,1)],
-        [(74,.5),(78,.5),(81,1),(86,1.5),(81,.5)], [(83,1.5),(81,.5),(79,2)],
-        [(76,1),(73,1),(69,1),(71,1)], [(74,3),(0,1)],
-        [(0,.5),(69,.5),(74,1),(76,.5),(78,1.5)], [(78,1),(81,.5),(78,.5),(76,1),(74,1)],
-        [(71,1),(67,.5),(69,.5),(74,1.5),(71,.5)], [(69,2.5),(0,1.5)],
-        [(74,.5),(76,.5),(78,1),(81,1),(78,1)], [(79,1),(78,1),(74,1),(71,1)],
-        [(69,.5),(71,.5),(73,1),(76,1),(69,1)], [(74,3),(0,1)]]
-    parts = []
-    for bar, melody in enumerate(phrases):
-        start = bar * 4 * beat
-        chord = chords[bar % 8]
-        parts.append((start, note(chord[0]-12, 1.65, 'bass'), .20))
-        for pos, tone in [(0.52, 1), (1.04, 2), (1.54, 3), (2.52, 1), (3.03, 3)]:
-            parts.append((start + pos * beat, note(chord[tone], .84), .105))
-        pos = 0
-        for pitch, length in melody:
-            if pitch:
-                voice = 'reed' if 8 <= bar < 16 else 'pluck'
-                parts.append((start + pos * beat, note(pitch, length * beat * .94, voice), .24))
-            pos += length
-    samples = mix(24 * 4 * beat, parts)
-    # A short room reflection, taper the last millisecond to meet the silent downbeat.
-    delay = round(.091 * RATE)
-    samples[delay:] += .13 * samples[:-delay].copy()
-    samples[-64:] *= np.linspace(1, 0, 64)
+        (3.6, [(69, 2.1), (73, 1.2), (74, 3.5)]),
+        (13.4, [(74, 1.5), (71, 2.8), (69, 2.6)]),
+        (24.8, [(67, 2.5), (69, 1.4), (74, 3.1), (73, 1.6)]),
+        (38.1, [(71, 2.4), (74, 1.8), (76, 3.3)]),
+        (50.5, [(78, 1.9), (76, 1.3), (74, 3.6)]),
+        (63.3, [(71, 2.1), (69, 2.8), (66, 3.4)]),
+    ]
+    air = np.random.default_rng(1565)
+    melody = mix(duration, [(start, flute(phrase, air), .155) for start, phrase in phrases])
+    samples += melody
+    for delay, gain in [(.081, .085), (.173, .045), (.281, .025)]:
+        samples += gain * np.roll(melody, round(delay * RATE))
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(RATE),
                     '-ac', '1', '-i', '-', '-codec:a', 'libmp3lame', '-b:a', '64k',
                     str(OUT / 'town-theme.mp3')], input=pcm(samples), check=True)

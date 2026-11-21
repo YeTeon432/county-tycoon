@@ -91,8 +91,8 @@ export class World3D extends Component {
     private _decalMat: Material | null = null;
     private readonly _decals = new Map<DecalLayer, Node>();
     private readonly _decalCapacity = new Map<DecalLayer, number>();
-    /** 扩容后保留旧网格到场景销毁，原生渲染线程可能还在用它。 */
-    private readonly _retiredGroundMeshes: Mesh[] = [];
+    /** 场景拥有的网格。销毁时子节点已被释放，直接从这里回收；扩容淘汰的网格也留到此时。 */
+    private readonly _sceneMeshes = new Set<Mesh>();
     /** 材质还没到时先记下，到了再画 */
     private readonly _decalPending = new Map<DecalLayer, readonly Decal[]>();
     /** 模型、材质都到了 */
@@ -356,6 +356,7 @@ export class World3D extends Component {
         const mr = node.addComponent(MeshRenderer);
         mr.shadowCastingMode = 0;
         mr.mesh = mesh;
+        this._sceneMeshes.add(mesh);
         mr.setMaterial(this._actorMat!, 0);
         mr.getMaterialInstance(0)!.setProperty('mainTexture', tex);
         if (mr.model) mr.model.priority = 1;
@@ -449,6 +450,7 @@ export class World3D extends Component {
             mr.setSharedMaterial(mat, 0);
             mr.mesh = utils.MeshUtils.createDynamicMesh(0, geometry, undefined,
                 { maxSubMeshes: 1, maxSubMeshVertices: nextCapacity * 4, maxSubMeshIndices: nextCapacity * 6 });
+            this._sceneMeshes.add(mr.mesh);
             this._decals.set(layer, node);
             this._decalCapacity.set(layer, nextCapacity);
         } else {
@@ -462,17 +464,12 @@ export class World3D extends Component {
 
     private retireGroundMesh(node: Node): void {
         node.active = false;
-        this._retiredGroundMeshes.push(node.getComponent(MeshRenderer)!.mesh!);
         node.destroy();
     }
 
     protected onDestroy(): void {
-        for (const node of this._decals.values()) node.getComponent(MeshRenderer)?.mesh?.destroy();
-        for (const mesh of this._retiredGroundMeshes) mesh.destroy();
-        this._groundNode?.getComponent(MeshRenderer)?.mesh?.destroy();
+        for (const mesh of this._sceneMeshes) mesh.destroy();
         this._edgeMesh?.destroy();
-        this._highlands?.mesh?.destroy();
-        this._streetNode?.getComponent(MeshRenderer)?.mesh?.destroy();
         this._streetMat?.destroy();
         for (const mats of this._previewMats.values()) mats.forEach((mat) => mat.destroy());
         this._decalMat?.destroy();
@@ -667,7 +664,11 @@ export class World3D extends Component {
         if (this._highlands) {
             const previous = this._highlands.mesh;
             this._highlands.mesh = mesh;
-            previous?.destroy();
+            if (mesh) this._sceneMeshes.add(mesh);
+            if (previous) {
+                this._sceneMeshes.delete(previous);
+                previous.destroy();
+            }
         }
     }
 
@@ -833,6 +834,7 @@ export class World3D extends Component {
             mr.setSharedMaterial(mat, 0);
             mr.mesh = utils.MeshUtils.createDynamicMesh(0, geometry, undefined,
                 { maxSubMeshes: 1, maxSubMeshVertices: nextCapacity * 4, maxSubMeshIndices: nextCapacity * 6 });
+            this._sceneMeshes.add(mr.mesh);
             mr.getMaterialInstance(0)!.setProperty('mainTexture', texture);
             this._groundCapacity.set(node, nextCapacity);
         } else {

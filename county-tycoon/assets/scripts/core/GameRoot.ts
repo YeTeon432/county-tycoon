@@ -13,7 +13,7 @@ import { createSimulation, loadSimJson } from '../core/SimLoader';
 import { loadTerrain } from '../core/TerrainConfig';
 import { Terrain } from '../core/Terrain';
 import { WorldView } from '../world/WorldView';
-import { SaveManager, readSave, restoreTown } from '../core/SaveGame';
+import { SaveManager, SAVE_KEY, LoadResult, clearSave, listProfiles, profileKey, readSave, restoreTown } from '../core/SaveGame';
 import { PlaceControls } from '../world/PlaceControls';
 import { TopBar } from '../ui/TopBar';
 import { TrackChip } from '../ui/TrackChip';
@@ -103,25 +103,39 @@ export class GameRoot extends Component {
             .then(({ world, buildings, sim: [economy, names, progress], terrain }) => {
                 this._config = world;
                 this._progressJson = progress;
-                this.build(world, buildings, economy, names, terrain);
+                if (platform === 'web' && usesLandscapeWebLayout()) {
+                    director.emit('town-profiles-ready', listProfiles, (id: number, create: boolean) => {
+                        const key = profileKey(id);
+                        const exists = getPlatform().getItem(key) !== null;
+                        if (create && exists) return '这个编号刚被使用，请重新新建档案。';
+                        const loaded = create ? { ok: false } : readSave(key);
+                        if (!create && !loaded.ok) return '这个档案暂时无法读取，可以选择其他档案。';
+                        return this.build(world, buildings, economy, names, terrain, loaded, key, true);
+                    });
+                } else {
+                    this.build(world, buildings, economy, names, terrain, readSave(), SAVE_KEY, false);
+                }
             })
             .catch((err) => {
                 console.error('[GameRoot] 启动失败', err);
+                director.emit('town-load-error', err);
             });
     }
 
     /** 存一次；写失败提示玩家（以前只在控制台警告，玩家不知道存档没存上，T548）。同一次失败只提示一次 */
     private _saveFailShown = false;
-    private save(): void {
-        if (!this._saver) return;
+    private save(): boolean {
+        if (!this._saver) return false;
         const ok = this._saver.saveNow();
-        if (ok) { this._saveFailShown = false; return; }
-        if (this._saveFailShown || !this._ui) return;
+        if (ok) { this._saveFailShown = false; return true; }
+        if (this._saveFailShown || !this._ui) return false;
         this._saveFailShown = true;
         this._ui.say('存档没存上（手机存储空间不够？），上一份存档还在');
+        return false;
     }
 
-    private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any, terrain: Terrain): void {
+    private build(world: WorldConfig, buildings: BuildingDef[], economy: any, names: any, terrain: Terrain,
+        loaded: LoadResult, key: string, useProfiles: boolean): string | null {
         if (terrain.width !== world.gridWidth || terrain.height !== world.gridHeight) {
             console.warn(`[GameRoot] map.json 是 ${terrain.width}×${terrain.height}，world.json 是 ${world.gridWidth}×${world.gridHeight}，以 map.json 为准`);
         }
@@ -134,7 +148,6 @@ export class GameRoot extends Component {
         }
 
         // 有存档就读档（D022：以前存档只写不读）；读不到或坏了就新开一局
-        const loaded = readSave();
         let sim;
         if (loaded.ok && loaded.save) {
             const defs = new Map(buildings.map((d) => [d.id, d] as [string, BuildingDef]));
@@ -153,7 +166,12 @@ export class GameRoot extends Component {
         }
         this._sim = sim;
         // 自动存档：切后台时 + 每个月结算后（DESIGN 1：每月自动存）
-        this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model);
+        this._saver = new SaveManager(() => (this._sim ? this._sim.state : null), () => this._model, key);
+        if (useProfiles && this._newGame && !this._saver.saveNow()) {
+            clearSave(key);
+            this._saver = null;
+            return '本机空间不足，未能建立新档案。请释放空间后重试。';
+        }
         this._saver.startAutoSave();
         sim.onMonth = () => {
             this.syncCenterAppearance();
@@ -170,6 +188,21 @@ export class GameRoot extends Component {
         this.buildPlaceControls();
         // 经营界面（支线 B）放最后，压在所有东西上面
         this._ui = UiRoot.create(this.node, this._sim, model, { newGame: this._newGame });
+        if (useProfiles) {
+            // 记录本次进入时间，短暂试玩后刷新也能把刚玩的城市排在首位。
+            if (!this._newGame) this.save();
+            if (getPlatform().sessionOnly) this._ui.say('浏览器未开放本地存储，本次档案仅在关闭页面前有效。');
+            this._ui.switchProfile = () => {
+                if (!this.save()) return;
+                const scene = director.getScene()!;
+                if (director.loadScene(scene.name, (err) => {
+                    if (err) director.emit('town-load-error', err);
+                })) {
+                    this._saver?.stopAutoSave();
+                    director.emit('town-return-profiles');
+                }
+            };
+        }
         // 空手点建筑 → 界面开详情；详情里的「换朝向」按钮 → WorldView
         const view = this._view, ui = this._ui;
         if (this._bar) ui.attachBuildingBar(this._bar);
@@ -291,6 +324,7 @@ export class GameRoot extends Component {
             view.onTownChanged = () => { this.updatePlacementHint(); ui.refreshOpenPanels(); this.save(); };
         }
         this.updatePlacementHint();
+        return null;
     }
 
     /**

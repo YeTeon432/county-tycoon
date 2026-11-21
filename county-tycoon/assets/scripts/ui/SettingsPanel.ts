@@ -1,3 +1,4 @@
+import { usesLandscapeWebLayout } from '../platform/Platform';
 import { townAudio } from '../core/TownAudio';
 import { _decorator, Graphics, Node } from 'cc';
 import { Panel } from './Panel';
@@ -7,9 +8,9 @@ const { ccclass } = _decorator;
 
 @ccclass('SettingsPanel')
 export class SettingsPanel extends Panel {
-    protected cardH = 400;
+    protected cardH = usesLandscapeWebLayout() ? 456 : 400;
 
-    static show(parent: Node, gridOn: boolean, onGridChange: (on: boolean) => void, onSaveError: () => void): SettingsPanel {
+    static show(parent: Node, gridOn: boolean, onGridChange: (on: boolean) => void, onSaveError: () => void, switchProfile: (() => void) | null): SettingsPanel {
         const panel = Panel.open(SettingsPanel, parent, '设置', '');
         panel.renderPage = () => {
             panel.buildRow(0, 'Grid', '常显地图网格', '放置和拆除时自动显示', gridOn, on => {
@@ -19,6 +20,10 @@ export class SettingsPanel extends Panel {
             panel.buildRow(1, 'Effects', '游戏音效', '操作与经营事件提示', townAudio.effectsOn, on => {
                 if (!townAudio.setEffects(on)) onSaveError();
             });
+            if (switchProfile) {
+                const button = makeButton(panel.content!, 'SwitchProfile', '切换档案', panel.contentW, 62, 'secondary', switchProfile);
+                button.node.setPosition(0, panel.contentTop - 262, 0);
+            }
         };
         panel.renderPage();
         return panel;

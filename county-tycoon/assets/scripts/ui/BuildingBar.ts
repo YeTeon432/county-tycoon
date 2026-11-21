@@ -793,7 +793,7 @@ export class BuildingBar extends Component {
     protected onDestroy(): void {
         view.targetOff(this);
         if (this._sheet) InputGuard.remove(this._sheet);
-        if (this._hint?.node.parent) InputGuard.remove(this._hint.node.parent);
+        if (this._hint?.node?.parent) InputGuard.remove(this._hint.node.parent);
         if (this._hintArrow) Tween.stopAllByTarget(this._hintArrow);
     }
 }

@@ -1,5 +1,5 @@
 import { townAudio } from '../core/TownAudio';
-import { _decorator, Component, JsonAsset, Layers, Node, profiler, resources, UITransform } from 'cc';
+import { _decorator, BlockInputEvents, Component, JsonAsset, Layers, Node, profiler, resources, UIOpacity, UITransform } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
 import { MonthlyReport, TownLevel } from '../core/sim/types';
@@ -446,14 +446,16 @@ export class UiRoot extends Component {
         // 详情面板保持打开，档案压在上面；档案关掉后详情还在，符合"点了人再返回"的操作习惯。
         // 但档案只留一份：再点另一个人时先关掉旧档案（否则叠两层，关的时候会重复销毁报错）
         const old = this._residentPanel;
-        this._residentPanel = null;
-        if (old && old.node && old.node.isValid) old.node.destroy();
         const onTrack = this.requestTrack ? (id: number, focusHome?: boolean) => this.startTrack(id, focusHome) : undefined;
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
+            if (old?.node?.isValid) old.node.destroy();
             townAudio.action('tap');
             const previous = this._listPanel ?? this._topPanel;
-            if (previous) previous.node.active = false;
+            // 保留上一层的 Graphics 和名单位置。档案的全屏节点接管触摸和滚轮。
+            const opacity = previous && (previous.node.getComponent(UIOpacity) ?? previous.node.addComponent(UIOpacity));
+            if (opacity) opacity.opacity = 0;
+            panel.node.addComponent(BlockInputEvents);
             panel.onJobChanged = (message) => {
                 townAudio.event('wish');
                 panel.showFeedback(message);
@@ -463,8 +465,9 @@ export class UiRoot extends Component {
                 this.onResidentChanged?.();
             };
             panel.onClosed = () => {
-                if (previous?.node.isValid) previous.node.active = true;
-                if (this._residentPanel === panel) this._residentPanel = null;
+                if (this._residentPanel !== panel) return;
+                if (opacity?.isValid) opacity.opacity = 255;
+                this._residentPanel = null;
             };
             this._residentPanel = panel;
         }

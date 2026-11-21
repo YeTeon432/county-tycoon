@@ -89,6 +89,7 @@ export class BuildingBar extends Component {
     private static readonly THUMB_H = 84;
 
     onSelect: ((def: BuildingDef | null) => void) | null = null;
+    onUpgradeRoads: (() => void) | null = null;
     onCancelBuild: (() => void) | null = null;
     onDemolishToggle: ((on: boolean) => void) | null = null;
     /** 点了未解锁 / 买不起的卡片：给一句提示（UiRoot 接到顶栏提示条） */
@@ -117,6 +118,7 @@ export class BuildingBar extends Component {
     private _drawDemolish: (() => void) | null = null;
     private _sheet: Node | null = null;
     private _hint: Label | null = null;
+    private _upgradeRoads: Node | null = null;
     private _cancelBuild: Node | null = null;
     private _selectedId: string | null = null;
 
@@ -663,15 +665,30 @@ export class BuildingBar extends Component {
         }, this);
         cancel.active = false;
         this._cancelBuild = cancel;
+
+        const upgrade = makePanelNode(node, 'UpgradeRoads', btnW, btnH);
+        upgrade.setPosition(cancel.position.x - btnW - 8, 0, 0);
+        drawGraphicsOnEnable(upgrade, g => {
+            drawHudTile(g, -btnW / 2, -btnH / 2, btnW, btnH, 9, UI_HUD.accent, UI_HUD.accentRim);
+        });
+        makeLabel(upgrade, 'Text', '一键升级', 21, UI_HUD.onAccent, btnW - 8).isBold = true;
+        upgrade.on(Node.EventType.TOUCH_END, () => {
+            if (!this._dragging) this.onUpgradeRoads?.();
+        }, this);
+        upgrade.active = false;
+        this._upgradeRoads = upgrade;
     }
 
-    showCancelBuild(show: boolean): void {
-        const btn = this._cancelBuild, hint = this._hint;
-        if (!btn || !hint || btn.active === show) return;
+    showBuildActions(show: boolean, canUpgradeRoads: boolean): void {
+        const btn = this._cancelBuild, upgrade = this._upgradeRoads, hint = this._hint;
+        if (!btn || !upgrade || !hint) return;
         btn.active = show;
+        upgrade.active = canUpgradeRoads;
         const box = hint.node.getComponent(UITransform)!;
         const width = hint.node.parent!.getComponent(UITransform)!.width;
-        box.setContentSize(width - 36 - (show ? btn.getComponent(UITransform)!.width : 0), box.height);
+        const actionsWidth = (show ? btn.getComponent(UITransform)!.width : 0)
+            + (canUpgradeRoads ? upgrade.getComponent(UITransform)!.width + 8 : 0);
+        box.setContentSize(width - 36 - actionsWidth, box.height);
     }
 
     setHint(text: string): void {

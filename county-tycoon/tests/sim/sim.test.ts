@@ -1870,4 +1870,42 @@ suite('住宅小区', () => {
     });
 });
 
+suite('全城土路升级', () => {
+    test('整批校验后才扣差价，开局路和自铺路使用同一套养护规则', () => {
+        const cfg = loadFullConfig();
+        const map = new MapBuilder().hRoad(0, 2, 0);
+        const town = map.view();
+        const roads = town.allBuildings().slice();
+        roads[2].defId = 'road';
+        const sim = new Simulation(cfg, town, { opening: false });
+        const pave = (uids: ReadonlySet<number>) => {
+            eq(uids.size, 2);
+            for (const road of roads) if (uids.has(road.uid)) road.defId = 'road';
+            return true;
+        };
+        eq(sim.roadUpgradeQuote(), null);
+        ok(sim.upgradeDirtRoads(pave));
+        sim.state.unlocked!.push('road');
+        ok(sim.onBuilt(roads[1].uid, 'dirt-road'));
+        const quote = sim.roadUpgradeQuote()!;
+        eq(quote.count, 2);
+        eq(quote.cost, 2 * (cfg.building('road')!.cost - cfg.building('dirt-road')!.cost));
+        sim.state.finance.funds = quote.cost - 1;
+        ok(sim.upgradeDirtRoads(pave));
+        eq(sim.roadUpgradeQuote()!.count, 2);
+        eq(sim.state.finance.funds, quote.cost - 1);
+        sim.state.finance.funds++;
+        ok(sim.upgradeDirtRoads(() => false));
+        eq(sim.state.finance.funds, quote.cost);
+        eq(sim.upgradeDirtRoads(pave), null);
+        eq(sim.state.finance.funds, 0);
+        eq(sim.roadUpgradeQuote()!.count, 0);
+        eq(sim.state.buildings.length, 2);
+        for (const road of roads.slice(0, 2)) eq(sim.building(road.uid)!.defId, 'road');
+        ok(sim.upgradeDirtRoads(pave));
+        eq(sim.state.finance.funds, 0);
+        eq(sim.stepMonth().expense.construction, quote.cost + cfg.building('dirt-road')!.cost);
+    });
+});
+
 report();

@@ -5,22 +5,6 @@
   "uuid": "20a484bc-2ea2-49f6-ab65-7051c83390e4",
   "files": [],
   "subMetas": {
-    "53647": {
-      "importer": "gltf-material",
-      "uuid": "20a484bc-2ea2-49f6-ab65-7051c83390e4@53647",
-      "displayName": "",
-      "id": "53647",
-      "name": "emit.material",
-      "userData": {
-        "gltfIndex": 1
-      },
-      "ver": "1.0.14",
-      "imported": true,
-      "files": [
-        ".json"
-      ],
-      "subMetas": {}
-    },
     "e10e4": {
       "importer": "gltf-mesh",
       "uuid": "20a484bc-2ea2-49f6-ab65-7051c83390e4@e10e4",
@@ -29,7 +13,7 @@
       "name": "立方体.mesh",
       "userData": {
         "gltfIndex": 0,
-        "triangleCount": 4402
+        "triangleCount": 6735
       },
       "ver": "1.1.1",
       "imported": true,
@@ -99,8 +83,7 @@
       "skeletons": [],
       "textures": [],
       "materials": [
-        "20a484bc-2ea2-49f6-ab65-7051c83390e4@ce988",
-        "20a484bc-2ea2-49f6-ab65-7051c83390e4@53647"
+        "20a484bc-2ea2-49f6-ab65-7051c83390e4@ce988"
       ],
       "scenes": [
         "20a484bc-2ea2-49f6-ab65-7051c83390e4@c3169"

@@ -663,59 +663,142 @@ def apartment():
     ebike(0.3, 0.74, 'blue'); ebike(0.6, 0.74, 'red')
 
 
+def school_wing(name, outline, bottom, floors, glazing, wall):
+    """逐跨围合外墙。窗台、四周洞口和后退的玻璃共用边界，斜切转角也有完整立面。"""
+    floor_h = 0.31
+    verts, faces, slots = [], [], []
+    colors = [wall, '#8e9b9c', '#547382', '#edf0da', '#57889c', '#83adbb', '#93bfca']
+    # 玻璃窗下的实体墙、窗洞内侧和细窗框都参与导出时的遮蔽烘焙。
+    def face(points, slot):
+        first = len(verts)
+        verts.extend(points)
+        faces.append(tuple(range(first, first + len(points))))
+        slots.append(slot)
+
+    for side, (x, y) in enumerate(outline):
+        ex, ey = outline[(side + 1) % len(outline)]
+        length = math.hypot(ex - x, ey - y)
+        ux, uy = (ex - x) / length, (ey - y) / length
+
+        def point(u, z, recess=0):
+            return (x + u * ux - recess * uy, y + u * uy + recess * ux, z)
+
+        def panel(left, right, low, high, slot, recess=0):
+            face([point(left, low, recess), point(right, low, recess),
+                  point(right, high, recess), point(left, high, recess)], slot)
+
+        count = max(1, round(length / (0.21 if glazing else 0.235)))
+        bay = length / count
+        for f in range(floors):
+            z = bottom + f * floor_h
+            sill = z + (0.046 if glazing else 0.077)
+            head = z + (0.282 if glazing else 0.254)
+            panel(0, length, z, sill, 2 if glazing else 0)
+            panel(0, length, head, z + floor_h, 1 if glazing else 0)
+            if glazing:
+                # 连续窗带只有上下两道通长收口。
+                face([point(0, sill), point(length, sill), point(length, sill, 0.013), point(0, sill, 0.013)], 1)
+                face([point(0, head, 0.013), point(length, head, 0.013), point(length, head), point(0, head)], 1)
+            for j in range(count):
+                lo, hi = j * bay, (j + 1) * bay
+                jamb = bay * (0.046 if glazing else 0.125)
+                left, right = lo + jamb, hi - jamb
+                depth = 0.013 if glazing else 0.032
+                jamb_depth = depth if glazing else 0
+                panel(lo, left, sill, head, 1 if glazing else 0, jamb_depth)
+                panel(right, hi, sill, head, 1 if glazing else 0, jamb_depth)
+                if not glazing:
+                    edge = [(left, sill), (right, sill), (right, head), (left, head)]
+                    for k, (a, b) in enumerate(edge):
+                        c, d = edge[(k + 1) % 4]
+                        face([point(a, b), point(c, d), point(c, d, depth), point(a, b, depth)], 1)
+                # 同一朝向的大面玻璃连续映出天光，少数住户的窗帘形成细微变化。
+                pane = (side + j // 2 + f // 4) % 3
+                panel(left, right, sill, head, 4 + pane, depth)
+                split = left + (right - left) * 0.63
+                panel(split - 0.004, split + 0.004, sill, head, 1, depth - 0.003)
+                if not glazing and (2 * j + f + side) % 7 == 0:
+                    panel(left, split - 0.005, head - 0.053, head, 3, depth - 0.002)
+            if glazing:
+                panel(0, length, z + 0.010, z + 0.020, 3, -0.003)
+    top = bottom + floors * floor_h
+    face([(x, y, top) for x, y in outline], 1)
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    for color in colors:
+        mesh.materials.append(M(color))
+    for poly, slot in zip(mesh.polygons, slots):
+        poly.material_index = slot
+    return top
+
+
 @sprite('school-house', 2, 2)
 def school_house():
-    """学区房：9 层蓝玻璃住宅（白框）+ 红色四坡顶，楼下草坪、树、小路、石头标牌「书香苑」。"""
-    lot(2, 2, m='grass')
-    bglass = M('#5aa0e6', rough=0.08, metal=0.25)
-    x0, y0, sx, sy, fh, nf = 0.42, 0.62, 1.16, 1.0, 0.34, 9
-    box(x0 - 0.08, y0 - 0.18, 0, sx + 0.16, sy + 0.26, Z0 + 0.01, 'pave')             # 楼周铺装
-    box(0.86, 0.0, 0, 0.3, 0.46, Z0 + 0.01, 'pave')                                    # 入户小路
-    box(x0, y0, Z0, sx, sy, fh * nf, 'white', bevel=0.006)
-    top = Z0 + fh * nf
-    cols_f, cols_s = 4, 3
-    for f in range(nf):
-        z = Z0 + f * fh
-        for i in range(cols_f):
-            cw = sx / cols_f
-            if f == 0 and i in (1, 2):
-                continue
-            box(x0 + i * cw + 0.03, y0 - 0.016, z + 0.04, cw - 0.06, 0.02, fh - 0.08, bglass)
-            if f and i in (0, 3):
-                box(x0 + i * cw + 0.02, y0 - 0.06, z + 0.02, cw - 0.04, 0.06, 0.02, 'white')
-                box(x0 + i * cw + 0.02, y0 - 0.06, z + 0.04, cw - 0.04, 0.008, 0.09, M('#a8d4f5', rough=0.1))
-        for i in range(cols_s):
-            cw = sy / cols_s
-            box(x0 + sx - 0.004, y0 + i * cw + 0.03, z + 0.04, 0.02, cw - 0.06, fh - 0.08, bglass)
-            if f and i == 1 and f % 2:
-                ac_unit(x0 + sx + 0.016, y0 + i * cw + 0.04, z + 0.01, face='side')
-        # 背面 / 左面（D031）：同样的蓝玻璃窗，背面隔层挂空调
-        for i in range(cols_f):
-            cw = sx / cols_f
-            box(x0 + i * cw + 0.03, y0 + sy - 0.004, z + 0.04, cw - 0.06, 0.02, fh - 0.08, bglass)
-            if f and i in (1, 2) and f % 2 == 0:
-                box(x0 + i * cw + cw / 2 - 0.07, y0 + sy, z + 0.01, 0.14, 0.07, 0.1, 'white', bevel=0.005)
-        for i in range(cols_s):
-            cw = sy / cols_s
-            box(x0 - 0.016, y0 + i * cw + 0.03, z + 0.04, 0.02, cw - 0.06, fh - 0.08, bglass)
-    # 入口
-    cw = sx / cols_f
-    box(x0 + cw + 0.04, y0 - 0.012, Z0, 2 * cw - 0.08, 0.02, fh - 0.06, 'frame')
-    box(x0 + cw + 0.06, y0 - 0.02, Z0 + 0.02, 2 * cw - 0.12, 0.02, fh - 0.1, 'glass')
-    box(x0 + cw - 0.02, y0 - 0.16, Z0 + fh - 0.04, 2 * cw + 0.04, 0.16, 0.03, 'white')
-    for xx in (x0 + cw, x0 + 3 * cw - 0.02):
-        box(xx, y0 - 0.15, Z0, 0.02, 0.02, fh - 0.04, 'white')
-    # 红色四坡顶
-    box(x0 - 0.04, y0 - 0.04, top, sx + 0.08, sy + 0.08, 0.05, 'white')
-    pyramid(x0 - 0.07, y0 - 0.07, top + 0.05, sx + 0.14, sy + 0.14, 0.75, 'roof_red')
-    # 草坪
-    tree(0.2, 0.3, 1.0, z=Z0); tree(0.25, 1.2, 0.9, z=Z0); tree(1.82, 0.25, 0.9, z=Z0)
-    tree(0.55, 0.18, 0.7, z=Z0, kind='pine'); tree(1.5, 0.15, 0.7, z=Z0, kind='pine')
-    for (bx, by) in [(0.36, 0.5), (0.7, 0.4), (1.32, 0.38), (1.66, 0.48), (1.85, 0.7), (1.86, 1.1)]:
-        bush(bx, by, 0.06, z=Z0)
-    box(1.24, 0.06, Z0, 0.24, 0.08, 0.12, M('#d9d3c3'), bevel=0.02)                     # 石头标牌
-    text('书香苑', 1.36, 0.054, Z0 + 0.065, 0.055, 'red', 'front')
-    lamp(0.84, 0.5)
+    """书香苑：陶砖住宅翼、切角玻璃塔楼和临街门厅共用同一座院落。"""
+    lot(2, 2, '#c2bbad')
+    lawn, stone, trim = '#a8bd86', '#e8d9bd', '#eff0df'
+    lobby_top = Z0 + 0.38
+    # 基座退入柱列，入口通廊从人行道连续伸到门厅。
+    box(0.18, 0.64, Z0, 1.58, 1.07, 0.37, '#b1a592')
+    # 门厅沿侧面转过街角，背面也留有采光。
+    curtain_side(0.77, Z0 + 0.09, 0.76, 0.22, 1.76, 4, 1, glass='#80a4a9', mull=stone)
+    box(0.25, 0.607, Z0 + 0.055, 1.41, 0.035, 0.27, '#617f84')
+    for x in (0.28, 0.55, 0.82, 1.07, 1.34, 1.62):
+        box(x, 0.579, Z0 + 0.02, 0.032, 0.061, 0.33, stone)
+    box(0.14, 0.492, lobby_top - 0.036, 1.67, 1.26, 0.038, trim)
+    box(0.77, 0.18, Z0 + 0.006, 0.62, 0.43, 0.014, '#dccbb2')
+    box(0.76, 0.32, Z0 + 0.302, 0.62, 0.29, 0.026, '#a48768')
+    for x in (0.785, 1.336):
+        box(x, 0.342, Z0 + 0.017, 0.018, 0.018, 0.286, '#968c76')
+    for k in range(3):
+        box(0.05 + k * 0.65, 0.026, Z0, 0.639, 0.176, 0.009, '#e1d7c3')
+
+    # 七层砖翼与九层切角塔错开，低翼屋顶作为可达的公共露台。
+    wing = [(0.18, 0.57), (0.88, 0.57), (0.88, 1.67), (0.18, 1.67)]
+    terrace = school_wing('StoneWing', wing, lobby_top, 7, False, '#ca987e')
+    # 砖翼的一列转角阳台朝向院落。横向楼板和内侧的砖墙在远景也有明暗差。
+    for floor in (1, 2, 3, 5, 6):
+        z = lobby_top + floor * 0.31
+        box(0.16, 0.447, z, 0.416, 0.13, 0.023, trim)
+        box(0.167, 0.452, z + 0.023, 0.40, 0.011, 0.078, '#96afb0')
+        box(0.167, 0.452, z + 0.101, 0.40, 0.011, 0.012, trim)
+        for x in (0.167, 0.558):
+            box(x, 0.452, z + 0.023, 0.011, 0.118, 0.09, '#a8b7b4')
+    box(0.158, 0.548, terrace, 0.744, 1.144, 0.036, stone)
+    parapet(0.18, 0.57, terrace + 0.036, 0.70, 1.10, h=0.064, t=0.021, m=stone)
+    for y in (0.64, 1.48):
+        box(0.24, y, terrace + 0.037, 0.48, 0.11, 0.067, '#9b8c73')
+        box(0.254, y + 0.011, terrace + 0.104, 0.452, 0.087, 0.073, '#859f71')
+    # 塔楼临街两角削斜，转动镜头时仍然读得出不同玻璃面的明暗。
+    tower = [(0.86, 0.71), (1.01, 0.56), (1.51, 0.56), (1.75, 0.80),
+             (1.75, 1.62), (1.64, 1.73), (0.86, 1.73)]
+    top = school_wing('GlassTower', tower, lobby_top, 9, True, '#dde1d7')
+    for x, y in (tower[0], tower[2], tower[4], tower[6]):
+        box(x - 0.024, y - 0.022, lobby_top, 0.049, 0.045, top - lobby_top + 0.052, trim)
+    crown = [(0.98, 0.86), (1.11, 0.73), (1.49, 0.73), (1.62, 0.86),
+             (1.62, 1.54), (0.98, 1.54)]
+    cap = school_wing('SetbackFloor', crown, top, 1, True, '#d6ddce')
+    box(1.06, 0.92, cap, 0.48, 0.51, 0.062, '#8e9d95')
+    for i in range(5):
+        box(1.09, 0.96 + 0.089 * i, cap + 0.062, 0.41, 0.046, 0.013, '#b6c2b7')
+    # 从远处也看得见的实墙竖带，上部细槽遮住设备层。
+    box(0.86, 1.51, lobby_top, 0.27, 0.243, cap - lobby_top + 0.10, stone)
+    for i in range(5):
+        box(0.891, 1.751, cap - 0.10 + 0.032 * i, 0.204, 0.008, 0.012, '#aba993')
+
+    for x, w in ((0.06, 0.63), (1.45, 0.48)):
+        box(x, 0.22, Z0 + 0.003, w, 0.30, 0.046, stone)
+        box(x + 0.021, 0.241, Z0 + 0.049, w - 0.042, 0.258, 0.014, lawn)
+    for x, y in ((0.25, 0.37), (1.74, 0.40)):
+        cyl(x, y, Z0 + 0.055, 0.021, 0.29, '#8c7961', 8)
+        for dx, dy, dz, r in ((0, 0, 0.37, 0.154), (-0.054, -0.035, 0.32, 0.112),
+                              (0.045, 0.025, 0.425, 0.109)):
+            ball(x + dx, y + dy, Z0 + dz, r, '#89a673' if dx else '#719667', 2, scale=(0.85, 0.82, 1.13))
+    box(0.40, 0.219, Z0 + 0.055, 0.277, 0.074, 0.112, stone)
+    text('书香苑', 0.54, 0.214, Z0 + 0.111, 0.064, '#916750', 'front')
 
 
 @sprite('hotpot', 2, 2)

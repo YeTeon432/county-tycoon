@@ -3,13 +3,11 @@ import { getPlatform } from '../platform/Platform';
 
 type ActionSound = 'tap' | 'road' | 'build' | 'blocked' | 'remove';
 type EventSound = 'complete' | 'wish' | 'promote';
-type ClipName = ActionSound | EventSound | 'town-theme';
-const clips: ClipName[] = ['tap', 'road', 'build', 'blocked', 'remove', 'complete', 'wish', 'promote', 'town-theme'];
-const MUSIC_KEY = 'county-music';
+type ClipName = ActionSound | EventSound;
+const clips: ClipName[] = ['tap', 'road', 'build', 'blocked', 'remove', 'complete', 'wish', 'promote'];
 const EFFECTS_KEY = 'county-sound-effects';
 
 class TownAudio {
-    musicOn = true;
     effectsOn = true;
     private root: Node | null = null;
     private sources = new Map<ClipName, AudioSource>();
@@ -20,7 +18,6 @@ class TownAudio {
     private lastEvent = -Infinity;
     private unlocked = false;
     private foreground = true;
-    private musicRequested = false;
     private generation = 0;
 
     attach(parent: Node): void {
@@ -28,7 +25,6 @@ class TownAudio {
         this.root = new Node('TownAudio');
         parent.addChild(this.root);
         this.effectsOn = platform.getItem(EFFECTS_KEY) !== '0';
-        this.musicOn = platform.getItem(MUSIC_KEY) !== '0';
         this.foreground = platform.name !== 'web' || typeof document === 'undefined' || !document.hidden;
         platform.onHide(this.hide);
         platform.onShow(this.show);
@@ -45,14 +41,12 @@ class TownAudio {
                 const node = new Node(name);
                 const source = node.addComponent(AudioSource);
                 source.playOnAwake = false;
-                source.loop = name === 'town-theme';
-                source.volume = source.loop ? 0.32 : 0.85;
+                source.volume = 0.85;
                 root.addChild(node);
                 // Cocos 3.8.8 prepares a player asynchronously after assigning its clip.
                 node.once('audiosource-loaded', () => {
                     if (this.root !== root || !root.isValid) return;
                     this.sources.set(name, source);
-                    if (source.loop) this.syncMusic();
                 });
                 source.clip = clip;
             });
@@ -83,41 +77,22 @@ class TownAudio {
     private unlock = (): void => {
         if (this.unlocked || !this.foreground) return;
         this.unlocked = true;
-        this.syncMusic();
     };
 
     private hide = (): void => {
         this.foreground = false;
         this.stopEffects();
-        this.syncMusic();
     };
 
     private show = (): void => {
         this.foreground = true;
-        this.syncMusic();
     };
-
-    setMusic(on: boolean): boolean {
-        this.musicOn = on;
-        this.syncMusic();
-        return getPlatform().setItem(MUSIC_KEY, on ? '1' : '0');
-    }
 
     setEffects(on: boolean): boolean {
         this.effectsOn = on;
         if (on) this.action('tap');
         else this.stopEffects();
         return getPlatform().setItem(EFFECTS_KEY, on ? '1' : '0');
-    }
-
-    private syncMusic(): void {
-        const source = this.sources.get('town-theme');
-        if (!source) return;
-        const play = this.unlocked && this.foreground && this.musicOn;
-        if (play === this.musicRequested) return;
-        this.musicRequested = play;
-        if (play) source.play();
-        else source.pause();
     }
 
     private stopEffects(): void {

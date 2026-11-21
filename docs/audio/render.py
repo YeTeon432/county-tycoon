@@ -1,6 +1,5 @@
-"""Render the original county theme and cues. Requires NumPy and ffmpeg."""
+"""Render the original county sound effects. Requires NumPy."""
 from pathlib import Path
-import subprocess
 import wave
 
 import numpy as np
@@ -63,45 +62,6 @@ def cues():
             out.writeframes(pcm(samples))
 
 
-def soft_piano(midi, seconds):
-    t = time(seconds)
-    freq = 440 * 2 ** ((midi - 69) / 12)
-    tone = np.zeros_like(t)
-    # Two nearly unison strings. Higher partials decay first under a felt hammer.
-    for harmonic, weight in enumerate((1, .38, .19, .09, .04), start=1):
-        phase = 2 * np.pi * freq * harmonic * (1 + .00009 * harmonic**2) * t
-        strings = .68 * np.sin(phase) + .32 * np.sin(phase * 1.0008)
-        tone += weight * strings * np.exp(-t * (.84 + .5 * harmonic))
-    attack = 1 - np.exp(-t / .024)
-    release = np.clip((seconds - t) / .30, 0, 1)
-    return tone * attack * release
-
-
-def theme():
-    # G-major pentatonic. A two-note pickup returns in the third phrase.
-    # Each event is (beat, MIDI note, length in beats, touch).
-    beat = 60 / 96
-    score = [
-        (.50, 67, .44, .17), (1.00, 69, .44, .18), (1.50, 71, 1.35, .23),
-        (3.00, 74, 1.65, .21), (5.00, 71, .66, .18), (5.75, 69, 1.55, .19),
-
-        (8.20, 71, .68, .19), (9.00, 69, .42, .16), (9.50, 67, 1.40, .22),
-        (11.25, 64, .66, .17), (12.00, 67, 2.60, .21),
-
-        (16.50, 67, .44, .16), (17.00, 69, .44, .18), (17.50, 71, 1.35, .22),
-        (19.00, 74, .70, .19), (19.75, 76, 1.65, .21), (21.75, 74, 1.35, .18),
-
-        (24.00, 71, 1.30, .21), (25.50, 74, .66, .18), (26.25, 69, 1.35, .18),
-        (28.00, 67, 2.75, .21),
-    ]
-    samples = mix(32 * beat, [(start * beat, soft_piano(pitch, length * beat), gain)
-                              for start, pitch, length, gain in score])
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(RATE),
-                    '-ac', '1', '-i', '-', '-codec:a', 'libmp3lame', '-b:a', '64k',
-                    str(OUT / 'town-theme.mp3')], input=pcm(samples), check=True)
-
-
 if __name__ == '__main__':
     OUT.mkdir(parents=True, exist_ok=True)
     cues()
-    theme()

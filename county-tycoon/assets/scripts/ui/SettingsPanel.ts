@@ -7,7 +7,7 @@ const { ccclass } = _decorator;
 
 @ccclass('SettingsPanel')
 export class SettingsPanel extends Panel {
-    protected cardH = 508;
+    protected cardH = 400;
 
     static show(parent: Node, gridOn: boolean, onGridChange: (on: boolean) => void, onSaveError: () => void): SettingsPanel {
         const panel = Panel.open(SettingsPanel, parent, '设置', '');
@@ -16,10 +16,7 @@ export class SettingsPanel extends Panel {
                 gridOn = on;
                 onGridChange(on);
             });
-            panel.buildRow(1, 'Music', '背景音乐', '循环播放《塘边早市》', townAudio.musicOn, on => {
-                if (!townAudio.setMusic(on)) onSaveError();
-            });
-            panel.buildRow(2, 'Effects', '游戏音效', '操作与经营事件提示', townAudio.effectsOn, on => {
+            panel.buildRow(1, 'Effects', '游戏音效', '操作与经营事件提示', townAudio.effectsOn, on => {
                 if (!townAudio.setEffects(on)) onSaveError();
             });
         };

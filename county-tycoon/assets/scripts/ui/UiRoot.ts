@@ -1,7 +1,8 @@
-import { _decorator, Component, JsonAsset, Layers, Node, profiler, resources, UITransform } from 'cc';
+import { townAudio } from '../core/TownAudio';
+import { _decorator, BlockInputEvents, Component, JsonAsset, Layers, Node, profiler, resources, UIOpacity, UITransform } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
-import { MonthlyReport, TownLevel } from '../core/sim/types';
+import { MonthlyReport, TownLevel, LEVEL_NAME } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { Portrait } from './Portrait';
 import { BuildingBar } from './BuildingBar';
@@ -126,7 +127,7 @@ export class UiRoot extends Component {
         this.buildTopBar();
         this.buildClock();
         this.buildTrackChip();
-        this._notices = NoticeLayer.create(this.node, this.sim);
+        this._notices = NoticeLayer.create(this.node, this.sim, () => this.openCenter('research'));
         this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
@@ -157,6 +158,7 @@ export class UiRoot extends Component {
     /** 给建造栏缩略图用的贴图仓库（WorldView 那一份）。集成在 WorldView 加 `get art()` 后调这个最干净 */
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
+        if (this._notices) this._notices.art = art;
         Portrait.setArt(art);
         CenterPanel.setArt(art);
     }
@@ -191,7 +193,7 @@ export class UiRoot extends Component {
 
     // ───────────────────────── 开局（T407） ─────────────────────────
 
-    /** 新档：暂停时间 → 开场卡片 → 资金滚上来 + 「店铺」页签上的箭头 */
+    /** 新档：暂停时间 → 开场卡片 → 资金滚上来 + 「道路·设施」页签上的箭头 */
     private playOpening(startFunds: number): void {
         const layer = this._introLayer;
         if (!layer || !this.sim) return;
@@ -205,6 +207,7 @@ export class UiRoot extends Component {
             this.applySpeed(resume === 0 ? 1 : resume);
             if (this._topBar) this._topBar.rollFunds(0, 1);
             this.startFirstBuildHint();
+            this._notices?.showOpeningAdvice();
         };
     }
 
@@ -215,14 +218,9 @@ export class UiRoot extends Component {
 
     private startFirstBuildHint(): void {
         if (!this.model) return;
-        if (this._bar) this._bar.showTabHint('店铺');
-        this._baseBuildings = this.countBuildings();
+        if (this._bar) this._bar.showTabHint('设施');
+        this._baseBuildings = this.model.buildingCount;
         this._waitFirstBuild = true;
-    }
-
-    /** 不算道路：开局提示是「盖几家店」，修路不算 */
-    private countBuildings(): number {
-        return this.model ? this.model.allBuildings().filter((b) => !b.def.flat).length : 0;
     }
 
     private refreshCenterStatus(): void {
@@ -238,12 +236,12 @@ export class UiRoot extends Component {
         this._goalsReady = ready;
     }
 
-    /** 首次盖好非道路建筑时收起开局箭头。 */
+    /** 首次铺路或建造时收起开局箭头。 */
     notifyBuilt(): void {
         this.refreshCenterStatus();
         if (this._topBar) this._topBar.refresh();
         if (!this._waitFirstBuild) return;
-        if (this.countBuildings() > this._baseBuildings) {
+        if (this.model && this.model.buildingCount > this._baseBuildings) {
             this._waitFirstBuild = false;
             if (this._bar) this._bar.showTabHint(null);
         }
@@ -272,6 +270,7 @@ export class UiRoot extends Component {
         const bar = node.addComponent(TopBar);
         bar.build(this.sim);
         bar.onSpeedChange = (speed) => {
+            if (this._clock && this._clock.speed !== speed) townAudio.action('tap');
             if (this._clock) this._clock.setSpeed(speed);
         };
         bar.onReportTap = () => this.openReport();
@@ -306,7 +305,7 @@ export class UiRoot extends Component {
         const layer = this._panelLayer, read = this.getGridPreference, write = this.setGridPreference;
         if (!layer || !read || !write) return;
         this.closeTopPanel();
-        const panel = SettingsPanel.show(layer, read(), write);
+        const panel = SettingsPanel.show(layer, read(), write, () => this.say('声音设置未能保存'));
         panel.onClosed = () => {
             if (this._settingsPanel === panel) this._settingsPanel = null;
         };
@@ -389,12 +388,21 @@ export class UiRoot extends Component {
             (text) => this._topPanel?.showFeedback(text),
             this.requestBranch ? (source) => {
                 const reason = this.requestBranch!(source);
-                if (reason) this._topPanel?.showFeedback(reason);
+                if (reason) { townAudio.action('blocked'); this._topPanel?.showFeedback(reason); }
                 else this.closeTopPanel();
             } : null,
+            () => {
+                if (!this.sim?.resettleResidents?.(uid)) {
+                    this._topPanel?.showFeedback('当前没有能接收整栋住户的安置房');
+                    return;
+                }
+                this.onResidentChanged?.();
+                this.onBuildingTapped(uid);
+                this._topPanel?.showFeedback('住户已搬进同心家园，老房已腾空');
+            },
         );
         if (panel) {
-            panel.onClosed = () => { this._topPanel = null; };
+            panel.onClosed = () => { if (this._topPanel === panel) this._topPanel = null; };
             this._topPanel = panel;
         }
     }
@@ -439,14 +447,18 @@ export class UiRoot extends Component {
         // 详情面板保持打开，档案压在上面；档案关掉后详情还在，符合"点了人再返回"的操作习惯。
         // 但档案只留一份：再点另一个人时先关掉旧档案（否则叠两层，关的时候会重复销毁报错）
         const old = this._residentPanel;
-        this._residentPanel = null;
-        if (old && old.node && old.node.isValid) old.node.destroy();
         const onTrack = this.requestTrack ? (id: number, focusHome?: boolean) => this.startTrack(id, focusHome) : undefined;
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
+            if (old?.node?.isValid) old.node.destroy();
+            townAudio.action('tap');
             const previous = this._listPanel ?? this._topPanel;
-            if (previous) previous.node.active = false;
+            // 保留上一层的 Graphics 和名单位置。档案的全屏节点接管触摸和滚轮。
+            const opacity = previous && (previous.node.getComponent(UIOpacity) ?? previous.node.addComponent(UIOpacity));
+            if (opacity) opacity.opacity = 0;
+            panel.node.addComponent(BlockInputEvents);
             panel.onJobChanged = (message) => {
+                townAudio.event('wish');
                 panel.showFeedback(message);
                 this._notices?.say('info', message);
                 this._topBar?.refresh();
@@ -454,8 +466,9 @@ export class UiRoot extends Component {
                 this.onResidentChanged?.();
             };
             panel.onClosed = () => {
-                if (previous?.node.isValid) previous.node.active = true;
-                if (this._residentPanel === panel) this._residentPanel = null;
+                if (this._residentPanel !== panel) return;
+                if (opacity?.isValid) opacity.opacity = 255;
+                this._residentPanel = null;
             };
             this._residentPanel = panel;
         }
@@ -548,7 +561,8 @@ export class UiRoot extends Component {
         const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
-        p.onHint = (text) => {
+        p.onHint = (text, rejected) => {
+            if (rejected) townAudio.action('blocked');
             p.showFeedback(text);
             this._notices?.say('info', text);
         };
@@ -568,8 +582,13 @@ export class UiRoot extends Component {
 
     private onLevelUp(lv: TownLevel): void {
         this.onTownUpgraded?.();
-        const name: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
-        if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去发展中心看看新目标吧。');
+        const history = this.sim?.state.promotions ?? [];
+        const record = history[history.length - 1];
+        if (record && record.to === lv) {
+            const ready = record.projects.find(p => p.newlyAvailable && !p.missing.length);
+            const line = ready ? `现在可以研究「${ready.name}」` : record.changes[0] ?? '晋升详情已记入游戏公告';
+            this._notices?.celebrate(`${LEVEL_NAME[record.from]} → ${LEVEL_NAME[lv]}`, line);
+        }
         if (this._bar) this._bar.refreshUnlocks();
         if (this._topBar) this._topBar.refresh();
     }

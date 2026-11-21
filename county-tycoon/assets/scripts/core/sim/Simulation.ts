@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity, shopRadius } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BuildingEcon, BuildingSim, PromotionRecord, LEVEL_NAME, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -270,19 +270,31 @@ export class Simulation implements SimApi {
         return (this.state.unlocked ?? []).indexOf(defId) >= 0;
     }
 
-    /** 这项研究的前置条件哪一条没满足（全满足返回 ''） */
-    private researchBlock(r: ResearchDef): string {
+    private researchRequirements(r: ResearchDef): string[] {
         const s = this.state;
-        if (LEVEL_ORDER.indexOf(s.level) < LEVEL_ORDER.indexOf(r.level)) return `${LEVEL_NAME[r.level]}才能研究`;
-        if (r.needPop > 0 && s.residents.length < r.needPop) return `人口要到 ${r.needPop}（现在 ${s.residents.length}）`;
-        if (r.needBuilding.length && !s.buildings.some((b) => r.needBuilding.indexOf(b.defId) >= 0)) {
-            return `县里要先有${r.needBuilding.map((id) => this.buildingName(id)).join('或')}`;
+        if (LEVEL_ORDER.indexOf(s.level) < LEVEL_ORDER.indexOf(r.level)) return [`${LEVEL_NAME[r.level]}才能研究`];
+        const missing: string[] = [];
+        if (s.residents.length < r.needPop) missing.push(`还差 ${r.needPop - s.residents.length} 位居民（人口 ${s.residents.length}/${r.needPop}）`);
+        if (r.needStaff) {
+            const staff = s.buildings.reduce((max, b) => r.needBuilding.indexOf(b.defId) >= 0 ? Math.max(max, b.workerIds.length) : max, 0);
+            if (staff < r.needStaff) missing.push(`一间作坊或工厂需有 ${r.needStaff} 人在岗，还差 ${r.needStaff - staff} 人`);
+        } else if (r.needBuilding.length && !s.buildings.some(b => r.needBuilding.indexOf(b.defId) >= 0)) {
+            missing.push(`先建成${r.needBuilding.map(id => this.buildingName(id)).join('或')}`);
+        }
+        if (r.needStreet.length && !s.streets?.some(st => r.needStreet.indexOf(st.kind) >= 0)) {
+            missing.push('先建成商业特色街，如便民生活圈或夜市一条街');
         }
         if (r.needEdu) {
-            const n = s.residents.filter((p) => p.education >= r.needEdu!.edu && p.age >= this._cfg.economy.residents.workMinAge).length;
-            if (n < r.needEdu.count) return `要有 ${r.needEdu.count} 位${EDU_NAME[r.needEdu.edu]}以上学历的居民（现在 ${n}）`;
+            const { edu, count } = r.needEdu;
+            const n = s.residents.filter(p => p.education >= edu && p.age >= this._cfg.economy.residents.workMinAge).length;
+            if (n < count) missing.push(`还差 ${count - n} 位${EDU_NAME[edu]}及以上学历的成年居民（${n}/${count}）`);
         }
-        return '';
+        return missing;
+    }
+
+    private researchBudgetGap(r: ResearchDef): string {
+        const gap = Math.ceil(r.cost - this.state.finance.funds);
+        return gap > 0 ? `建设资金还差 ¥${gap.toLocaleString('en-US')}` : '';
     }
 
     researchList(): ResearchStatus[] {
@@ -302,10 +314,10 @@ export class Simulation implements SimApi {
                 progress = (act.total - act.left) / act.total;
                 reason = `还要 ${act.left} 天`;
             } else {
-                reason = this.researchBlock(r);
+                reason = this.researchRequirements(r)[0] ?? '';
                 state = reason ? 'locked' : 'ready';
             }
-            return { id: r.id, name: r.name, unlocks: r.unlocks.slice(), cost: r.cost, days: r.days, level: r.level, state, reason, progress };
+            return { id: r.id, name: r.name, unlocks: r.unlocks.slice(), cost: r.cost, days: r.days, level: r.level, needPop: r.needPop, state, reason, progress };
         });
     }
 
@@ -364,9 +376,8 @@ export class Simulation implements SimApi {
         if ((s.research ?? []).length >= slots) {
             return slots >= MAX_SLOTS ? '研究位都占满了，等一项做完' : '研究位都占满了（可以在上面再开一个研究位）';
         }
-        const block = this.researchBlock(r);
+        const block = this.researchRequirements(r)[0] || this.researchBudgetGap(r);
         if (block) return block;
-        if (s.finance.funds < r.cost) return `建设资金不够（还差 ¥${r.cost - s.finance.funds}）`;
         s.finance.funds -= r.cost;
         this._researchSpent += r.cost;
         this._flows.outflow.research += r.cost;   // 请县外的专家，钱流出县外
@@ -436,17 +447,63 @@ export class Simulation implements SimApi {
         });
     }
 
+    /** 在奖励到账后保存研究条件，以后翻看仍是晋升当天的结果。 */
+    private recordPromotion(from: TownLevel, reward: number): void {
+        const s = this.state, p = this._cfg.progress, e = this._cfg.economy;
+        const record: PromotionRecord = {
+            from, to: s.level, month: s.month, population: s.residents.length, reward, changes: [], projects: [],
+        };
+        const slots = this.researchSlots();
+        for (const r of p?.research ?? []) {
+            if (LEVEL_ORDER.indexOf(r.level) > LEVEL_ORDER.indexOf(s.level)) continue;
+            if ((s.researched ?? []).indexOf(r.id) >= 0 || s.research?.some(job => job.id === r.id)) continue;
+            const missing = this.researchRequirements(r);
+            if (slots.used >= slots.total) missing.push(`${slots.total} 个研究位已占满，等一项完成`);
+            const budget = this.researchBudgetGap(r);
+            if (budget) missing.push(budget);
+            const artId = r.unlocks[0];
+            const building = this._cfg.building(artId);
+            let effect = '';
+            if (artId === 'road') effect = '土路之外，可铺设城市道路';
+            else if (artId === 'school') effect = `为沿路 ${SCHOOL_RANGE} 格内的家庭提供就学服务`;
+            else if (artId === 'bridge') effect = '可以架桥，把河两岸的路接起来';
+            else if (building && r.unlocks.length === 1 && building.jobs.length) effect = `每栋提供 ${totalPositions(building)} 个岗位`;
+            if (building?.housing) effect = `每栋可住 ${building.housing} 人`;
+            if (artId === 'highrise') {
+                const previous = this._cfg.building('apartment');
+                if (building && previous) effect = `同占四格地，步梯房住 ${previous.housing} 人，高层住 ${building.housing} 人`;
+            }
+            record.projects.push({ id: r.id, name: r.name, artId, newlyAvailable: r.level === s.level,
+                effect, cost: r.cost, days: r.days, missing });
+        }
+        const oldPool = p?.invest.pool[from] ?? [];
+        const added = (p?.invest.pool[s.level] ?? []).filter(id => oldPool.indexOf(id) < 0 && this._cfg.building(id));
+        if (added.length) record.changes.push(`招商新增意向：${added.map(id => this.buildingName(id)).join('、')}`);
+        const oldRate = e.servicePerCapita * (e.serviceLevelMult[from] ?? 1);
+        const newRate = e.servicePerCapita * (e.serviceLevelMult[s.level] ?? 1);
+        if (newRate !== oldRate) record.changes.push(`每人每月的公共服务基础支出从 ¥${oldRate} 调整为 ¥${newRate}`);
+        const goal = this.goals().find(g => !g.done);
+        if (goal) {
+            const current = goal.kind === 'employment' ? `${Math.round(goal.value * 100)}%` : Math.round(goal.value);
+            record.changes.push(`下次晋升目标：${goal.text}（当前 ${current}）`);
+        }
+        if (s.level === 'top100') record.changes.push('已获百强县称号，完成全部晋升阶段');
+        (s.promotions ??= []).push(record);
+    }
+
     upgradeLevel(): TownLevel | null {
         const s = this.state;
         const g = this.goals();
         const idx = LEVEL_ORDER.indexOf(s.level);
         if (!g.length || !g.every((x) => x.done) || idx >= LEVEL_ORDER.length - 1) return null;
+        const previous = s.level;
         s.level = LEVEL_ORDER[idx + 1];
         const reward = this._cfg.progress?.levelReward[s.level] ?? 0;
         if (reward > 0) {
             s.finance.funds += reward;
             this._flows.inflow.grants += reward;   // 上级的发展奖励，县外来的钱
         }
+        this.recordPromotion(previous, reward);
         this.event(`县城升级为「${LEVEL_NAME[s.level]}」`);
         this.notice('levelUp', `咱们升级成「${LEVEL_NAME[s.level]}」了！${reward ? `上级奖励建设资金 ¥${reward}` : ''}`, []);
         return s.level;
@@ -1329,7 +1386,7 @@ export class Simulation implements SimApi {
             const moved = this.openBuilding(c.uid, c.defId, c.deal, c.branch);
             const message = !c.branch ? `${this.buildingName(c.defId)}完工了`
                 : `${this.buildingName(c.defId)}分厂投产，${moved} 名老员工就近调岗`;
-            this.notice('info', message, []);
+            this.notice('complete', message, []);
         }
         s.construction = s.construction.filter((x) => x.left > 0);
         this._town.refresh?.();
@@ -1854,8 +1911,10 @@ export class Simulation implements SimApi {
         // 等级只升不降：人口掉回去不该把已经解锁的建筑又锁上
         let idx = order.indexOf(s.level);
         for (let i = idx + 1; i < order.length; i++) if (!reached(order[i])) break; else idx = i;
-        if (order[idx] !== s.level) {
-            s.level = order[idx];
+        for (let i = order.indexOf(s.level) + 1; i <= idx; i++) {
+            const previous = s.level;
+            s.level = order[i];
+            this.recordPromotion(previous, 0);
             this.event(`县城升级为「${LEVEL_NAME[s.level]}」`);
         }
     }
@@ -2318,6 +2377,39 @@ export class Simulation implements SimApi {
 
     // ───────────────────────────── 住房 / 岗位 ─────────────────────────────
 
+    /** 拆旧前整栋回迁，亲属和邻居一起搬。只选已经交付、沿路可达且住得下的安置房。 */
+    resettlementOffer(homeId: number): { targetUid: number; count: number } | null {
+        const source = this.building(homeId);
+        if (!source || ['hut', 'brick', 'house'].indexOf(source.defId) < 0 || !source.residentIds.length) return null;
+        const count = source.residentIds.length;
+        const capacity = this._cfg.building('resettlement')?.housing ?? 0;
+        let nearest = Infinity;
+        let targetUid = 0;
+        for (const b of this.state.buildings) {
+            if (b.defId !== 'resettlement' || capacity - b.residentIds.length < count) continue;
+            const distance = this._town.roadDistance(homeId, b.uid);
+            if (distance < nearest) { nearest = distance; targetUid = b.uid; }
+        }
+        return isFinite(nearest) ? { targetUid, count } : null;
+    }
+
+    resettleResidents(homeId: number): boolean {
+        const offer = this.resettlementOffer(homeId);
+        if (!offer) return false;
+        const source = this.building(homeId)!;
+        const target = this.building(offer.targetUid)!;
+        const ids = source.residentIds.slice();
+        for (const id of ids) {
+            const r = this.resident(id)!;
+            r.homeId = target.uid;
+            this.log(r, '从老房回迁到同心家园');
+        }
+        target.residentIds.push(...ids);
+        source.residentIds = [];
+        this.notice('info', `${ids.length} 位街坊一起搬进了同心家园`, ids);
+        return true;
+    }
+
     private assignHomes(list: Resident[]): void {
         const supply = this.housingSupply();
         for (const r of list) {
@@ -2461,7 +2553,8 @@ function clamp(min: number, max: number, v: number): number {
 /** 日志里用的建筑名。模拟层不读 buildings.json，这里留一份小表 */
 /** 和 buildings.json 的 name 保持一致（模拟层不读那个表）；测试会对一遍 */
 export const DEF_NAMES: Record<string, string> = {
-    hut: '土坯农房', brick: '砖瓦房', house: '自建小楼', apartment: '商品房小区', detached: '独栋', villa: '别墅', 'school-house': '学区房',
+    hut: '土坯农房', brick: '砖瓦房', house: '自建小楼', apartment: '步梯商品房小区', detached: '独栋', villa: '别墅', 'school-house': '学区房',
+    'workers-estate': '厂矿家属院', 'resettlement': '回迁安置小区', 'highrise': '电梯高层小区', 'garden-estate': '花园洋房小区', 'market-estate': '商住综合小区',
     breakfast: '早餐铺', 'milk-tea': '奶茶店', bbq: '烧烤摊', hotpot: '火锅店',
     parcel: '快递驿站', supermarket: '超市', 'net-cafe': '网吧', 'phone-shop': '手机店',
     barber: '理发店', tutoring: '补习班',
@@ -2584,9 +2677,7 @@ const WISH_DONE_TEXT: Partial<Record<WishKind, string>> = {
     house: '住上好房子了', job: '找到工作了', school: '孩子能上学了', clinic: '附近有卫生院了', commute: '上班不远了', env: '家附近环境好了', vehicle: '买上车了',
 };
 
-const LEVEL_NAME: Record<TownLevel, string> = {
-    village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县',
-};
+
 
 /** 折线插值：points 按 x 升序 */
 function curve(points: [number, number][], x: number): number {

@@ -21,7 +21,7 @@ interface IntroPage {
  *
  *   1. 在外打拼多年，你回到了老家。
  *   2. 这次回来，你带了一笔启动资金：¥100,000（金额读 economy.json 的 startFunds）
- *   3. 先修条路、盖几家店，让乡亲们有活干、有钱花。
+ *   3. 先接一段土路，再沿路盖房。
  *
  * 点任意处翻页，右上「跳过」直接结束。全屏遮罩登记 InputGuard，播放期间地图不响应。
  * 用词：只说「启动资金」，不说是谁给的（D018）。
@@ -52,7 +52,7 @@ export class IntroCards extends Component {
         this._pages = [
             { icon: 'home', text: '在外打拼多年，\n你回到了老家。' },
             { icon: 'coin', text: '这次回来，你带了一笔启动资金', big: `¥${formatNumber(startFunds)}` },
-            { icon: 'shop', text: '先修条路、盖几家店，\n让乡亲们有活干、有钱花。' },
+            { icon: 'home', text: '先从村口接一段土路，再沿路盖房，\n让新来的乡亲有个落脚的地方。' },
         ];
 
         // 遮罩：比抽屉的深一点，让卡片成为唯一焦点；点任意处翻页

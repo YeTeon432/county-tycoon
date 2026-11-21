@@ -26,6 +26,8 @@ export interface ResearchDef {
     needPop: number;
     /** 县里要有其中一种（'a|b'） */
     needBuilding: string[];
+    needStaff: number;
+    needStreet: string[];
     needEdu: { edu: Education; count: number } | null;
 }
 
@@ -97,6 +99,8 @@ export function parseProgress(json: any): ProgressConfig | null {
         level: levelOf(r.level),
         needPop: Math.max(0, num(r.needPop, 0)),
         needBuilding: split(r.needBuilding),
+        needStaff: Math.max(0, num(r.needStaff, 0)),
+        needStreet: split(r.needStreet),
         needEdu: r.needEdu && typeof r.needEdu === 'object'
             ? { edu: (EDU.indexOf(r.needEdu.edu) >= 0 ? r.needEdu.edu : 0) as Education, count: Math.max(0, num(r.needEdu.count, 0)) }
             : null,

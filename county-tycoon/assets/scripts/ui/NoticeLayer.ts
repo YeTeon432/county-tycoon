@@ -1,11 +1,14 @@
+import { townAudio } from '../core/TownAudio';
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { ArtLibrary } from '../core/ArtLibrary';
 import { InputGuard } from '../core/InputGuard';
 import { getPlatform } from '../platform/Platform';
 import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
+import { openBulletin } from './Bulletin';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
-import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, makeButton, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -41,7 +44,7 @@ export class NoticeLayer extends Component {
     private _hornDot: Node | null = null;
     private history: { kind: Notice['kind']; text: string }[] = [];
     private _list: Node | null = null;
-    private _queue: { kind: Notice['kind']; text: string }[] = [];
+    private _queue: { kind: Notice['kind']; text: string; onShown?: () => void }[] = [];
     private _showing = 0;
 
     private _tipIndex = 0;
@@ -53,7 +56,10 @@ export class NoticeLayer extends Component {
     private _card: Node | null = null;
     private _cardTimer = 0;
 
-    static create(parent: Node, sim: SimApi): NoticeLayer {
+    art: ArtLibrary | null = null;
+    private goResearch!: () => void;
+
+    static create(parent: Node, sim: SimApi, goResearch: () => void): NoticeLayer {
         const node = new Node('NoticeLayer');
         node.layer = Layers.Enum.UI_2D;
         const vis = view.getVisibleSize();
@@ -61,6 +67,7 @@ export class NoticeLayer extends Component {
         parent.addChild(node);
         const c = node.addComponent(NoticeLayer);
         c._sim = sim;
+        c.goResearch = goResearch;
         c.build();
         return c;
     }
@@ -69,10 +76,12 @@ export class NoticeLayer extends Component {
 
     /** 一个月的通知进来：公告栏全收，来人 / 走人上大公示 */
     push(notices: readonly Notice[]): void {
+        const lead = notices.find(n => n.kind === 'wishDone') ?? notices.find(n => n.kind === 'complete');
         for (const n of notices) {
             if (n.kind === 'levelUp') continue;   // 升级走全屏庆祝
             // 心愿的建议很长，公告栏只放心愿本身（点楼顶气泡看建议）
-            this.say(n.kind, n.reason && n.kind === 'arrive' ? `${n.text}：「${n.reason}」` : n.text);
+            const cue = n === lead ? townAudio.whenShown(n.kind === 'wishDone' ? 'wish' : 'complete') : undefined;
+            this.say(n.kind, n.reason && n.kind === 'arrive' ? `${n.text}：「${n.reason}」` : n.text, cue);
         }
         const big = notices.filter((n) => n.kind === 'arrive' || n.kind === 'leave');
         const arrive = big.filter((n) => n.kind === 'arrive');
@@ -87,12 +96,12 @@ export class NoticeLayer extends Component {
     }
 
     /** 往公告栏发一条（界面自己的提示也走这里，比如「建设资金不够」） */
-    say(kind: Notice['kind'], text: string): void {
+    say(kind: Notice['kind'], text: string, onShown?: () => void): void {
         this.history.push({ kind, text });
         if (this.history.length > 30) this.history.shift();
         if (this._hornDot) this._hornDot.active = true;
 
-        this._queue.push({ kind, text });
+        this._queue.push({ kind, text, onShown });
         this._tipsLeft = 0;   // 有真消息了就不再轮播提示
     }
 
@@ -160,9 +169,10 @@ export class NoticeLayer extends Component {
         g.stroke();
     }
 
-    private showBar(kind: Notice['kind'], text: string): void {
+    private showBar(kind: Notice['kind'], text: string, onShown?: () => void): void {
         const bar = this._bar, label = this._barText;
         if (!bar || !label) return;
+        onShown?.();
         label.string = text;
         label.color = kind === 'leave' || kind === 'warn' || kind === 'layoff' ? UI_COLOR.down
             : kind === 'arrive' || kind === 'stay' || kind === 'wishDone' || kind === 'research' || kind === 'street' || kind === 'deal' || kind === 'renovate' ? UI_COLOR.up
@@ -174,6 +184,10 @@ export class NoticeLayer extends Component {
         tween(op).to(0.2, { opacity: 255 }).start();
         if (this._horn) this._horn.active = false;
         this._showing = NoticeLayer.SHOW_SECONDS;
+    }
+
+    showOpeningAdvice(): void {
+        this.showBar('info', '先接土路，再沿路建房。点此查看游戏公告');
     }
 
     private hideBar(): void {
@@ -194,36 +208,16 @@ export class NoticeLayer extends Component {
     /** 展开 / 收起最近 12 条 */
     private toggleList(): void {
         if (this._list) { this.closeList(); return; }
+        this.showBulletin(false);
+    }
+
+    private showBulletin(promotions: boolean): void {
+        this.closeList();
+        if (!this._sim) return;
         if (this._hornDot) this._hornDot.active = false;
-        const vis = view.getVisibleSize();
-        const W = Math.min(vis.width, 720) - 32;
-        const items = this.history.slice(-12).reverse();
-        const rowH = 40;
-        const H = Math.max(1, items.length) * rowH + 56;
-        const box = makePanelNode(this.node, 'List', W, H);
-        const top = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 8;
-        const left = this._horn?.position.x ?? (-vis.width / 2 + 38);
-        box.setPosition(left - 22 + W / 2, top - H / 2, 0);
-        const g = box.addComponent(Graphics);
-        drawShadow(g, -W / 2, -H / 2, W, H, 20, 3);
-        g.fillColor = UI_COLOR.panel;
-        g.roundRect(-W / 2, -H / 2, W, H, 20);
-        g.fill();
-        const title = makeLabelLeft(box, 'Title', '县里的消息', UI_FONT.body, UI_COLOR.text, W - 40);
-        title.isBold = true;
-        title.node.setPosition(-W / 2 + 20, H / 2 - 28, 0);
-        if (!items.length) {
-            const l = makeLabelLeft(box, 'Empty', '还没有消息', UI_FONT.small, UI_COLOR.textDim, W - 40);
-            l.node.setPosition(-W / 2 + 20, H / 2 - 28 - rowH, 0);
-        }
-        items.forEach((it, i) => {
-            const l = makeLabelLeft(box, 'Row', it.text, UI_FONT.small,
-                it.kind === 'leave' || it.kind === 'warn' || it.kind === 'layoff' ? UI_COLOR.down
-                    : it.kind === 'arrive' || it.kind === 'stay' ? UI_COLOR.up : UI_COLOR.text, W - 40);
-            l.node.setPosition(-W / 2 + 20, H / 2 - 28 - rowH * (i + 1), 0);
-        });
-        box.on(Node.EventType.TOUCH_END, () => this.closeList(), this);
-        InputGuard.add(box);
+        const box = openBulletin(this.node.parent!, this.history, this._sim.state, this.art, promotions,
+            () => this.closeList(), () => { this.closeList(); this.goResearch(); });
+        InputGuard.add(box, 'panel');
         this._list = box;
     }
 
@@ -280,17 +274,27 @@ export class NoticeLayer extends Component {
         const l2 = makeLabel(card, 'Line', line, UI_FONT.body, UI_COLOR.textDim, W - 60);
         l2.overflow = Label.Overflow.RESIZE_HEIGHT;
         l2.node.setPosition(0, -50, 0);
-        const tip = makeLabel(card, 'Tip', '点任意处继续', UI_FONT.small, UI_COLOR.textDim, W);
-        tip.node.setPosition(0, -H / 2 + 36, 0);
-        card.setScale(0.6, 0.6, 1);
-        tween(card).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-        root.on(Node.EventType.TOUCH_END, () => {
+        const dismiss = () => {
             InputGuard.remove(root);
+            root.active = false;
             root.destroy();
             this._celebrate = null;
+        };
+        const continueBtn = makeButton(card, 'Continue', '继续经营', 152, 56, 'secondary', dismiss);
+        continueBtn.node.setPosition(-94, -H / 2 + 49, 0);
+        const details = makeButton(card, 'Changes', '查看变化', 164, 56, 'primary', () => {
+            dismiss();
+            this.showBulletin(true);
+        });
+        details.node.setPosition(88, -H / 2 + 49, 0);
+        card.setScale(0.6, 0.6, 1);
+        tween(card).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        root.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            if (event.target === root || event.target === card) dismiss();
         }, this);
-        InputGuard.add(root);
+        InputGuard.add(root, 'panel');
         this._celebrate = root;
+        townAudio.event('promote');
     }
 
     // ───────────────────────── 大公示 ─────────────────────────
@@ -374,12 +378,12 @@ export class NoticeLayer extends Component {
         if (this._showing > 0) {
             this._showing -= dt;
             if (this._showing <= 0) {
-                if (this._queue.length) { const n = this._queue.shift()!; this.showBar(n.kind, n.text); }
+                if (this._queue.length) { const n = this._queue.shift()!; this.showBar(n.kind, n.text, n.onShown); }
                 else this.hideBar();
             }
         } else if (this._queue.length) {
             const n = this._queue.shift()!;
-            this.showBar(n.kind, n.text);
+            this.showBar(n.kind, n.text, n.onShown);
         } else if (this._tipsLeft > 0) {
             this._tipTimer -= dt;
             if (this._tipTimer <= 0) {
@@ -401,7 +405,7 @@ export class NoticeLayer extends Component {
 
     protected onDestroy(): void {
         view.targetOff(this);
-        if (this._list) InputGuard.remove(this._list);
+        this.closeList();
         if (this._horn) InputGuard.remove(this._horn);
         if (this._bar) InputGuard.remove(this._bar);
         if (this._card) InputGuard.remove(this._card);

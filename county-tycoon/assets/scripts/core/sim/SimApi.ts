@@ -76,6 +76,8 @@ export interface SimApi {
 
     openGuidance?(id: number): void;
     housingHint?(homeId: number): string;
+    resettlementOffer?(homeId: number): { targetUid: number; count: number } | null;
+    resettleResidents?(homeId: number): boolean;
     leaveMonthsLeft?(resident: Resident): number;
     jobReferral?(id: number): JobReferral | null;
     introduceJob?(id: number, uid: number, title: string): boolean;
@@ -105,6 +107,7 @@ export interface Employer {
 }
 
 export interface ResearchStatus {
+    needPop?: number;
     id: string;
     name: string;
     unlocks: string[];

@@ -1,9 +1,10 @@
 import { _decorator, Color, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
-import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
+import { GoalStatus, housingShortfall, ResearchStatus, SimApi } from '../core/sim/SimApi';
 import { Education, Offer, TownLevel, LEVEL_NAME } from '../core/sim/types';
 import { centerArtId } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { Panel } from './Panel';
+import { HOUSING_BOARD_HEIGHT, makeHousingBoard } from './HousingBoard';
 import { ListRow, ScrollList } from './ScrollList';
 import {
     drawShadow, formatMoney, makeButton, makeIcon, makeRoundButton, makeStatTile, makeTag, IconName, makeLabel, makeLabelLeft, makeLabelRight, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE, UI_RADIUS,
@@ -477,46 +478,47 @@ export class CenterPanel extends Panel {
     private fillTalent(body: Node, H: number): void {
         const sim = this._sim!;
         const W = this.W;
-        const st = sim.talentStatus ? sim.talentStatus() : { ready: true, reason: '', nextCost: [] };
-        this.sectionBand(body, H, '外县人才引进', '每批 6 人，间隔 5 天；需预留空房，到县后自行求职。');
-
-        const TIERS: { edu: Education; label: string; desc: string }[] = [
-            { edu: 0, label: '初中', desc: '进工厂、当店员、干体力活' },
-            { edu: 1, label: '高中', desc: '技术员、收银、老师助理' },
-            { edu: 2, label: '大专', desc: '老师、工程师、银行柜员' },
+        const st = sim.talentStatus?.();
+        const housing = sim.housingSummary?.();
+        if (!st || !housing) return;
+        makeHousingBoard(body, W, H / 2, housing);
+        const descriptions = [
+            { label: '初中', desc: '进工厂、当店员、干体力活' },
+            { label: '高中', desc: '技术员、收银、老师助理' },
+            { label: '大专', desc: '老师、工程师、银行柜员' },
         ];
-        let y = H / 2 - 106;
-        const rowH = 150;
-        for (let i = 0; i < TIERS.length; i++) {
-            const t = TIERS[i];
-            const price = st.nextCost[i] ?? 0;
+        let y = H / 2 - HOUSING_BOARD_HEIGHT - 28;
+        const note = makeLabelLeft(body, 'Timing', st.ready ? '每隔 5 天可引进一批，到县后自行求职。' : st.reason,
+            UI_FONT.small, st.ready ? UI_COLOR.textDim : UI_COLOR.down, W);
+        note.node.setPosition(-W / 2, y, 0);
+        y -= 28;
+        const rowH = Math.min(150, Math.floor((y + H / 2) / Math.max(1, st.tiers.length)));
+        for (const t of st.tiers) {
+            const { label, desc } = descriptions[t.edu] ?? { label: '其他', desc: '到县后自行求职' };
+            const short = housingShortfall(housing, t.count);
             const row = makePanelNode(body, `Tier${t.edu}`, W, rowH - 12);
             row.setPosition(0, y - (rowH - 12) / 2, 0);
             cardSurface(row, W, rowH - 12);
-            const name = makeLabelLeft(row, 'Name', `${t.label}学历 · 一次来 6 人`, UI_FONT.body, UI_COLOR.text, W - 260);
+            const name = makeLabelLeft(row, 'Name', `${label}学历 · 一次来 ${t.count} 人`, UI_FONT.body, UI_COLOR.text, W - 260);
             name.isBold = true;
             name.node.setPosition(-W / 2 + 20, 26, 0);
-            const sub = makeLabelLeft(row, 'Sub', t.desc, UI_FONT.small, UI_COLOR.textDim, W - 260);
+            const sub = makeLabelLeft(row, 'Sub', desc, UI_FONT.small, UI_COLOR.textDim, W - 260);
             sub.node.setPosition(-W / 2 + 20, -12, 0);
-            const cost = makeLabelLeft(row, 'Cost', `共 ${formatMoney(price)}`, UI_FONT.small, UI_COLOR.gold, W - 260);
+            const cost = makeLabelLeft(row, 'Cost', `共 ${formatMoney(t.cost)}`, UI_FONT.small, UI_COLOR.gold, W - 260);
             cost.node.setPosition(-W / 2 + 20, -44, 0);
-            const btn = makeButton(row, 'Hire', '引进', 160, 64, 'primary', () => this.hire(t.edu, t.label));
-            btn.setEnabled(st.ready);
+            const btn = makeButton(row, 'Hire', short ? `缺 ${short} 个住位` : '引进', 160, 64, 'primary', () => this.hire(t.edu, label, t.count));
+            btn.setEnabled(st.ready && short === 0);
             btn.node.setPosition(W / 2 - 20 - 80, 0, 0);
             y -= rowH;
         }
-        if (!st.ready) {
-            const why = makeLabelLeft(body, 'Why', st.reason, UI_FONT.small, UI_COLOR.down, W);
-            why.node.setPosition(-W / 2, y - 18, 0);
-        }
     }
 
-    private hire(edu: Education, label: string): void {
+    private hire(edu: Education, label: string, count: number): void {
         const sim = this._sim;
         if (!sim || !sim.hireTalents) return;
         const err = sim.hireTalents(edu);
         if (err) { if (this.onHint) this.onHint(err, true); return; }
-        if (this.onHint) this.onHint(`招来 6 位${label}学历的年轻人，已经安排住下`);
+        if (this.onHint) this.onHint(`招来 ${count} 位${label}学历的年轻人，已经安排住下`);
         if (this.onChanged) this.onChanged();
         this.fill();
     }

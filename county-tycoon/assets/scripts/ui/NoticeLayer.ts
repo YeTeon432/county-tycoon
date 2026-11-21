@@ -4,6 +4,7 @@ import { InputGuard } from '../core/InputGuard';
 import { getPlatform } from '../platform/Platform';
 import { SimApi } from '../core/sim/SimApi';
 import { Notice, Resident } from '../core/sim/types';
+import { openBulletin } from './Bulletin';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
 import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
@@ -25,12 +26,6 @@ export class NoticeLayer extends Component {
     private static readonly BAR_H = 44;
     private static readonly SHOW_SECONDS = 4;
     private static readonly CARD_SECONDS = 2.5;
-
-    private static readonly STARTER_ADVICE = [
-        '修路　从村口已有的土路接出去，两旁留空地。',
-        '建房　在路边盖一栋土坯农房，给新来的乡亲留住处。',
-        '开店　点居民家上的心愿气泡，看看附近缺哪种店。',
-    ];
 
     /** 玩法提示：没有新消息时轮播（新档的前几天） */
     private static readonly TIPS = [
@@ -209,44 +204,8 @@ export class NoticeLayer extends Component {
     private toggleList(): void {
         if (this._list) { this.closeList(); return; }
         if (this._hornDot) this._hornDot.active = false;
-        const vis = view.getVisibleSize();
-        const W = Math.min(vis.width, 720) - 32;
-        const items = this.history.slice(-12).reverse();
-        const rowH = 40;
-        const advice = NoticeLayer.STARTER_ADVICE;
-        const newsRows = items.length ? items.length + 1 : 0;
-        const H = 56 + (advice.length + newsRows) * rowH;
-        const box = makePanelNode(this.node, 'List', W, H);
-        const top = vis.height / 2 - TopBar.HEIGHT - 8 - NoticeLayer.BAR_H - 8;
-        const left = this._horn?.position.x ?? (-vis.width / 2 + 38);
-        box.setPosition(left - 22 + W / 2, top - H / 2, 0);
-        const g = box.addComponent(Graphics);
-        drawShadow(g, -W / 2, -H / 2, W, H, 20, 3);
-        g.fillColor = UI_COLOR.panel;
-        g.roundRect(-W / 2, -H / 2, W, H, 20);
-        g.fill();
-        const title = makeLabelLeft(box, 'Title', '游戏公告 · 开局建议', UI_FONT.body, UI_COLOR.text, W - 140);
-        title.isBold = true;
-        title.node.setPosition(-W / 2 + 20, H / 2 - 28, 0);
-        makeLabel(box, 'Close', '收起', UI_FONT.small, UI_COLOR.textDim, 72).node.setPosition(W / 2 - 52, H / 2 - 28, 0);
-        const rowY = (row: number) => H / 2 - 28 - rowH * row;
-        advice.forEach((text, i) => {
-            const line = makeLabelLeft(box, 'Advice', text, UI_FONT.small, UI_COLOR.text, W - 40);
-            line.node.setPosition(-W / 2 + 20, rowY(i + 1), 0);
-        });
-        if (items.length) {
-            const news = makeLabelLeft(box, 'News', '县里的消息', UI_FONT.body, UI_COLOR.text, W - 40);
-            news.isBold = true;
-            news.node.setPosition(-W / 2 + 20, rowY(advice.length + 1), 0);
-        }
-        items.forEach((it, i) => {
-            const l = makeLabelLeft(box, 'Row', it.text, UI_FONT.small,
-                it.kind === 'leave' || it.kind === 'warn' || it.kind === 'layoff' ? UI_COLOR.down
-                    : it.kind === 'arrive' || it.kind === 'stay' ? UI_COLOR.up : UI_COLOR.text, W - 40);
-            l.node.setPosition(-W / 2 + 20, rowY(advice.length + 2 + i), 0);
-        });
-        box.on(Node.EventType.TOUCH_END, () => this.closeList(), this);
-        InputGuard.add(box);
+        const box = openBulletin(this.node.parent!, this.history, () => this.closeList());
+        InputGuard.add(box, 'panel');
         this._list = box;
     }
 
@@ -425,7 +384,7 @@ export class NoticeLayer extends Component {
 
     protected onDestroy(): void {
         view.targetOff(this);
-        if (this._list) InputGuard.remove(this._list);
+        this.closeList();
         if (this._horn) InputGuard.remove(this._horn);
         if (this._bar) InputGuard.remove(this._bar);
         if (this._card) InputGuard.remove(this._card);

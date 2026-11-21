@@ -12,6 +12,7 @@ export interface BuildingDef {
     id: string;
     name: string;
     category: string;
+    estateName?: string;
     width: number;
     height: number;
     /** 占位色：没有贴图时画色块用 */
@@ -56,6 +57,7 @@ function sanitize(def: BuildingDef, index: number): BuildingDef | null {
         id: def.id,
         name: typeof def.name === 'string' && def.name ? def.name : def.id,
         category: typeof def.category === 'string' ? def.category : '其他',
+        estateName: typeof def.estateName === 'string' ? def.estateName : undefined,
         width: Math.max(1, Math.floor(def.width || 1)),
         height: Math.max(1, Math.floor(def.height || 1)),
         color: typeof def.color === 'string' && def.color ? def.color : '#966c6c',

@@ -50,6 +50,7 @@ interface Card {
     lock: Sprite;
     /** 住宅能住几人（图区右下角，非住宅不显示） */
     cap: Label;
+    researchHint: Label | null;
     /** 分层合批（T212）：这张卡在 底 / 图 / 图标 / 文字 四层里的影子节点，每帧跟 node 同步位置和显隐 */
     holders: Node[];
     /** 上次画的状态，变了才重画 */
@@ -351,6 +352,15 @@ export class BuildingBar extends Component {
         cap.node.setPosition(imgW / 2 - 4, imgY - imgH / 2 + 12, 0);
         cap.node.active = false;
 
+        const researchHint = def.estateName ? makeLabel(textH, 'ResearchHint', '', 16, UI_COLOR.text, imgW - 32) : null;
+        if (researchHint) {
+            researchHint.node.setPosition(8, imgY + imgH / 2 - 16, 0);
+            researchHint.enableOutline = true;
+            researchHint.outlineColor = UI_PALETTE.white;
+            researchHint.outlineWidth = 2;
+            researchHint.node.active = false;
+        }
+
         const name = makeLabel(textH, 'Name', def.name, UI_FONT.small, UI_COLOR.text, w - 12);
         name.isBold = true;
         name.cacheMode = Label.CacheMode.BITMAP;   // 进动态合图，卡片文字能连成一批（T212）
@@ -368,7 +378,7 @@ export class BuildingBar extends Component {
             this.handleItemClick(def);
         }, this);
 
-        return { def, tab: BuildingBar.tabOf(def), node, selected: false, thumb, swatch, name, price, coin, lock, cap, holders, state: '' };
+        return { def, tab: BuildingBar.tabOf(def), node, selected: false, thumb, swatch, name, price, coin, lock, cap, researchHint, holders, state: '' };
     }
 
     /** 没有贴图时的占位：一块等距菱形色块（按占格画大小），比方块更像"一块地上的楼" */
@@ -432,6 +442,7 @@ export class BuildingBar extends Component {
         if (sim0 && sim0.isUnlocked && !sim0.isUnlocked(def.id)) {
             // D026：没研究过
             const r = sim0.researchList ? sim0.researchList().find((x) => x.unlocks.indexOf(def.id) >= 0) : null;
+            if (r && def.estateName && r.reason) return `${r.name} · ${r.reason}`;
             return r ? `先在发展中心研究「${r.name}」` : '还不能盖';
         }
         const locked = this.isLocked(def);
@@ -490,6 +501,11 @@ export class BuildingBar extends Component {
         c.thumb.color = UI_PALETTE.white;
         const so = c.swatch.node.getComponent(UIOpacity) ?? c.swatch.node.addComponent(UIOpacity);
         so.opacity = 255;
+        if (c.researchHint) {
+            const r = locked ? this._sim?.researchList?.().find(item => item.unlocks.indexOf(c.def.id) >= 0) : null;
+            c.researchHint.string = r?.needPop ? `${r.needPop}人可研` : '';
+            c.researchHint.node.active = !!c.researchHint.string;
+        }
         c.lock.node.active = locked;          // 只留一把小锁做标记
         c.name.color = UI_COLOR.text;
 

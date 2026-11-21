@@ -174,7 +174,7 @@
     },
     {
       "id": "r-apartment",
-      "name": "公寓楼",
+      "name": "步梯商品房小区",
       "unlocks": [
         "apartment"
       ],
@@ -182,6 +182,62 @@
       "days": 2,
       "level": "village",
       "needPop": 10
+    },
+    {
+      "id": "r-workers-estate",
+      "name": "厂矿家属院",
+      "unlocks": [
+        "workers-estate"
+      ],
+      "cost": 6000,
+      "days": 1,
+      "level": "village",
+      "needBuilding": "workshop|textile|food-factory|mine|moto-factory|electronics|car-factory",
+      "needStaff": 2
+    },
+    {
+      "id": "r-resettlement",
+      "name": "回迁安置小区",
+      "unlocks": [
+        "resettlement"
+      ],
+      "cost": 12000,
+      "days": 2,
+      "level": "town",
+      "needBuilding": "hut|brick|house"
+    },
+    {
+      "id": "r-highrise",
+      "name": "电梯高层小区",
+      "unlocks": [
+        "highrise"
+      ],
+      "cost": 26000,
+      "days": 3,
+      "level": "town",
+      "needBuilding": "apartment"
+    },
+    {
+      "id": "r-garden-estate",
+      "name": "花园洋房小区",
+      "unlocks": [
+        "garden-estate"
+      ],
+      "cost": 24000,
+      "days": 2,
+      "level": "town",
+      "needBuilding": "plaza"
+    },
+    {
+      "id": "r-market-estate",
+      "name": "商住综合小区",
+      "unlocks": [
+        "market-estate"
+      ],
+      "cost": 36000,
+      "days": 3,
+      "level": "county",
+      "needStreet": "daily|night|influencer|food|youth"
     },
     {
       "id": "r-house",

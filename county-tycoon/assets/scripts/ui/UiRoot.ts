@@ -390,9 +390,18 @@ export class UiRoot extends Component {
                 if (reason) { townAudio.action('blocked'); this._topPanel?.showFeedback(reason); }
                 else this.closeTopPanel();
             } : null,
+            () => {
+                if (!this.sim?.resettleResidents?.(uid)) {
+                    this._topPanel?.showFeedback('当前没有能接收整栋住户的安置房');
+                    return;
+                }
+                this.onResidentChanged?.();
+                this.onBuildingTapped(uid);
+                this._topPanel?.showFeedback('住户已搬进同心家园，老房已腾空');
+            },
         );
         if (panel) {
-            panel.onClosed = () => { this._topPanel = null; };
+            panel.onClosed = () => { if (this._topPanel === panel) this._topPanel = null; };
             this._topPanel = panel;
         }
     }

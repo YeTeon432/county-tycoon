@@ -51,13 +51,14 @@ export class BuildingPanel extends Panel {
         toggleFacing: ((uid: number) => boolean) | null,
         onHint: ((text: string) => void) | null = null,
         onBranch: ((uid: number) => void) | null = null,
+        onResettle: (() => void) | null = null,
     ): BuildingPanel | null {
         const placed = model.allBuildings().find((b) => b.uid === uid) ?? null;
         if (!placed) return null;
 
         const branchOf = sim.building(uid)?.branchOf ?? sim.state.construction?.find(c => c.uid === uid)?.branch?.sourceUid;
         const name = placed.def.name + (branchOf === undefined ? '' : '分厂');
-        const panel = Panel.open(BuildingPanel, parent, name, placed.def.category);
+        const panel = Panel.open(BuildingPanel, parent, placed.def.estateName ?? name, placed.def.estateName ? name : placed.def.category);
         panel._onBranch = onBranch;
         panel._sim = sim;
         panel._placed = placed;
@@ -65,7 +66,7 @@ export class BuildingPanel extends Panel {
         panel._toggleFacing = toggleFacing;
         panel._onHint = onHint;
         panel.renderPage = () => {
-            panel.fill();
+            panel.fill(onResettle);
             panel.buildFacingButton();
         };
         panel.renderPage();
@@ -80,7 +81,7 @@ export class BuildingPanel extends Panel {
         return b && typeof b.housing === 'number' ? b.housing : 0;
     }
 
-    private fill(): void {
+    private fill(onResettle: (() => void) | null): void {
         const sim = this._sim;
         const placed = this._placed;
         const content = this.content;
@@ -117,6 +118,27 @@ export class BuildingPanel extends Panel {
         }
         y -= tileH + 36;
 
+        const relocation = sim.resettlementOffer?.(placed.uid);
+        if (relocation && onResettle) {
+            const label = makeLabelLeft(content, 'Relocation', `同心家园可接收本楼全部 ${relocation.count} 位住户`,
+                UI_FONT.small, UI_COLOR.text, W - 170);
+            label.node.setPosition(-W / 2, y - 16, 0);
+            const move = makeButton(content, 'Resettle', '整栋回迁', 146, 50, 'primary', onResettle);
+            move.node.setPosition(W / 2 - 73, y - 16, 0);
+            y -= 68;
+        }
+        if (placed.def.id === 'resettlement') {
+            const guide = makeLabelLeft(content, 'RelocationHelp', '点沿路相通的农房、砖瓦房或自建小楼，可将整栋住户迁来。', UI_FONT.small, UI_COLOR.text, W);
+            guide.node.setPosition(-W / 2, y, 0);
+            y -= 42;
+        }
+        if (placed.def.id === 'market-estate' && b) {
+            const shop = makeLabelLeft(content, 'Storefronts',
+                `底商在岗 ${b.workerIds.length} 人  ·  上月服务 ${b.lastCustomers} 人次  ·  营业额 ${formatMoney(b.lastRevenue)}`,
+                UI_FONT.small, UI_COLOR.text, W);
+            shop.node.setPosition(-W / 2, y, 0);
+            y -= 42;
+        }
         const offer = sim.branchOffer?.(placed.uid);
         if (offer && this._onBranch) {
             const label = makeLabelLeft(content, 'BranchTerms', `建设费 ${formatMoney(offer.cost)} · 新增 ${offer.jobs} 个岗位`,

@@ -1700,4 +1700,77 @@ suite('开分厂', () => {
     });
 });
 
+suite('住宅小区', () => {
+    test('村口按人口或在岗工人研究，沿用老商品房的研究和建筑编号', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view);
+        const row = (id: string) => sim.researchList().find(r => r.id === id)!;
+        eq(row('r-apartment').level, 'village');
+        eq(row('r-apartment').needPop, 10);
+        eq(cfg.building('apartment')!.housing, 18);
+        const workers = sim.building(t.shops.workshop)!;
+        workers.workerIds = [];
+        eq(row('r-workers-estate').state, 'locked');
+        workers.workerIds = sim.state.residents.slice(0, 2).map(r => r.id);
+        eq(row('r-workers-estate').state, 'ready');
+        const saved = JSON.parse(JSON.stringify(sim.state));
+        saved.researched.push('r-apartment');
+        saved.unlocked.push('apartment');
+        const loaded = new Simulation(cfg, t.view, { state: saved });
+        ok(loaded.isUnlocked('apartment'));
+        eq(loaded.researchList().find(r => r.id === 'r-apartment')!.state, 'done');
+        eq(loaded.isUnlocked('highrise'), false);
+    });
+
+    test('回迁需要沿路可达且整栋住得下，重复点击不会搬两次', () => {
+        const cfg = loadConfig();
+        const t = basicTown(cfg);
+        const sim = new Simulation(cfg, t.view);
+        const old = sim.building(t.houses[0])!;
+        const ids = old.residentIds.slice();
+        ok(ids.length > 0);
+        sim.state.finance.funds = 1e6;
+        const add = (x: number, y: number) => {
+            const uid = t.map.build('resettlement', x, y, 2, 2);
+            ok(sim.onBuilt(uid, 'resettlement'));
+            return uid;
+        };
+        cfg.building('resettlement')!.buildDays = 0;
+        add(20, 20);
+        eq(sim.resettleResidents(old.uid), false);
+        const target = add(15, 6);
+        cfg.building('resettlement')!.housing = ids.length - 1;
+        eq(sim.resettlementOffer(old.uid), null);
+        cfg.building('resettlement')!.housing = ids.length;
+        eq(sim.resettlementOffer(old.uid)!.targetUid, target);
+        ok(sim.resettleResidents(old.uid));
+        eq(old.residentIds.length, 0);
+        eq(sim.resettleResidents(old.uid), false);
+        sim.onDemolished(old.uid);
+        const loaded = new Simulation(cfg, t.view, { state: JSON.parse(JSON.stringify(sim.state)) });
+        eq(loaded.building(target)!.residentIds.length, ids.length);
+        for (const id of ids) eq(loaded.resident(id)!.homeId, target);
+    });
+
+    test('商住小区须有商业特色街，入住、底商用工和营业收入共用一栋楼', () => {
+        const cfg = loadFullConfig();
+        const t = basicTown(cfg);
+        const uid = t.map.build('market-estate', 15, 6, 2, 2);
+        t.view.refresh();
+        const sim = new Simulation(cfg, t.view);
+        sim.state.level = 'county';
+        const research = () => sim.researchList().find(r => r.id === 'r-market-estate')!;
+        eq(research().state, 'locked');
+        sim.state.streets = [{ kind: 'daily', uids: [t.shops.breakfast, t.shops.supermarket, t.shops.parcel] }];
+        eq(research().state, 'ready');
+        const home = sim.building(uid)!;
+        ok(home.residentIds.length > 0);
+        sim.stepMonth();
+        ok(sim.employers().some(e => e.uid === uid && e.required === 3));
+        ok(sim.buildingPrice('market-estate') > 0);
+        ok(home.workerIds.length > 0 && home.lastRevenue > 0);
+    });
+});
+
 report();

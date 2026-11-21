@@ -275,6 +275,12 @@ export class Simulation implements SimApi {
         const s = this.state;
         if (LEVEL_ORDER.indexOf(s.level) < LEVEL_ORDER.indexOf(r.level)) return `${LEVEL_NAME[r.level]}才能研究`;
         if (r.needPop > 0 && s.residents.length < r.needPop) return `人口要到 ${r.needPop}（现在 ${s.residents.length}）`;
+        if (r.needStaff && !s.buildings.some(b => r.needBuilding.indexOf(b.defId) >= 0 && b.workerIds.length >= r.needStaff)) {
+            return `要有一间至少 ${r.needStaff} 人在岗的作坊或工厂`;
+        }
+        if (r.needStreet.length && !s.streets?.some(st => r.needStreet.indexOf(st.kind) >= 0)) {
+            return '先建成一条商业特色街，例如便民生活圈或夜市一条街';
+        }
         if (r.needBuilding.length && !s.buildings.some((b) => r.needBuilding.indexOf(b.defId) >= 0)) {
             return `县里要先有${r.needBuilding.map((id) => this.buildingName(id)).join('或')}`;
         }
@@ -305,7 +311,7 @@ export class Simulation implements SimApi {
                 reason = this.researchBlock(r);
                 state = reason ? 'locked' : 'ready';
             }
-            return { id: r.id, name: r.name, unlocks: r.unlocks.slice(), cost: r.cost, days: r.days, level: r.level, state, reason, progress };
+            return { id: r.id, name: r.name, unlocks: r.unlocks.slice(), cost: r.cost, days: r.days, level: r.level, needPop: r.needPop, state, reason, progress };
         });
     }
 
@@ -2318,6 +2324,39 @@ export class Simulation implements SimApi {
 
     // ───────────────────────────── 住房 / 岗位 ─────────────────────────────
 
+    /** 拆旧前整栋回迁，亲属和邻居一起搬。只选已经交付、沿路可达且住得下的安置房。 */
+    resettlementOffer(homeId: number): { targetUid: number; count: number } | null {
+        const source = this.building(homeId);
+        if (!source || ['hut', 'brick', 'house'].indexOf(source.defId) < 0 || !source.residentIds.length) return null;
+        const count = source.residentIds.length;
+        const capacity = this._cfg.building('resettlement')?.housing ?? 0;
+        let nearest = Infinity;
+        let targetUid = 0;
+        for (const b of this.state.buildings) {
+            if (b.defId !== 'resettlement' || capacity - b.residentIds.length < count) continue;
+            const distance = this._town.roadDistance(homeId, b.uid);
+            if (distance < nearest) { nearest = distance; targetUid = b.uid; }
+        }
+        return isFinite(nearest) ? { targetUid, count } : null;
+    }
+
+    resettleResidents(homeId: number): boolean {
+        const offer = this.resettlementOffer(homeId);
+        if (!offer) return false;
+        const source = this.building(homeId)!;
+        const target = this.building(offer.targetUid)!;
+        const ids = source.residentIds.slice();
+        for (const id of ids) {
+            const r = this.resident(id)!;
+            r.homeId = target.uid;
+            this.log(r, '从老房回迁到同心家园');
+        }
+        target.residentIds.push(...ids);
+        source.residentIds = [];
+        this.notice('info', `${ids.length} 位街坊一起搬进了同心家园`, ids);
+        return true;
+    }
+
     private assignHomes(list: Resident[]): void {
         const supply = this.housingSupply();
         for (const r of list) {
@@ -2461,7 +2500,8 @@ function clamp(min: number, max: number, v: number): number {
 /** 日志里用的建筑名。模拟层不读 buildings.json，这里留一份小表 */
 /** 和 buildings.json 的 name 保持一致（模拟层不读那个表）；测试会对一遍 */
 export const DEF_NAMES: Record<string, string> = {
-    hut: '土坯农房', brick: '砖瓦房', house: '自建小楼', apartment: '商品房小区', detached: '独栋', villa: '别墅', 'school-house': '学区房',
+    hut: '土坯农房', brick: '砖瓦房', house: '自建小楼', apartment: '步梯商品房小区', detached: '独栋', villa: '别墅', 'school-house': '学区房',
+    'workers-estate': '厂矿家属院', 'resettlement': '回迁安置小区', 'highrise': '电梯高层小区', 'garden-estate': '花园洋房小区', 'market-estate': '商住综合小区',
     breakfast: '早餐铺', 'milk-tea': '奶茶店', bbq: '烧烤摊', hotpot: '火锅店',
     parcel: '快递驿站', supermarket: '超市', 'net-cafe': '网吧', 'phone-shop': '手机店',
     barber: '理发店', tutoring: '补习班',

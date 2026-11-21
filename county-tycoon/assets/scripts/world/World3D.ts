@@ -199,7 +199,9 @@ export class World3D extends Component {
         return true;
     }
 
-    private modelId(id: string): string {
+    private modelId(id: string, col = 0, row = 0): string {
+        // 相邻自建房交错使用两套等高模型，预览和读档都按地块选同一款。
+        if (id === 'house' && (col + row) % 2 === 1) return 'house-terrace';
         return id === 'center' ? this._centerArtId : id;
     }
 
@@ -531,7 +533,7 @@ export class World3D extends Component {
             this._minePreview = mine;
             this.updateOutcrops();
         }
-        const id = p ? this.modelId(p.id) : null;
+        const id = p ? this.modelId(p.id, p.col, p.row) : null;
         if (!p || !id || !this._mats || !this._prefabs.has(id)) {
             if (cur) { cur.node.destroy(); this._preview = null; }
             return;
@@ -597,7 +599,7 @@ export class World3D extends Component {
     private syncBuildings(): void {
         const alive = new Set<number>();
         for (const b of this._model.allBuildings()) {
-            const id = this.modelId(b.def.id);
+            const id = this.modelId(b.def.id, b.col, b.row);
             if (b.def.flat || !this._prefabs.has(id)) continue;
             alive.add(b.uid);
             const key = `${id}|${b.col},${b.row}|${b.facing ?? ''}`;

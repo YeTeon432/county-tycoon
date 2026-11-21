@@ -423,12 +423,15 @@ def _auto_back():
 
 # ---------------------------------------------------------------- 登记 & 渲染
 _SPRITES = []
+_MODEL_ONLY = set()
 
 
-def sprite(name, w, h, facing=True):
+def sprite(name, w, h, facing=True, model_only=False):
     """登记一张建筑图。facing=True 会多出 <name>_r（门面朝右下）。
     D033 起地图上的楼是 3D 模型，这些图只给建造栏卡片 / 放置提示用；背面图 _b / _br（D031）T540h 起不再出。"""
     def deco(fn):
+        if model_only:
+            _MODEL_ONLY.add(name)  # 同一建筑的街景变体共用建造卡
         _SPRITES.append((name, w, h, facing, fn, None))
         return fn
     return deco
@@ -555,7 +558,7 @@ def run():
     only = set(argv[1:])
     os.makedirs(out_dir, exist_ok=True)
     for name, w, h, facing, fn, width_px in _SPRITES:
-        if only and name not in only:
+        if name in _MODEL_ONLY or (only and name not in only):
             continue
         _render_one(name, w, h, fn, '', out_dir, width_px)
         if facing:

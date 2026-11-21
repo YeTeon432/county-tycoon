@@ -5,7 +5,7 @@
 
 朝向（和旧版一致，只画两种，另外两种由 LifeLayer 左右翻转）：
   人 / 电动车 / 摩托车：front = 朝 +X 走（往右下，看得到脸），back = 朝 -X 走（背影，往左上）
-  汽车：车身沿 X，车头车尾对称，一张图。
+  汽车：车身沿 X，car<N> 朝 +X，car<N>-back 朝 -X；白色前灯、红色尾灯。
 锚点 = 图底边中点。等距图里脚 / 轮子的着地中心并不是最低点（右下那只脚、车的右下角更低），
 所以每张图建好后把整个模型沿地面往画面上方（-X、+Y 方向）平移，让最低点正好压在图底边上，
 不会被裁。平移量每类固定（同一类所有帧一样，走路不上下抖），见 SETTLE。
@@ -1478,16 +1478,17 @@ def arches(L, W, r, color):
 
 
 def ends(L, W, z, light_z, color):
-    """车头车尾一样：保险杠 + 格栅 + 一对灯（白 + 橙转向）+ 蓝牌。"""
+    """车头朝 +X，前后灯和格栅区分行驶方向。"""
     for sgn in (1, -1):
         x = sgn * L / 2
         xo = x - 0.012 if sgn > 0 else x - 0.008
         box(xo - 0.004 * sgn, -W / 2 + 0.02, z, 0.024, W - 0.04, 0.04, '#5a5f66', bevel=0.01)     # 保险杠
-        box(xo, -0.07, light_z - 0.012, 0.02, 0.14, 0.03, '#2e3136')                             # 格栅
-        for k in range(3):
-            box(xo + 0.002 * sgn, -0.065, light_z - 0.006 + k * 0.009, 0.02, 0.13, 0.003, '#6a6f77')
+        if sgn > 0:
+            box(xo, -0.07, light_z - 0.012, 0.02, 0.14, 0.03, '#2e3136')                             # 格栅
+            for k in range(3):
+                box(xo + 0.002 * sgn, -0.065, light_z - 0.006 + k * 0.009, 0.02, 0.13, 0.003, '#6a6f77')
         for side in (1, -1):
-            box(x - 0.01, side * (W / 2 - 0.07) - 0.035, light_z, 0.02, 0.07, 0.03, M('#fff4c8', emit=1.8))
+            box(x - 0.01, side * (W / 2 - 0.07) - 0.035, light_z, 0.02, 0.07, 0.03, M('#fff4c8' if sgn > 0 else '#cf2429', emit=0.8))
             box(x - 0.01, side * (W / 2 - 0.025) - 0.012, light_z, 0.02, 0.024, 0.03, M('#ffa030', emit=1.2))
         box(x - 0.011 + 0.006 * sgn, -0.05, z + 0.006, 0.016, 0.1, 0.03, M('#2f5fc0', emit=0.35))   # 蓝牌
         box(x - 0.012 + 0.008 * sgn, -0.044, z + 0.016, 0.014, 0.088, 0.01, M('#f6f6f6', emit=0.35))
@@ -1549,19 +1550,19 @@ def van(color):
     ends(L, W, 0.06, 0.12, color)
 
 
-@actor('car0', 120 * PXS, PXS)
-def car0():
-    warm(); sedan('#dc3a2e'); settle('car')
+def street_car(skin, back):
+    warm()
+    if skin == 2:
+        van('#2f6fd8')
+    else:
+        sedan(('#dc3a2e', '#f3f1ea')[skin])
+    settle('car', back)
 
 
-@actor('car1', 120 * PXS, PXS)
-def car1():
-    warm(); sedan('#f3f1ea'); settle('car')
-
-
-@actor('car2', 120 * PXS, PXS)
-def car2():
-    warm(); van('#2f6fd8'); settle('car')
+for _skin in range(3):
+    for _back in (False, True):
+        _name = f'car{_skin}' + ('-back' if _back else '')
+        actor(_name, 120 * PXS, PXS)(lambda i=_skin, back=_back: street_car(i, back))
 
 
 # ---------------------------------------------------------------- 金币

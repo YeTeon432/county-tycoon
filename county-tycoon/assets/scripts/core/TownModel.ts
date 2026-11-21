@@ -1,4 +1,4 @@
-import { BuildingDef } from './BuildingConfig';
+import { BuildingDef, travelSurface } from './BuildingConfig';
 import { Terrain } from './Terrain';
 
 /** 已经放在地图上的一栋建筑 */
@@ -110,7 +110,7 @@ export class TownModel {
 
     private isRoad(col: number, row: number): boolean {
         const b = this.getAt(col, row);
-        return !!b && b.def.flat;
+        return travelSurface(b?.def) !== null;
     }
 
     /**

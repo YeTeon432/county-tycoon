@@ -175,6 +175,10 @@ export interface EconomyConfig {
     rentPerPerson: number;
     /** 通勤超过这个距离开始扣心情 */
     commuteComfort: number;
+    busMonthlyCost: number;
+    busStopRadius: number;
+    busSpeedRatio: number;
+    busWait: number;
     pension: number;
     /** 公共服务（环卫、治安、管网）每人每月多少钱，按城镇等级乘倍率（T532）。财政出，流出县外 */
     servicePerCapita: number;
@@ -405,6 +409,7 @@ const DEFAULT_ECONOMY: EconomyConfig = {
     distancePenalty: 0.06,
     rentPerPerson: 600,
     commuteComfort: 4,
+    busMonthlyCost: 600, busStopRadius: 3, busSpeedRatio: 3, busWait: 1,
     pension: 400,
     servicePerCapita: 0,
     serviceLevelMult: { village: 1, town: 1, county: 1, city: 1, top100: 1 },
@@ -591,6 +596,10 @@ export function parseEconomy(json: EconomyJson | null | undefined): EconomyConfi
         distancePenalty: clamp01(t.distancePenalty, d.distancePenalty),
         rentPerPerson: Math.max(0, num(t.rentPerPerson, d.rentPerPerson)),
         commuteComfort: Math.max(0, num(t.commuteComfort, d.commuteComfort)),
+        busMonthlyCost: Math.max(0, num(t.busMonthlyCost, d.busMonthlyCost)),
+        busStopRadius: Math.max(0, num(t.busStopRadius, d.busStopRadius)),
+        busSpeedRatio: Math.max(1, num(t.busSpeedRatio, d.busSpeedRatio)),
+        busWait: Math.max(0, num(t.busWait, d.busWait)),
         pension: Math.max(0, num(t.pension, d.pension)),
         servicePerCapita: Math.max(0, num(t.servicePerCapita, d.servicePerCapita)),
         serviceCrowding: Math.max(0, num(t.serviceCrowding, d.serviceCrowding)),

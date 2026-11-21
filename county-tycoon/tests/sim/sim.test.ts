@@ -4,6 +4,7 @@ import { buildWorld } from '../../assets/scripts/core/sim/world';
 import { staffing, positionsOf, openingsFor } from '../../assets/scripts/core/sim/labor';
 import { parseEconomy, parseNames, makeSimConfig } from '../../assets/scripts/core/sim/config';
 import { DEF_NAMES, Simulation } from '../../assets/scripts/core/sim/Simulation';
+import { Resident } from '../../assets/scripts/core/sim/types';
 import { SimConfig } from '../../assets/scripts/core/sim/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -1734,6 +1735,180 @@ suite('居民引导与用工', () => {
         sim.stepMonth();
         ok(sim.housingHint(home).includes('正在翻盖'));
         eq(sim.state.renovations!.filter((x) => x.uid === home).length, 1);
+    });
+});
+
+suite('居民通勤', () => {
+    function town() {
+        const cfg = loadFullConfig();
+        cfg.economy.moveChance = 1;
+        const map = new MapBuilder();
+        map.hRoad(0, 13, 4);
+        const home = map.build('house', 1, 3), nearHome = map.build('house', 8, 3);
+        const job = map.build('workshop', 8, 5), localJob = map.build('breakfast', 1, 5);
+        map.build('villa', 9, 9); // 直线近，路网不通
+        const sim = new Simulation(cfg, map.view(), { seed: 91, opening: false });
+        function add(age: number) {
+            const r = (sim as any).createResident(null, 'F', age) as Resident;
+            sim.state.residents.push(r);
+            r.homeId = home;
+            sim.building(home)!.residentIds.push(r.id);
+            r.savings = 3500;
+            return r;
+        }
+        const worker = add(35);
+        worker.jobId = job;
+        worker.jobTitle = '工人';
+        worker.salary = 2600;
+        sim.building(job)!.workerIds.push(worker.id);
+        return { sim, cfg, map, worker, home, nearHome, localJob, add };
+    }
+
+    test('给步行员工配车：校验资金、路程和车辆，读档后月账单只记一次', () => {
+        const { sim, cfg, map, worker } = town();
+        const cost = cfg.economy.vehicles.tiers.ebike.price;
+        eq(sim.commuteInfo(worker.id)!.distance, 8);
+        sim.state.finance.funds = cost - 1;
+        eq(sim.provideCommuteBike(worker.id), false);
+        eq(sim.state.finance.funds, cost - 1);
+        sim.state.finance.funds = cost;
+        ok(sim.provideCommuteBike(worker.id));
+        eq(sim.commuteInfo(worker.id)!.comfort, 6);
+        eq(worker.savings, 3500);
+        eq(sim.state.finance.funds, 0);
+        const loaded = new Simulation(cfg, map.view(), { state: JSON.parse(JSON.stringify(sim.state)) });
+        eq(loaded.resident(worker.id)!.vehicle, 'ebike');
+        eq(loaded.provideCommuteBike(worker.id), false);
+        eq(loaded.stepMonth().expense.commuteBikes, cost);
+        eq(loaded.stepMonth().expense.commuteBikes, 0);
+    });
+
+    test('同级近房：同住配偶和孩子一起搬，岗位保留，当月通勤心愿结清', () => {
+        const { sim, worker, add, home, nearHome } = town();
+        const spouse = add(66), kid = add(7);
+        worker.spouseId = spouse.id; spouse.spouseId = worker.id;
+        spouse.childIds.push(kid.id); kid.parentIds.push(spouse.id);
+        spouse.idle = true; spouse.savings = 50000;
+        worker.wish = { kind: 'commute', text: '想离单位近些', hint: '', suggest: '', radius: 4, since: 0, until: 1 };
+        const job = worker.jobId;
+        const result = sim.stepMonth();
+        eq(worker.jobId, job);
+        for (const r of [worker, spouse, kid]) {
+            eq(r.homeId, nearHome);
+            eq(sim.building(home)!.residentIds.indexOf(r.id), -1);
+            eq(sim.building(nearHome)!.residentIds.filter(id => id === r.id).length, 1);
+        }
+        eq(sim.commuteInfo(worker.id)!.bikeCost, null);
+        ok(result.notices!.some(n => n.kind === 'wishDone' && n.residentIds.indexOf(worker.id) >= 0));
+        ok(!worker.moodParts!.some(p => p.key === 'commute'));
+    });
+
+    test('房租负担、床位和另一半的通勤会挡住搬家', () => {
+        const { sim, worker, add, home, nearHome, localJob } = town();
+        const spouse = add(37);
+        worker.spouseId = spouse.id; spouse.spouseId = worker.id;
+        spouse.jobId = localJob; spouse.jobTitle = '店员'; spouse.salary = 2500;
+        sim.building(localJob)!.workerIds.push(spouse.id);
+        const move = () => (sim as any).moveToBetterHomes((sim as any).refreshWorld());
+        move();
+        eq(worker.homeId, home, '不能让配偶从家门口改成长途上班');
+        spouse.jobId = null;
+        spouse.savings = worker.savings = 0;
+        move();
+        eq(worker.homeId, home, '全家存款付不起租金');
+        worker.savings = 20000;
+        for (let i = 0; i < 5; i++) {
+            const occupant = add(7);
+            (sim as any).detachHome(occupant);
+            occupant.homeId = nearHome;
+            sim.building(nearHome)!.residentIds.push(occupant.id);
+        }
+        move();
+        eq(worker.homeId, home, '近房只剩一张床，另一栋房子不通路');
+    });
+});
+
+suite('交通中心与通勤公交', () => {
+    function town() {
+        const cfg = loadFullConfig();
+        cfg.economy.moveChance = 0;
+        const map = new MapBuilder();
+        map.hRoad(0, 18, 4);
+        const home = map.build('house', 1, 3), work = map.build('workshop', 11, 5);
+        const near = map.build('house', 2, 3), reverse = map.build('house', 11, 3);
+        const local = map.build('breakfast', 1, 5), distant = map.build('house', 17, 3);
+        let buildings = map.view().allBuildings();
+        const view = new SimpleTownView(20, 20, () => buildings);
+        const sim = new Simulation(cfg, view, { seed: 501, opening: false });
+        const hire = (house: number, job: number, title: string) => {
+            const p: Resident = (sim as any).createResident(null, 'F', 30);
+            p.birthMonth = 9; p.homeId = house; p.jobId = job; p.salary = 2600; p.jobTitle = title;
+            sim.state.residents.push(p);
+            sim.building(house)!.residentIds.push(p.id);
+            sim.building(job)!.workerIds.push(p.id);
+            return p;
+        };
+        const a = hire(home, work, '工人'), b = hire(near, work, '工人');
+        const c = hire(reverse, local, '店员'), d = hire(distant, work, '工人');
+        const breakRoad = () => {
+            const tile = buildings.find(x => x.road && x.col === 6)!;
+            const before = buildings;
+            buildings = buildings.filter(x => x !== tile);
+            sim.onDemolished(tile.uid);
+            return () => { buildings = before; view.refresh(); };
+        };
+        return { sim, cfg, view, a, b, c, d, breakRoad };
+    }
+
+    test('看推荐免费；双向计人、资金门槛、重复开线、月账单与读档', () => {
+        const { sim, cfg, view, a, b, c, d } = town();
+        const funds = sim.state.finance.funds;
+        const quote = sim.busProposal(a.id)!;
+        eq(quote.riders, 3);
+        eq(sim.state.busLines?.length ?? 0, 0);
+        eq(sim.state.finance.funds, funds);
+        sim.state.finance.funds = quote.monthlyCost - 1;
+        ok(sim.openBusLine(quote));
+        sim.state.finance.funds = funds;
+        eq(sim.openBusLine(quote), null);
+        ok(sim.openBusLine(quote));
+        eq(sim.state.busLines!.length, 1);
+        eq(sim.state.finance.funds, funds);
+        eq(sim.busForTrip(a.id, a.homeId!, a.jobId!)!.forward, true);
+        eq(sim.busForTrip(c.id, c.homeId!, c.jobId!)!.forward, false);
+        eq(sim.commuteInfo(b.id)!.bus, true);
+        eq(sim.commuteInfo(d.id)!.bus, false);
+        eq(sim.busProposal(a.id), null);
+        eq(sim.busProposal(c.id), null);
+        const restored = new Simulation(cfg, view, { state: JSON.parse(JSON.stringify(sim.state)) });
+        const control = new Simulation(cfg, view, { state: JSON.parse(JSON.stringify(sim.state)) });
+        control.closeBusLine(quote.from, quote.to);
+        control.stepMonth();
+        const report = restored.stepMonth();
+        eq(report.expense.buses, quote.monthlyCost);
+        eq(restored.state.finance.funds, control.state.finance.funds - quote.monthlyCost);
+        eq(restored.state.busLines![0].lastRiders, 3);
+        restored.closeBusLine(quote.from, quote.to);
+        eq(restored.commuteInfo(a.id)!.bus, false);
+        eq(restored.stepMonth().expense.buses, 0);
+    });
+
+    test('人数变化需要重看报价；断路自动停运、停止计费', () => {
+        const { sim, a, b, breakRoad } = town();
+        const old = sim.busProposal(a.id)!;
+        b.jobId = b.homeId;
+        ok(sim.openBusLine(old));
+        const updated = sim.busProposal(a.id)!;
+        eq(updated.riders, 2);
+        eq(sim.openBusLine(updated), null);
+        const reconnect = breakRoad();
+        eq(sim.commuteInfo(a.id)!.bus, false);
+        eq(sim.busProposal(a.id), null);
+        eq(sim.stepMonth().expense.buses, 0);
+        eq(sim.state.busLines![0].lastRiders, 0);
+        reconnect();
+        eq(sim.stepMonth().expense.buses, updated.monthlyCost);
+        ok(sim.state.busLines![0].lastRiders! > 0);
     });
 });
 

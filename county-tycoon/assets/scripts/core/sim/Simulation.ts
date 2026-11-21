@@ -1,4 +1,4 @@
-import { Employer, housingShortfall, HousingSummary, TalentStatus, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
+import { BusProposal, Employer, housingShortfall, HousingSummary, TalentStatus, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity, shopRadius } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, PromotionRecord, LEVEL_NAME, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BusStops, BusLine, BuildingEcon, BuildingSim, PromotionRecord, LEVEL_NAME, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -156,7 +156,6 @@ export class Simulation implements SimApi {
         this.updateWishes(world);                 //    心愿（D026）
         this.updateDepartures();                  // 最后一个月达成心愿也有机会留下
         this.renovateHomes();                     //    住户自家翻盖（D026）
-        this.moveToBetterHomes();                 //    搬去更好的房子
         this.assessBuildings(world);              //    店铺口碑
         this.runImmigration(world);               // 5. 迁入
         this.updateOffers();                      //    招商意向（D026）
@@ -198,6 +197,7 @@ export class Simulation implements SimApi {
         if (cost > s.finance.funds) return false;
 
         s.finance.funds -= cost;
+        this._distCache.clear(); // 新路可能缩短档案里当前显示的通勤
         if (deal) {
             this._subsidySpent += cost;
             this._flows.outflow.subsidy += cost;
@@ -578,10 +578,10 @@ export class Simulation implements SimApi {
         }
         // 5. 上班太远
         if (r.jobId !== null) {
-            const dist = this.distance(r.homeId, r.jobId);
-            const comfort = cfg.commuteComfort * this.tier(r).range;
+            const dist = this.commuteTrip(r, r.homeId, r.jobId).effective;
+            const comfort = this.commuteComfort(r);
             if (isFinite(dist) && dist > comfort + 3) {
-                out.push({ kind: 'commute', text: '上班太远了，每天来回走好久', hint: '在他家附近盖有岗位的店或厂，或者让他搬近一点', suggest: '', radius: Math.round(comfort) });
+                out.push({ kind: 'commute', text: '上班太远了，每天来回走好久', hint: this.branchOffer(r.jobId) ? '可以在家附近开分厂，或在厂边盖房，让我搬近些。' : '单位附近有合适的空房，我家就有机会搬过去。', suggest: '', radius: Math.round(comfort) });
             }
         }
         // 6. 环境
@@ -648,15 +648,14 @@ export class Simulation implements SimApi {
         if (w.kind === 'job') return r.jobId === null || !!(w.jobTarget &&
             (this.building(r.jobId)?.defId !== w.jobTarget.defId || r.jobTitle !== w.jobTarget.title));
         if (r.homeId === null) return false;
-        const cfg = this._cfg.economy;
         switch (w.kind) {
             case 'school': return !this.hasNearby(r.homeId, 'school', SCHOOL_RANGE);
             case 'clinic': return !this.hasNearby(r.homeId, 'clinic', CLINIC_RANGE);
             case 'shop': return !!w.demand && !this.hasShopInCircle(r.homeId, w.demand, world);
             case 'commute': {
                 if (r.jobId === null) return false;
-                const d = this.distance(r.homeId, r.jobId);
-                return isFinite(d) && d > cfg.commuteComfort * this.tier(r).range + 3;
+                const d = this.commuteTrip(r, r.homeId, r.jobId).effective;
+                return isFinite(d) && d > this.commuteComfort(r) + 3;
             }
             case 'env': return this.homeEnv(r.homeId) < 0;
             case 'vehicle': return r.vehicle === 'walk';
@@ -676,7 +675,8 @@ export class Simulation implements SimApi {
         r.mood = clamp(0, 100, r.mood + wt.doneMood);
         s.wishesDone = (s.wishesDone ?? 0) + 1;
         s.buzz = Math.min(this._cfg.economy.buzzMax, (s.buzz ?? 0) + wt.doneBuzz);
-        this.notice('wishDone', `${r.name}的心愿实现了：${WISH_DONE_TEXT[w.kind] ?? w.text}`, [r.id]);
+        const result = w.kind === 'commute' && this.commuteInfo(r.id)?.bus ? '现在能坐公交上班了' : WISH_DONE_TEXT[w.kind] ?? w.text;
+        this.notice('wishDone', `${r.name}的心愿实现了：${result}`, [r.id]);
         this.log(r, `心愿实现了：${w.text}`);
         if (r.leaving && r.mood >= this._cfg.economy.stayMood) {
             r.leaving = null;
@@ -979,34 +979,191 @@ export class Simulation implements SimApi {
         return best;
     }
 
-    private moveToBetterHomes(): void {
+    private commuteComfort(r: Resident): number {
+        return this._cfg.economy.commuteComfort * this.tier(r).range;
+    }
+
+    busStopCell(cell: number): [number, number] {
+        return [cell % this._town.width, Math.floor(cell / this._town.width)];
+    }
+
+    busMonthlyCost(): number { return this._cfg.economy.busMonthlyCost; }
+
+    busPath(line: BusStops): readonly number[] { return this._town.busPath(line.from, line.to); }
+
+    /** 总耗时以步行一格为单位，包括两端步行、等车和车程。 */
+    private busTime(home: number, job: number, line: BusStops): number {
+        const path = this.busPath(line);
+        if (path.length < 2) return Infinity;
+        const cfg = this._cfg.economy;
+        return Math.min(this.busWalk(home, job, line.from, line.to), this.busWalk(home, job, line.to, line.from))
+            + cfg.busWait + (path.length - 1) / cfg.busSpeedRatio;
+    }
+
+    private busWalk(home: number, job: number, start: number, end: number): number {
+        const a = this._town.walkToStop(home, start), b = this._town.walkToStop(job, end);
+        return Math.max(a, b) <= this._cfg.economy.busStopRadius ? a + b : Infinity;
+    }
+
+    private commuteTrip(r: Resident, home: number, job: number) {
+        const range = this.tier(r).range;
+        const distance = this.distance(home, job);
+        let time = distance / range, line: BusLine | null = null;
+        for (const candidate of this.state.busLines ?? []) {
+            const t = this.busTime(home, job, candidate);
+            if (t < time) { time = t; line = candidate; }
+        }
+        return { distance, effective: line ? time * range : distance, time, line };
+    }
+
+    busForTrip(id: number, origin: number, destination: number) {
+        const r = this.resident(id);
+        if (!r || r.homeId === null || r.jobId === null) return null;
+        if (!(origin === r.homeId && destination === r.jobId || origin === r.jobId && destination === r.homeId)) return null;
+        const line = this.commuteTrip(r, r.homeId, r.jobId).line;
+        if (!line) return null;
+        const forward = this.busWalk(origin, destination, line.from, line.to) <= this.busWalk(origin, destination, line.to, line.from);
+        return { line, forward };
+    }
+
+    busProposal(residentId?: number): BusProposal | null {
+        const people = this.state.residents;
+        const eligible = (r: Resident) => r.homeId !== null && r.jobId !== null
+            && this.commuteTrip(r, r.homeId, r.jobId).effective > this.commuteComfort(r);
+        const candidates = residentId === undefined ? people.filter(eligible) : people.filter(r => r.id === residentId && eligible(r));
+        for (const r of candidates) {
+            const pair = this._town.stationPair(r.homeId!, r.jobId!);
+            if (!pair || pair[0] === pair[1]) continue;
+            const stop = (uid: number) => {
+                const b = this.building(uid)!;
+                return this.buildingName(b.defId) + (b.branchOf === undefined ? '' : '分厂');
+            };
+            const route = { from: pair[0], to: pair[1], fromName: stop(r.homeId!), toName: stop(r.jobId!) };
+            const benefits = (p: Resident) => p.homeId !== null && p.jobId !== null
+                && this.busTime(p.homeId, p.jobId, route) < this.commuteTrip(p, p.homeId, p.jobId).time;
+            if (!benefits(r)) continue;
+            return { ...route, residentId: r.id, residentName: r.name, riders: people.filter(benefits).length, monthlyCost: this.busMonthlyCost() };
+        }
+        return null;
+    }
+
+    openBusLine(quote: BusProposal): string | null {
+        const fresh = this.busProposal(quote.residentId);
+        if (!fresh || fresh.from !== quote.from || fresh.to !== quote.to || fresh.riders !== quote.riders || fresh.monthlyCost !== quote.monthlyCost)
+            return '通勤需求已变化，请查看最新推荐';
+        if (this.state.finance.funds < fresh.monthlyCost) return '建设资金不足一个月的运营费';
+        (this.state.busLines ??= []).push({ from: fresh.from, to: fresh.to, fromName: fresh.fromName, toName: fresh.toName, lastRiders: null });
+        return null;
+    }
+
+    closeBusLine(from: number, to: number): void {
+        this.state.busLines = (this.state.busLines ?? []).filter(l => l.from !== from || l.to !== to);
+    }
+
+    private settleBusService(): number {
+        const lines = this.state.busLines ?? [];
+        if (!lines.length) return 0;
+        for (const line of lines) line.lastRiders = 0;
+        for (const r of this.state.residents) {
+            if (r.homeId === null || r.jobId === null) continue;
+            const line = this.commuteTrip(r, r.homeId, r.jobId).line;
+            if (line) line.lastRiders!++;
+        }
+        return lines.filter(line => this.busPath(line).length > 1).length * this.busMonthlyCost();
+    }
+
+    commuteInfo(id: number) {
+        const r = this.resident(id);
+        if (!r || r.homeId === null || r.jobId === null) return null;
+        const { distance, effective, line, time } = this.commuteTrip(r, r.homeId, r.jobId);
+        const comfort = this.commuteComfort(r);
+        const vehicles = this._cfg.economy.vehicles;
+        const canRide = r.vehicle === 'walk' && r.age >= vehicles.minAge && r.age <= vehicles.maxAge
+            && distance / vehicles.tiers.ebike.range < time;
+        return { distance, effective, bus: !!line, comfort, bikeCost: canRide && isFinite(distance) && effective > comfort ? vehicles.tiers.ebike.price : null };
+    }
+
+    provideCommuteBike(id: number): boolean {
+        const cost = this.commuteInfo(id)?.bikeCost;
+        if (cost == null || this.state.finance.funds < cost) return false;
+        const r = this.resident(id)!;
+        const finance = this.state.finance;
+        finance.funds -= cost;
+        finance.pendingCommuteBikes = (finance.pendingCommuteBikes ?? 0) + cost;
+        this._flows.outflow.subsidy += cost;
+        r.vehicle = 'ebike';
+        this.log(r, '领到通勤电动车，开始骑车上班');
+        this.openGuidance(id);
+        return true;
+    }
+
+    /** 比较全家的超距格数。换房不能让其他在岗家人更辛苦，也不能让上班路线断开。 */
+    private chooseFamilyHome(home: BuildingSim, level: number, family: Resident[], homes: BuildingSim[]) {
+        const cfg = this._cfg.economy;
+        const adults = family.filter(m => m.age >= cfg.residents.workMinAge);
+        const savings = adults.reduce((sum, m) => sum + Math.max(0, m.savings), 0);
+        const commuters = adults.filter(m => m.jobId !== null).map(m => {
+            const comfort = this.commuteComfort(m);
+            return { resident: m, job: m.jobId!, comfort, excess: Math.max(0, this.commuteTrip(m, home.uid, m.jobId!).effective - comfort) };
+        });
+        let best: BuildingSim | null = null;
+        const currentExcess = commuters.reduce((sum, c) => sum + c.excess, 0);
+        let bestExcess = currentExcess, bestLevel = level, bestDistance = Infinity;
+        for (const b of homes) {
+            const e = this._cfg.building(b.defId);
+            if (b.uid === home.uid || !e || e.housing - b.residentIds.length < family.length) continue;
+            if (this.state.renovations?.some(x => x.uid === b.uid)) continue;
+            if (savings < (e.rent || cfg.rentPerPerson) * adults.length * cfg.moveRentMonths) continue;
+            let totalExcess = 0, totalDistance = 0;
+            for (const c of commuters) {
+                const d = this.commuteTrip(c.resident, b.uid, c.job).effective;
+                const excess = Math.max(0, d - c.comfort);
+                if (!isFinite(d) || excess > c.excess) { totalExcess = Infinity; break; }
+                totalExcess += excess;
+                totalDistance += d;
+            }
+            if (!isFinite(totalExcess)) continue;
+            const betterHousing = e.homeLevel > bestLevel;
+            const closerTie = best && e.homeLevel === bestLevel && totalDistance < bestDistance;
+            if (totalExcess < bestExcess || (totalExcess === bestExcess && (betterHousing || closerTie))) {
+                best = b;
+                bestExcess = totalExcess;
+                bestLevel = e.homeLevel;
+                bestDistance = totalDistance;
+            }
+        }
+        return best && { target: best, closer: bestExcess < currentExcess };
+    }
+
+    private moveToBetterHomes(world: World): void {
         const s = this.state;
         const cfg = this._cfg.economy;
-        const world = this.refreshWorld();
         for (const r of s.residents.slice()) {
             if (r.homeId === null || r.age < cfg.residents.workMinAge) continue;
-            if (r.spouseId !== null && r.spouseId < r.id) continue;   // 一家只判一次（id 小的那位）
+            const spouse = r.spouseId !== null ? this.resident(r.spouseId) : null;
+            if (spouse && spouse.homeId === r.homeId && spouse.id < r.id) continue;   // 一家只判一次（id 小的那位）
             if (r.parentIds.some((id) => { const p = this.resident(id); return !!p && p.homeId === r.homeId; })) continue;   // 跟父母住的不单独搬
             const home = world.buildingByUid.get(r.homeId);
-            const he = home ? this._cfg.building(home.defId) : null;
+            if (!home) continue;
+            const he = this._cfg.building(home.defId);
             if (!he) continue;
-            const spouse = r.spouseId !== null ? this.resident(r.spouseId) : null;
-            const kids = r.childIds.map((id) => this.resident(id)).filter((c): c is Resident => !!c && c.age < cfg.residents.workMinAge && c.homeId === r.homeId);
-            const family = [r, ...(spouse && spouse.homeId === r.homeId ? [spouse] : []), ...kids];
-            const target = this.betterHomeFor(r, he.homeLevel, family.length);
-            if (!target) continue;
-            const te = this._cfg.building(target.defId)!;
-            const adults = family.filter((x) => x.age >= cfg.residents.workMinAge);
-            const savings = adults.reduce((a, x) => a + Math.max(0, x.savings), 0);
-            if (savings < (te.rent || cfg.rentPerPerson) * adults.length * cfg.moveRentMonths) continue;
+            const couple = spouse && spouse.homeId === r.homeId ? [r, spouse] : [r];
+            const childIds = new Set<number>();
+            for (const adult of couple) for (const id of adult.childIds) childIds.add(id);
+            const kids = Array.from(childIds, id => this.resident(id)).filter((c): c is Resident => !!c && c.age < cfg.residents.workMinAge && c.homeId === r.homeId);
+            const family = [...couple, ...kids];
+            const move = this.chooseFamilyHome(home, he.homeLevel, family, world.homes);
+            if (!move) continue;
+            const { target, closer } = move;
             if (!chance(this._rng, cfg.moveChance)) continue;
+            const message = `搬进了${this.buildingName(target.defId)}${closer ? '，上班更近了' : ''}`;
             for (const m of family) {
+                this.log(m, message);
                 this.detachHome(m);
                 m.homeId = target.uid;
                 target.residentIds.push(m.id);
             }
-            this.log(r, `搬进了${this.buildingName(target.defId)}`);
-            this.notice('info', `${r.name}${family.length > 1 ? '一家' : ''}搬进了${this.buildingName(target.defId)}`, family.map((x) => x.id));
+            this.notice('info', `${r.name}${family.length > 1 ? '一家' : ''}${message}`, family.map((x) => x.id));
         }
     }
 
@@ -1597,6 +1754,10 @@ export class Simulation implements SimApi {
             construction: this._constructionSpent, upkeep: 0, publicWages: 0, pension: 0, promotion: 0,
             research: this._researchSpent, talent: this._talentSpent,
         };
+        expense.buses = this.settleBusService();
+        this._flows.outflow.upkeep += expense.buses;
+        expense.commuteBikes = s.finance.pendingCommuteBikes ?? 0;
+        s.finance.pendingCommuteBikes = 0;
         expense.promotion += this._subsidySpent;
         income.investment += this._investIncome;
         this._constructionSpent = 0;
@@ -1713,7 +1874,7 @@ export class Simulation implements SimApi {
         // 施工款在盖的时候已经扣过了（onBuilt），这里只记账不再扣——以前这里扣了第二遍（D026 修）
         // 招商的土地出让金 / 补贴、研究费都在发生时已经进出财政，这里只记账不再算（D026）
         const net = income.business + income.industry + income.income + income.land + income.profit + income.rent
-            - expense.upkeep - expense.publicWages - expense.pension - (expense.services ?? 0);
+            - expense.buses - expense.upkeep - expense.publicWages - expense.pension - (expense.services ?? 0);
         s.finance.funds += net;
 
         // 财政见底：上级拨款，不会游戏结束（DESIGN 3）
@@ -1769,6 +1930,7 @@ export class Simulation implements SimApi {
 
         // 买车（DESIGN 11.1）：放在心情前面，买了当月就有心情加成
         this.buyVehicles(income);
+        this.moveToBetterHomes(world);   // 用新住处结算本月心情和心愿
 
         // 心情
         for (const r of s.residents) r.mood = this.nextMood(r, world);
@@ -2021,8 +2183,8 @@ export class Simulation implements SimApi {
         // 通勤：有车的人能接受的距离更远（DESIGN 11.2）
         const tier = this.tier(r);
         if (r.jobId !== null && r.homeId !== null) {
-            const d = this.distance(r.homeId, r.jobId);
-            const comfort = cfg.commuteComfort * tier.range;
+            const d = this.commuteTrip(r, r.homeId, r.jobId).effective;
+            const comfort = this.commuteComfort(r);
             if (isFinite(d) && d > comfort) add('commute', '上班太远', -Math.min(15, (d - comfort) * 2.5));
         }
         // 有车心情好
@@ -2292,7 +2454,7 @@ export class Simulation implements SimApi {
         for (const o of openings) {
             if (uid !== undefined && (o.building.uid !== uid || o.slot.title !== title)) continue;
             if (target && (o.building.defId !== target.defId || o.slot.title !== target.title)) continue;
-            const d = r.homeId === null ? 0 : this.distance(r.homeId, o.building.uid);
+            const d = r.homeId === null ? 0 : this.commuteTrip(r, r.homeId, o.building.uid).effective;
             const dist = isFinite(d) ? d : this._cfg.economy.serviceRadius * 2;
             const score = o.slot.salary - dist * penalty;
             if (score > bestScore) { best = o; bestScore = score; }

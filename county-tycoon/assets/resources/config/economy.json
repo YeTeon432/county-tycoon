@@ -15,6 +15,7 @@
     "_住房说明": "D026 住房等级（DESIGN 23）：每栋的 rent = 每个成年住户每月房租（没写用 rentPerPerson），homeLevel 1～5，homeMood 幸福度加成；upgradeTo = 住户攒够钱可以自己翻盖成什么，selfBuilt = 只能翻盖得到、玩家不能直接盖。renovate* 是翻盖参数，move* 是搬家参数",
     "renovateSavingsRatio": 1.5, "renovateMood": 50, "moveChance": 0.1, "moveRentMonths": 12,
     "commuteComfort": 4,
+    "busMonthlyCost": 600, "busStopRadius": 3, "busSpeedRatio": 3, "busWait": 1,
     "pension": 400,
     "_公共服务说明": "T532：环卫、治安、管网，每人每月，按等级乘倍率；财政出，流出县外",
     "servicePerCapita": 500,

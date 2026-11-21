@@ -37,6 +37,11 @@ export function centerArtId(level: TownLevel): string {
 
 export type RoadKind = 'dirt' | 'city';
 
+/** 可通行的铺装道路和已建桥面；装饰地块也贴地，但不接入路网。 */
+export function travelSurface(def?: BuildingDef): RoadKind | 'bridge' | null {
+    return def?.id === 'bridge' ? 'bridge' : def?.road ?? null;
+}
+
 interface BuildingConfigJson {
     buildings: BuildingDef[];
 }

@@ -12,6 +12,7 @@ export interface BuildingDef {
     id: string;
     name: string;
     category: string;
+    purpose?: string;
     estateName?: string;
     width: number;
     height: number;
@@ -57,6 +58,7 @@ function sanitize(def: BuildingDef, index: number): BuildingDef | null {
         id: def.id,
         name: typeof def.name === 'string' && def.name ? def.name : def.id,
         category: typeof def.category === 'string' ? def.category : '其他',
+        purpose: typeof def.purpose === 'string' ? def.purpose : undefined,
         estateName: typeof def.estateName === 'string' ? def.estateName : undefined,
         width: Math.max(1, Math.floor(def.width || 1)),
         height: Math.max(1, Math.floor(def.height || 1)),

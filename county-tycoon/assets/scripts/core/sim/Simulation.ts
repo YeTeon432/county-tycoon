@@ -264,6 +264,10 @@ export class Simulation implements SimApi {
 
     // ───────────────────────────── 研究 / 目标 / 升级（D026，DESIGN 18、19） ─────────────────────────────
 
+    buildingEconomy(defId: string): Readonly<BuildingEcon> | null {
+        return this._cfg.building(defId);
+    }
+
     isUnlocked(defId: string): boolean {
         if (!this._cfg.progress) return true;
         if (this.state.pendingDeal && this.state.pendingDeal.defId === defId) return true;
@@ -830,7 +834,7 @@ export class Simulation implements SimApi {
     // ───────────────────────────── 覆盖范围（T538） ─────────────────────────────
 
     /** 店按步行的消费半径；学校 / 卫生院 / 派出所 / 广场按各自的范围；其他楼没有覆盖范围 */
-    private reachRadius(defId: string): number {
+    reachRadius(defId: string): number {
         if (defId === 'school') return SCHOOL_RANGE;
         if (defId === 'clinic') return CLINIC_RANGE;
         if (defId === 'police') return POLICE_RANGE;

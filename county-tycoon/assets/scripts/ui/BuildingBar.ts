@@ -310,7 +310,7 @@ export class BuildingBar extends Component {
         this.refreshCards(true);
     }
 
-    private static tabOf(def: BuildingDef): string {
+    static tabOf(def: BuildingDef): string {
         for (const t of BAR_TABS) if (t.cats.indexOf(def.category) >= 0) return t.key;
         return BAR_TABS[BAR_TABS.length - 1].key;
     }
@@ -405,10 +405,11 @@ export class BuildingBar extends Component {
     }
 
     /** 缩略图：建筑用图集里那张（朝左的默认版），马路用地面图集里一段直路，桥用桥面 */
-    private frameFor(def: BuildingDef): SpriteFrame | null {
+    frameFor(def: BuildingDef): SpriteFrame | null {
         const art = this._art;
         if (!art) return null;
         if (def.road) return art.groundByName(`${def.road}-5`) ?? art.get(def.id);
+        if (def.flat) return art.groundByName(def.id) ?? art.get(def.id);
         if (def.id === 'bridge') return art.groundByName('bridge-gx') ?? art.get(def.id);
         return art.get(def.id === 'center' && this._sim ? centerArtId(this._sim.state.level) : def.id);
     }

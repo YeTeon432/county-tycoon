@@ -1,5 +1,5 @@
 import type { GoalDef } from './config';
-import { BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
+import { BuildingEcon, BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
 
 /**
  * 画面层调用模拟层的唯一入口（合同，见 docs/PARALLEL.md）。
@@ -84,6 +84,8 @@ export interface SimApi {
     employers?(): Employer[];
     resident(id: number): Resident | null;
     building(uid: number): BuildingSim | null;
+    reachRadius?(defId: string): number;
+    buildingEconomy?(defId: string): Readonly<BuildingEcon> | null;
     /** 某种建筑的客单价（消费时飘字用）；不是消费型建筑返回 0 */
     buildingPrice?(defId: string): number;
     /** 汇总：人口、就业率、平均工资、平均储蓄、平均心情 */

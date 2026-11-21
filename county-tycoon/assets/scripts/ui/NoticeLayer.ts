@@ -41,6 +41,7 @@ export class NoticeLayer extends Component {
     private _bar: Node | null = null;
     private _barText: Label | null = null;
     private _horn: Node | null = null;
+    private _catalogButton: Node | null = null;
     private _hornDot: Node | null = null;
     private history: { kind: Notice['kind']; text: string }[] = [];
     private _list: Node | null = null;
@@ -59,7 +60,7 @@ export class NoticeLayer extends Component {
     art: ArtLibrary | null = null;
     private goResearch!: () => void;
 
-    static create(parent: Node, sim: SimApi, goResearch: () => void): NoticeLayer {
+    static create(parent: Node, sim: SimApi, goResearch: () => void, openCatalog: () => void): NoticeLayer {
         const node = new Node('NoticeLayer');
         node.layer = Layers.Enum.UI_2D;
         const vis = view.getVisibleSize();
@@ -68,7 +69,7 @@ export class NoticeLayer extends Component {
         const c = node.addComponent(NoticeLayer);
         c._sim = sim;
         c.goResearch = goResearch;
-        c.build();
+        c.build(openCatalog);
         return c;
     }
 
@@ -107,7 +108,7 @@ export class NoticeLayer extends Component {
 
     // ───────────────────────── 公告栏 ─────────────────────────
 
-    private build(): void {
+    private build(openCatalog: () => void): void {
 
         // 喇叭（收起状态）
         const horn = makePanelNode(this.node, 'Horn', 44, 44);
@@ -143,6 +144,9 @@ export class NoticeLayer extends Component {
         bar.addComponent(UIOpacity).opacity = 0;
         bar.on(Node.EventType.TOUCH_END, () => this.toggleList(), this);
         this._bar = bar;
+        const catalog = makeButton(this.node, 'CatalogButton', '建筑图鉴', 142, 44, 'secondary', openCatalog, 'home').node;
+        InputGuard.add(catalog);
+        this._catalogButton = catalog;
         const align = () => {
             this.closeList();
             const { width, height } = view.getVisibleSize();
@@ -153,6 +157,7 @@ export class NoticeLayer extends Component {
             const left = -width / 2 + Math.max(0, inset) + 16;
             horn.setPosition(left + 22, y, 0);
             bar.setPosition(left + bw / 2, y, 0);
+            catalog.setPosition(left + 71, y - NoticeLayer.BAR_H - 8, 0);
         };
         align();
         view.on('canvas-resize', align, this);
@@ -408,6 +413,7 @@ export class NoticeLayer extends Component {
         this.closeList();
         if (this._horn) InputGuard.remove(this._horn);
         if (this._bar) InputGuard.remove(this._bar);
+        if (this._catalogButton) InputGuard.remove(this._catalogButton);
         if (this._card) InputGuard.remove(this._card);
     }
 }

@@ -182,6 +182,10 @@ export class NoticeLayer extends Component {
         this._showing = NoticeLayer.SHOW_SECONDS;
     }
 
+    showOpeningAdvice(): void {
+        this.showBar('info', '先接土路，再沿路建房。点此查看游戏公告');
+    }
+
     private hideBar(): void {
         const bar = this._bar;
         if (!bar || !bar.active) return;

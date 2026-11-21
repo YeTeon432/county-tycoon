@@ -205,7 +205,7 @@ export class UiRoot extends Component {
             this.applySpeed(resume === 0 ? 1 : resume);
             if (this._topBar) this._topBar.rollFunds(0, 1);
             this.startFirstBuildHint();
-            this._notices?.say('info', '开局建议：先接土路，再沿路建房。点此看游戏公告');
+            this._notices?.showOpeningAdvice();
         };
     }
 
@@ -217,12 +217,8 @@ export class UiRoot extends Component {
     private startFirstBuildHint(): void {
         if (!this.model) return;
         if (this._bar) this._bar.showTabHint('设施');
-        this._baseBuildings = this.countBuildings();
+        this._baseBuildings = this.model.buildingCount;
         this._waitFirstBuild = true;
-    }
-
-    private countBuildings(): number {
-        return this.model ? this.model.allBuildings().length : 0;
     }
 
     private refreshCenterStatus(): void {
@@ -243,7 +239,7 @@ export class UiRoot extends Component {
         this.refreshCenterStatus();
         if (this._topBar) this._topBar.refresh();
         if (!this._waitFirstBuild) return;
-        if (this.countBuildings() > this._baseBuildings) {
+        if (this.model && this.model.buildingCount > this._baseBuildings) {
             this._waitFirstBuild = false;
             if (this._bar) this._bar.showTabHint(null);
         }

@@ -45,7 +45,8 @@ export interface SimApi {
     /** 人才引进：招一批某个学历的人。成功 null，失败返回原因 */
     hireTalents?(edu: Education): string | null;
     /** 人才引进现在能不能招、各档价格 */
-    talentStatus?(): { ready: boolean; reason: string; nextCost: number[] };
+    talentStatus?(): TalentStatus;
+    housingSummary?(): HousingSummary;
     /** 当前等级的阶段目标和进度 */
     goals?(): GoalStatus[];
     /** 目标全部完成：升级。返回新等级，不能升返回 null */
@@ -111,6 +112,27 @@ export interface BusProposal extends BusStops {
     residentName: string;
     riders: number;
     monthlyCost: number;
+}
+
+export interface HousingSummary {
+    population: number;
+    buildings: number;
+    capacity: number;
+    occupied: number;
+    vacant: number;
+    unhoused: number;
+    available: number;
+}
+
+export function housingShortfall(housing: HousingSummary, newcomers: number): number {
+    return Math.max(0, housing.unhoused + newcomers - housing.vacant);
+}
+
+export interface TalentStatus {
+    ready: boolean;
+    reason: string;
+    nextCost: number[];
+    tiers: { edu: Education; count: number; cost: number }[];
 }
 
 export interface JobReferral {

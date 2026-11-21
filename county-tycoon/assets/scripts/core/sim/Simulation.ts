@@ -1,4 +1,4 @@
-import { BusProposal, Employer, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
+import { BusProposal, Employer, housingShortfall, HousingSummary, TalentStatus, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
@@ -2001,8 +2001,7 @@ export class Simulation implements SimApi {
         const s = this.state;
         const cfg = this._cfg.economy;
         const openJobs = this.countOpenJobs(world);
-        const homeless = s.residents.filter((r) => r.homeId === null).length;
-        const freeHomes = this.countFreeHousing() - homeless;
+        const freeHomes = this.housingSummary().available;
         if (freeHomes <= 0) return;
 
         // 县城幸福度越高、口碑越好，想来的人越多（D026，DESIGN 16.2）
@@ -2060,9 +2059,9 @@ export class Simulation implements SimApi {
         if ((s.talentReadyAt ?? 0) > now) return `刚招过一批，还要等 ${s.talentReadyAt! - now} 天`;
         const tier = cfg.talentTiers.find((x) => x.edu === edu);
         if (!tier) return '没有这一档';
-        const homeless = s.residents.filter((r) => r.homeId === null).length;
-        const freeHomes = this.countFreeHousing() - homeless;
-        if (freeHomes < tier.count) return `空房不够：要 ${tier.count} 间，现在只有 ${freeHomes} 间`;
+        const housing = this.housingSummary();
+        const short = housingShortfall(housing, tier.count);
+        if (short > 0) return `空房不够，本批还需增加 ${short} 个住位`;
         const cost = tier.price * tier.count;
         if (s.finance.funds < cost) return `建设资金不够（还差 ¥${cost - s.finance.funds}）`;
 
@@ -2096,12 +2095,12 @@ export class Simulation implements SimApi {
     }
 
     /** 人才引进现在能不能招：返回不能用时的原因，能用返回 null */
-    talentStatus(): { ready: boolean; reason: string; nextCost: number[] } {
+    talentStatus(): TalentStatus {
         const s = this.state;
         const cfg = this._cfg.economy;
-        const nextCost = cfg.talentTiers.map((t) => t.price * t.count);
+        const tiers = cfg.talentTiers.map(t => ({ edu: t.edu, count: t.count, cost: t.price * t.count }));
         const wait = (s.talentReadyAt ?? 0) - s.month;
-        return { ready: wait <= 0, reason: wait > 0 ? `刚招过一批，还要等 ${wait} 天` : '', nextCost };
+        return { ready: wait <= 0, reason: wait > 0 ? `刚招过一批，还要等 ${wait} 天` : '', tiers, nextCost: tiers.map(t => t.cost) };
     }
 
     /** 城镇等级（DESIGN 6）。营商环境要等 M3，先只判人口和几栋关键建筑 */
@@ -2664,10 +2663,18 @@ export class Simulation implements SimApi {
         return out;
     }
 
-    private countFreeHousing(): number {
-        let free = 0;
-        for (const { b, econ } of this.housingSupply()) free += Math.max(0, econ.housing - b.residentIds.length);
-        return free;
+    housingSummary(): HousingSummary {
+        const homes = this.housingSupply();
+        const residents = this.state.residents;
+        const unhoused = residents.filter(r => r.homeId === null).length;
+        let capacity = 0, occupied = 0, vacant = 0;
+        for (const { b, econ } of homes) {
+            capacity += econ.housing;
+            occupied += b.residentIds.length;
+            vacant += Math.max(0, econ.housing - b.residentIds.length);
+        }
+        return { population: residents.length, buildings: homes.length, capacity, occupied,
+            vacant, unhoused, available: Math.max(0, vacant - unhoused) };
     }
 
     private countOpenJobs(world: World): number {

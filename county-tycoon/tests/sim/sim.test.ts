@@ -1064,7 +1064,13 @@ suite('研究 / 目标 / 心愿（D026 第二批）', () => {
         sim.state.finance.funds = 200000;
         const n0 = sim.state.residents.length;
         const f0 = sim.state.finance.funds;
+        const before = sim.housingSummary();
         eq(sim.hireTalents(2), null);
+        const after = sim.housingSummary();
+        eq(after.population, before.population + 6);
+        eq(after.occupied, before.occupied + 6);
+        eq(after.available, before.available - 6);
+        eq(after.capacity, before.capacity);
         const fresh = sim.state.residents.slice(n0);
         eq(fresh.length, 6, '来了 6 人');
         ok(fresh.every((r) => r.education === 2 && r.age >= 22 && r.age <= 30 && r.homeId !== null), '大专、年轻、有房');
@@ -1083,6 +1089,25 @@ suite('研究 / 目标 / 心愿（D026 第二批）', () => {
         sim.state.finance.funds = 200000;
         ok(/空房/.test(sim.hireTalents(0) ?? ''), '说清楚是空房不够');
         eq(sim.state.finance.funds, 200000, '没扣钱');
+    });
+
+    test('住房看板只统计已建成住宅，并为本地待安置居民预留住位', () => {
+        const cfg = loadFullConfig();
+        const map = new MapBuilder(12, 12);
+        map.hRoad(1, 10, 5);
+        map.build('hut', 3, 4);
+        map.build('breakfast', 5, 4);
+        const sim = new Simulation(cfg, map.view(), { seed: 74 });
+        sim.state.construction = [{ uid: 90, defId: 'apartment', left: 2, total: 2 }];
+        const h = sim.housingSummary();
+        eq(h.buildings, 1);
+        eq(h.capacity, cfg.building('hut')!.housing);
+        eq(h.population, sim.state.residents.length);
+        eq(h.occupied + h.unhoused, h.population);
+        eq(h.vacant + h.occupied, h.capacity);
+        ok(h.unhoused > h.vacant, '本地住位已经不足');
+        eq(h.available, 0);
+        ok(sim.hireTalents(0)?.includes(`还需增加 ${6 + h.unhoused - h.vacant} 个住位`));
     });
 
     test('研究前置：人口 / 等级 / 要有某栋楼，原因说清楚', () => {

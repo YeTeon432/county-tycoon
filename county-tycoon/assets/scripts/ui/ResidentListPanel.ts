@@ -1,8 +1,9 @@
 import { _decorator, Color, Label, Node, UITransform } from 'cc';
-import { SimApi } from '../core/sim/SimApi';
+import { HousingSummary, SimApi } from '../core/sim/SimApi';
 import { Resident } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { Panel } from './Panel';
+import { HOUSING_BOARD_HEIGHT, makeHousingBoard } from './HousingBoard';
 import { ListRow, ScrollList } from './ScrollList';
 import { buildPersonRow } from './PersonRow';
 import { formatMoney, makeLabelLeft, makePill, makeStatTile, moodColor, UI_COLOR, UI_FONT, UI_PALETTE } from './UiTheme';
@@ -52,6 +53,8 @@ export class ResidentListPanel extends Panel {
     private _filterPills: { key: FilterKey; setActive: (on: boolean) => void }[] = [];
     private _countLabel: Label | null = null;
     private _list: ScrollList | null = null;
+    private _updateHousing?: (data: HousingSummary) => void;
+    private _statValues: Label[] = [];
 
     static show(
         parent: Node,
@@ -80,25 +83,22 @@ export class ResidentListPanel extends Panel {
         let y = this.contentTop;
 
         // ── 汇总：两排数值格 ──
-        const sum = sim.summary();
-        const rate = sum.workingAge > 0 ? Math.round((sum.employed / sum.workingAge) * 100) : 0;
-        const carRate = sum.population > 0 ? Math.round(((sum.vehicles ?? 0) / sum.population) * 100) : 0;
-        const tiles: [string, string, Color][] = [
-            ['人口', `${sum.population}`, UI_PALETTE.blue],
-            ['就业率', `${rate}%`, rate >= 60 ? UI_PALETTE.green : UI_COLOR.down],
-            ['平均幸福度', sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—', sum.population > 0 ? moodColor(sum.avgMood) : UI_COLOR.textDim],
-            ['平均工资', formatMoney(sum.avgSalary), UI_COLOR.gold],
-            ['平均储蓄', formatMoney(sum.avgSavings), UI_COLOR.gold],
-            ['有车率', `${carRate}%`, UI_PALETTE.blue],
-        ];
-        const tileH = 96, gap = 14;
+        const housing = sim.housingSummary?.();
+        if (housing) {
+            this._updateHousing = makeHousingBoard(content, W, y, housing);
+            y -= HOUSING_BOARD_HEIGHT + 12;
+        }
+        const tiles = this.stats(sim);
+        this._statValues = [];
+        const tileH = 80, gap = 12;
         const tileW = (W - gap * 2) / 3;
         for (let i = 0; i < tiles.length; i++) {
             const col = i % 3, rowI = Math.floor(i / 3);
             const t = makeStatTile(content, tileW, tileH, tiles[i][0], tiles[i][1], tiles[i][2]);
+            this._statValues.push(t.value);
             t.node.setPosition(-W / 2 + tileW / 2 + col * (tileW + gap), y - tileH / 2 - rowI * (tileH + gap), 0);
         }
-        y -= tileH * 2 + gap + 34;
+        y -= tileH * 2 + gap + 18;
 
         // ── 排序 / 筛选 ──
         y = this.pillRow(content, W, y, '排序', SORTS, this._sort, (k) => {
@@ -126,6 +126,31 @@ export class ResidentListPanel extends Panel {
 
         this.refreshSelection();
         this.rebuildList();
+    }
+
+    private stats(sim: SimApi): [string, string, Color][] {
+        const sum = sim.summary();
+        const rate = sum.workingAge > 0 ? Math.round((sum.employed / sum.workingAge) * 100) : 0;
+        const carRate = sum.population > 0 ? Math.round(((sum.vehicles ?? 0) / sum.population) * 100) : 0;
+        return [
+            [sim.housingSummary ? '在岗人数' : '人口', String(sim.housingSummary ? sum.employed : sum.population), UI_PALETTE.blue],
+            ['就业率', `${rate}%`, rate >= 60 ? UI_PALETTE.green : UI_COLOR.down],
+            ['平均幸福度', sum.population > 0 ? `${Math.round(sum.avgMood)}` : '—', sum.population > 0 ? moodColor(sum.avgMood) : UI_COLOR.textDim],
+            ['平均工资', formatMoney(sum.avgSalary), UI_COLOR.gold],
+            ['平均储蓄', formatMoney(sum.avgSavings), UI_COLOR.gold],
+            ['有车率', `${carRate}%`, UI_PALETTE.blue],
+        ];
+    }
+
+    refresh(): void {
+        if (!this._sim) return;
+        const housing = this._sim.housingSummary?.();
+        if (housing) this._updateHousing?.(housing);
+        this.stats(this._sim).forEach(([, value, color], i) => {
+            this._statValues[i].string = value;
+            this._statValues[i].color = color;
+        });
+        this.rebuildList(true);
     }
 
     /** 一行药丸按钮：左边一个小标题，右边依次排开 */
@@ -160,7 +185,7 @@ export class ResidentListPanel extends Panel {
     }
 
     /** 按当前排序 + 筛选重建列表 */
-    private rebuildList(): void {
+    private rebuildList(keepScroll = false): void {
         const sim = this._sim;
         const list = this._list;
         if (!sim || !list) return;
@@ -194,7 +219,7 @@ export class ResidentListPanel extends Panel {
             height: 76,
             build: (row) => this.buildRow(row, W, r),
         }));
-        list.setRows(rows);
+        list.setRows(rows, keepScroll);
     }
 
     private matches(r: Resident): boolean {

@@ -83,9 +83,12 @@ export class ScrollList extends Component {
     }
 
     /** 清空并重新填行 */
-    setRows(rows: ListRow[]): void {
+    setRows(rows: ListRow[], keepScroll = false): void {
         if (!this._content) return;
-        this._content.removeAllChildren();
+        for (const child of this._content.children.slice()) {
+            child.removeFromParent();
+            child.destroy();
+        }
 
         let y = 0;
         for (let i = 0; i < rows.length; i++) {
@@ -105,9 +108,8 @@ export class ScrollList extends Component {
         this._contentH = y;
         const trans = this._content.getComponent(UITransform)!;
         trans.setContentSize(trans.width, Math.max(this._viewH, y));
-        // 内容变了要回到顶部，否则会出现"滚到空白"的怪状态
-        this._scrollY = 0;
-        this.applyScroll();
+        // 主动筛选时回到顶部，结算刷新时保留位置并夹到新的范围。
+        this.scrollTo(keepScroll ? this._scrollY : 0);
     }
 
     /** 内容总高 > 可视高时才允许滚动，滚到头停住 */

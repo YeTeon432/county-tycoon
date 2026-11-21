@@ -217,6 +217,7 @@ export interface JobSlot {
 export interface Finance {
     funds: number;               // 建设资金
     taxRate: { business: number; industry: number; income: number };
+    pendingCommuteBikes?: number; // 本月已支付，结算时列入账单
     lastMonth: MonthlyReport | null;
 }
 
@@ -225,7 +226,7 @@ export interface MonthlyReport {
     /** business / industry / income = 三种税；profit = 县属店铺工厂的经营利润（可为负）；rent = 县属住房房租 */
     income: { business: number; industry: number; income: number; land: number; investment: number; profit: number; rent: number };
     /** research = 研究费（D026），services = 公共服务（T532），旧存档没有 */
-    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number; research?: number; services?: number; talent?: number };
+    expense: { construction: number; upkeep: number; publicWages: number; pension: number; promotion: number; research?: number; services?: number; commuteBikes?: number; talent?: number };
     populationBefore: number;
     populationAfter: number;
     events: LifeEvent[];         // 本月全县大事记（结婚、迁入、离开……）

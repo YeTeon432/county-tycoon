@@ -469,7 +469,7 @@ export class UiRoot extends Component {
             const opacity = previous && (previous.node.getComponent(UIOpacity) ?? previous.node.addComponent(UIOpacity));
             if (opacity) opacity.opacity = 0;
             panel.node.addComponent(BlockInputEvents);
-            panel.onJobChanged = (message) => {
+            panel.onResidentChanged = (message) => {
                 townAudio.event('wish');
                 panel.showFeedback(message);
                 this._notices?.say('info', message);

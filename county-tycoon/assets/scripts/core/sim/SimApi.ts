@@ -77,6 +77,8 @@ export interface SimApi {
     canAfford(defId: string): boolean;
 
     openGuidance?(id: number): void;
+    commuteInfo?(id: number): { distance: number; comfort: number; bikeCost: number | null } | null;
+    provideCommuteBike?(id: number): boolean;
     housingHint?(homeId: number): string;
     resettlementOffer?(homeId: number): { targetUid: number; count: number } | null;
     resettleResidents?(homeId: number): boolean;

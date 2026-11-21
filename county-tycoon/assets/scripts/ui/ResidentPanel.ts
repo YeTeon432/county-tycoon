@@ -29,7 +29,7 @@ export class ResidentPanel extends Panel {
     private _sim: SimApi | null = null;
     private _residentId = 0;
     private _findingJob = false;
-    onJobChanged: ((message: string) => void) | null = null;
+    onResidentChanged: ((message: string) => void) | null = null;
     private _model: TownModel | null = null;
     /** 「追踪」（T425）；心愿卡片的「看范围」也走它（T538：追踪时地图画出心愿范围） */
     private _onTrack: ((id: number, focusHome?: boolean) => void) | null = null;
@@ -140,7 +140,7 @@ export class ResidentPanel extends Panel {
                     if (ranged) { this._onTrack?.(r.id, true); return; }
                     if (referral && sim.introduceJob?.(r.id, referral.uid, referral.title)) {
                         this._findingJob = false;
-                        this.onJobChanged?.(`${r.name}已入职${referral.employer}，担任${referral.title}`);
+                        this.onResidentChanged?.(`${r.name}已入职${referral.employer}，担任${referral.title}`);
                     } else this._findingJob = true;
                     this.refresh();
                 });
@@ -177,6 +177,25 @@ export class ResidentPanel extends Panel {
             const val = makeLabelLeft(row, 'Value', value, UI_FONT.body, UI_COLOR.text, W - 126);
             val.node.setPosition(-W / 2 + 106, 0, 0);
         } }));
+        const commute = sim.commuteInfo?.(r.id);
+        if (commute) {
+            const cost = commute.bikeCost;
+            const distance = isFinite(commute.distance) ? `沿路 ${commute.distance} 格 · 舒适 ${Math.floor(commute.comfort)} 格` : '到单位的路还没接通';
+            rows.unshift({ height: 58, build: (row) => {
+                makeLabelLeft(row, 'Commute', `通勤　${distance}`, UI_FONT.small, UI_COLOR.text, W - (cost === null ? 32 : 292))
+                    .node.setPosition(-W / 2 + 16, 0, 0);
+                if (cost === null) return;
+                const affordable = sim.state.finance.funds >= cost;
+                const label = affordable ? `配电动车 ¥${cost}` : `资金不足 ¥${cost}`;
+                const btn = makeButton(row, 'CommuteBike', label, 250, 44, 'primary', () => {
+                    if (list.dragging) return;
+                    if (sim.provideCommuteBike?.(r.id)) this.onResidentChanged?.(`${r.name}领到了通勤电动车`);
+                    this.refresh();
+                });
+                btn.setEnabled(affordable);
+                btn.node.setPosition(W / 2 - 138, 0, 0);
+            } });
+        }
         const parts = (r.moodParts ?? []).slice().sort((a, b) => a.value - b.value);
         if (parts.length) {
             rows.push({ height: 62, build: (row) => makeSectionTitle(row, W, 0, '幸福度明细', UI_PALETTE.green) });

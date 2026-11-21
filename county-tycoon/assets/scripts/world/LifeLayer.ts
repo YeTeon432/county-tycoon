@@ -3,6 +3,7 @@ import type { BusLine } from '../core/sim/types';
 import { busPosition } from './CommuteBus';
 import { _decorator, Color, Component, Graphics, JsonAsset, Label, Layers, Node, Sprite, Tween, UIOpacity, UITransform, Vec3, resources, tween } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
+import { travelSurface } from '../core/BuildingConfig';
 import { DayClock } from '../core/DayClock';
 import { IsoMath } from '../core/IsoMath';
 import { PlacedBuilding, TownModel } from '../core/TownModel';
@@ -36,6 +37,7 @@ const { ccclass } = _decorator;
 type Kind = 'ped' | 'scoot' | 'moto' | 'car';
 type VehicleKey = 'walk' | 'ebike' | 'moto' | 'car';
 const KIND_OF: Record<VehicleKey, Kind> = { walk: 'ped', ebike: 'scoot', moto: 'moto', car: 'car' };
+const STREET_SCALE: Record<Kind, number> = { ped: 0.68, car: 0.72, scoot: 1, moto: 1 };
 const VEHICLE_OF: Record<Kind, VehicleKey> = { ped: 'walk', scoot: 'ebike', moto: 'moto', car: 'car' };
 
 /** config/traffic.json（D022 / D024，DESIGN 11.3、15）。加载不到就用这份 */
@@ -249,7 +251,7 @@ export class LifeLayer extends Component {
         const a = p.agent;
         if (a && a.node.isValid) {
             const pos = this._iso!.toLocal(a.view.gx, a.view.gy);
-            return { walking: true, x: pos.x, y: pos.y + (a.view.h || 12), uid: null, to: a.to };
+            return { walking: true, x: pos.x, y: pos.y + (a.view.h || 12) - a.view.settle, uid: null, to: a.to };
         }
         const uid = p.loc ?? this._info.get(id)?.homeId ?? null;
         return { walking: false, x: 0, y: 0, uid, to: null };
@@ -554,7 +556,7 @@ export class LifeLayer extends Component {
     // ---------------- 道路查询 ----------------
     private roadKind(col: number, row: number): string | null {
         const b = this._model!.getAt(col, row);
-        return b && b.def.flat ? (b.def.road ?? 'city') : null;
+        return travelSurface(b?.def);
     }
 
     /** 这一步的道路倍率：走过一半之前按出发格、之后按目标格 */
@@ -634,6 +636,7 @@ export class LifeLayer extends Component {
         const op = node.addComponent(UIOpacity);
         op.opacity = 0;
         tween(op).to(LifeLayer.FADE, { opacity: 255 }).start();
+        const scale = STREET_SCALE[kind];
         const sh = this._art!.get(SHADOW[kind].frame);
         const shSize = sh ? this._art!.worldSize(sh) : { width: 0, height: 0 };
 
@@ -649,7 +652,7 @@ export class LifeLayer extends Component {
             to,
             view: {
                 gx: 0, gy: 0, frame: null, w: 0, h: 0, flip: false,
-                shadow: sh, sw: shSize.width, sh: shSize.height, settle: SHADOW[kind].settle, alpha: 0,
+                shadow: sh, sw: shSize.width * scale, sh: shSize.height * scale, settle: SHADOW[kind].settle * scale, alpha: 0,
             },
         };
         this.node.addChild(node);
@@ -710,9 +713,22 @@ export class LifeLayer extends Component {
     private updatePosition(a: Agent): void {
         const dx = a.tc - a.col, dy = a.tr - a.row;
         const off = this.lane(a);
-        // 垂直方向 (-dy, dx)
-        a.view.gx = a.col + 0.5 + dx * a.t - dy * off;
-        a.view.gy = a.row + 0.5 + dy * a.t + dx * off;
+        let along = a.t;
+        if (a.kind === 'car') {
+            // 两条偏移车道在弯心处相交。沿当前路段插值到交点，换段的前后位置就一致。
+            const w = this._model!.width;
+            const prev = a.path[a.i - 1], next = a.path[a.i + 2];
+            if (prev !== undefined) {
+                const inX = a.col - prev % w, inY = a.row - Math.floor(prev / w);
+                along += (dy * inX - dx * inY) * off * (1 - a.t);
+            }
+            if (next !== undefined) {
+                const outX = next % w - a.tc, outY = Math.floor(next / w) - a.tr;
+                along += (dy * outX - dx * outY) * off * a.t;
+            }
+        }
+        a.view.gx = a.col + 0.5 + dx * along - dy * off;
+        a.view.gy = a.row + 0.5 + dy * along + dx * off;
     }
 
     private layoutActor(a: Agent): void {
@@ -734,13 +750,14 @@ export class LifeLayer extends Component {
         } else if (a.kind === 'moto') {
             name = `moto${a.skin}-${front ? 'front' : 'back'}`;
         } else {
-            name = `car${a.skin}`;
+            name = `car${a.skin}${front ? '' : '-back'}`;
         }
         const frame = art.get(name);
         if (frame && v.frame !== frame) {
             v.frame = frame;
             const sz = art.worldSize(frame);
-            v.w = sz.width; v.h = sz.height;
+            v.w = sz.width * STREET_SCALE[a.kind];
+            v.h = sz.height * STREET_SCALE[a.kind];
         }
         v.flip = flip;
         if (a.node.children.length > 0) this.positionChat(a);
@@ -860,9 +877,10 @@ export class LifeLayer extends Component {
         // 挂在行人节点上，跟着人走
         a.node.addChild(node);
         const x = Math.random() < 0.5 ? -6 : 6;
-        node.setPosition(x, 92, 0);   // 行人图高约 94 世界像素（8 倍图 64×96），音符在头顶偏一侧
+        const head = a.view.h - a.view.settle;
+        node.setPosition(x, head, 0);
         node.setScale(0.6, 0.6, 1);
-        tween(node).to(1.5, { position: new Vec3(x * 1.5, 104, 0) }).start();
+        tween(node).to(1.5, { position: new Vec3(x * 1.5, head + 12, 0) }).start();
         tween(op).to(0.15, { opacity: 230 }).delay(1.0).to(0.35, { opacity: 0 })
             .call(() => { Tween.stopAllByTarget(node); node.destroy(); })
             .start();

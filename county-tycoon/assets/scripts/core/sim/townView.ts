@@ -10,7 +10,7 @@
  *       model.allBuildings().map((b) => ({
  *           uid: b.uid, defId: b.def.id,
  *           col: b.col, row: b.row, width: b.def.width, height: b.def.height,
- *           road: b.def.flat,
+ *           road: travelSurface(b.def) !== null,
  *       })));
  */
 

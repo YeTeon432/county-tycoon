@@ -2,6 +2,7 @@ import { JsonAsset, resources } from 'cc';
 import { makeSimConfig } from './sim/config';
 import { Simulation } from './sim/Simulation';
 import { SimpleTownView } from './sim/townView';
+import { travelSurface } from './BuildingConfig';
 import { TownModel } from './TownModel';
 import { SimState } from './sim/types';
 
@@ -32,7 +33,7 @@ export function createSimulation(model: TownModel, economyJson: any, namesJson: 
         model.allBuildings().map((b) => ({
             uid: b.uid, defId: b.def.id,
             col: b.col, row: b.row, width: b.def.width, height: b.def.height,
-            road: b.def.flat,
+            road: travelSurface(b.def) !== null,
         })));
     return new Simulation(makeSimConfig(economyJson, namesJson, progressJson), view, state ? { state } : { seed });
 }

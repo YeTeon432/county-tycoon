@@ -272,6 +272,7 @@ export class World3D extends Component {
                     this._sceneMeshes.add(this.busMesh);
                 }
                 node = this.child(this._root, 'CommuterBus');
+                node.setScale(0.74, 0.74, 0.74);
                 const renderer = node.addComponent(MeshRenderer);
                 renderer.mesh = this.busMesh;
                 renderer.setSharedMaterial(this._mats.lit, 0);
@@ -335,7 +336,7 @@ export class World3D extends Component {
             for (const a of order) {
                 const f = a.shadow;
                 if (!f || texOf(f) !== tex) continue;
-                const cx = a.gx + fx * a.settle * k * 2, cz = a.gy + fz * a.settle * k * 2;
+                const cx = a.gx, cz = a.gy;
                 const rx = right.x * a.sw * k / 2, rz = right.z * a.sw * k / 2;
                 const ux = fx * a.sh * k, uz = fz * a.sh * k;   // 屏幕上高 sh 的影子在地上长 2·sh
                 const y = 0.003;
@@ -347,7 +348,8 @@ export class World3D extends Component {
                 const f = a.frame!;
                 if (texOf(f) !== tex) continue;
                 // 四个顶点都在脚下，着色器用绘制当帧的相机矩阵展开身体。
-                const x = a.gx, z = a.gy;
+                // 图底边位于脚底或轮组中心的近侧，把着地点对齐车道和影子。
+                const x = a.gx - fx * a.settle * k * 2, z = a.gy - fz * a.settle * k * 2;
                 quad(f, a.flip, a.alpha,
                     x, 0, z, x, 0, z, x, 0, z, x, 0, z, a.w * k / 2, a.h * k);
             }

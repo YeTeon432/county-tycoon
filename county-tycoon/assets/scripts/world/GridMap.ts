@@ -1,5 +1,6 @@
 import { _decorator, Component, Layers, Node, UITransform, SpriteFrame } from 'cc';
 import { ArtLibrary, GROUND_GRASS_FRAMES, GROUND_ROAD_BASE } from '../core/ArtLibrary';
+import { travelSurface } from '../core/BuildingConfig';
 import { bridgeName, grassName, neighborMask, RoadKind, roadName, terrainName } from '../core/GroundFrames';
 import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 
@@ -126,7 +127,7 @@ export class GridMap extends Component {
         // 道路优先：道路是玩家放的建筑，盖在地形上面
         const kind = this.roadKind(col, row);
         if (kind) {
-            const mask = neighborMask((c, r) => this.roadKind(c, r) !== null, col, row);
+            const mask = neighborMask((c, r) => travelSurface(this._model?.getAt(c, r)?.def) !== null, col, row);
             return art.groundByName(roadName(kind, mask)) ?? art.ground(GROUND_ROAD_BASE[kind] + mask);
         }
 

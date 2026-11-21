@@ -347,6 +347,7 @@ export class UiRoot extends Component {
 
     refreshOpenPanels(): void {
         this._catalog?.refreshAvailability();
+        if (this._listPanel?.node?.isValid) this._listPanel.refresh();
         if (this._residentPanel?.node?.isValid) this._residentPanel.refresh();
         if (this._centerPanel?.node?.isValid) this._centerPanel.fill();
     }

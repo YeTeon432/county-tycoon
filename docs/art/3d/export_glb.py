@@ -6,7 +6,7 @@
 
 做法：照常跑出图脚本里登记的建模函数（含背面自动补窗），然后
   1. 文字转网格、修改器（倒角）应用掉；
-  2. 全部合成一个网格，材质只留底色，写进顶点色；分两个子网格：受光的 / 招牌灯（自发光）；
+  2. 全部合成一个网格，材质只留底色，写进顶点色；按受光面、招牌灯及显式标注的玻璃分子网格；
   3. Cycles 烘环境光遮蔽，乘进顶点色；
   4. 坐标换成 Cocos 习惯（Y 朝上）由 glTF 导出器自动做；原点 = 占地左上角 (0,0,0)，1 单位 = 1 格。
 打印每栋楼的三角面数。
@@ -22,9 +22,9 @@ lib.run = lambda: None                      # 只登记，不渲染
 # ---- 减面（实时渲染用，楼是从 ~60 米外看的，小倒角、高精度圆看不出来）
 _box, _cyl, _ball, _text = lib.box, lib.cyl, lib.ball, lib.text
 def _box_lo(x, y, z, sx, sy, sz, m, bevel=0.0, rot=None):
-    """小零件不倒角；楼身这种大块面留一圈 1 段倒角（边上有一道高光，不然像纸盒）。"""
-    big = bevel and min(sx, sy, sz) > 0.2
-    o = _box(x, y, z, sx, sy, sz, m, bevel=max(bevel, 0.012) if big else 0.0, rot=rot)
+    """为有倒角的楼体或宽板保留一段折面，薄檐的圆角半径按板厚限制。"""
+    big = bevel and sorted((sx, sy, sz))[1] > 0.2
+    o = _box(x, y, z, sx, sy, sz, m, bevel=min(max(bevel, 0.012), 0.25 * min(sx, sy, sz)) if big else 0.0, rot=rot)
     if big:
         o.modifiers['bv'].segments = 1
     return o
@@ -111,20 +111,23 @@ def export(name, w, h, fn):
     bpy.ops.object.convert(target='MESH')          # 文字 → 网格，修改器应用掉
     objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
     lit = bpy.data.materials.new('lit'); emit = bpy.data.materials.new('emit')
+    glass = bpy.data.materials.new('glass')
     for o in objs:
         me = o.data
         ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'CORNER')
-        flags = []
+        surface_slots = []
         for poly in me.polygons:
             mat = o.material_slots[poly.material_index].material if o.material_slots else None
             col = _base_color(mat)
-            flags.append(_emissive(mat))
+            surface_slots.append(2 if mat and mat.get('town_glass') else int(_emissive(mat)))
             for li in poly.loop_indices:
                 ca.data[li].color = col
         me.materials.clear()
-        me.materials.append(lit); me.materials.append(emit)    # 两个子网格：0 受光，1 招牌 / 灯（不吃暗）
-        for poly, f in zip(me.polygons, flags):
-            poly.material_index = 1 if f else 0
+        me.materials.append(lit); me.materials.append(emit)
+        if 2 in surface_slots:
+            me.materials.append(glass)
+        for poly, slot in zip(me.polygons, surface_slots):
+            poly.material_index = slot
     bpy.ops.object.select_all(action='DESELECT')
     for o in objs:
         o.select_set(True)

@@ -1,0 +1,78 @@
+CCEffect %{
+  techniques:
+  - name: foliage
+    passes:
+    - vert: district-vs:vert
+      frag: district-fs:frag
+      embeddedMacros: { LEAVES: true }
+      properties: &surface
+        mainColor: { value: [1, 1, 1, 1], editor: { type: color } }
+  - name: glass
+    passes:
+    - vert: district-vs:vert
+      frag: district-fs:frag
+      properties: *surface
+}%
+
+CCProgram district-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+  #include <legacy/fog-vs>
+  in vec3 a_position;
+  in vec3 a_normal;
+  in vec4 a_color;
+  out vec3 v_world;
+  out vec3 v_normal;
+  out vec3 v_color;
+
+  vec4 vert () {
+    vec4 world = cc_matWorld * vec4(a_position, 1.0);
+    #if LEAVES
+      // 世界坐标保持相邻树木的风向一致；仅弯动绿色树冠，树池和主干固定。
+      float leaf = smoothstep(0.025, 0.12, a_color.g - a_color.r);
+      float bend = leaf * smoothstep(0.14, 1.24, world.y);
+      float phase = dot(world.xz, vec2(0.78, 0.48));
+      float gust = sin(1.63 * cc_time.x + phase) + 0.41 * sin(2.93 * cc_time.x + 1.7 * phase + world.y);
+      world.xz += vec2(0.032, 0.017) * bend * gust;
+    #endif
+    v_world = world.xyz;
+    v_normal = mat3(cc_matWorldIT) * a_normal;
+    v_color = a_color.rgb;
+    CC_TRANSFER_FOG(world);
+    return cc_matViewProj * world;
+  }
+}%
+
+CCProgram district-fs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <legacy/fog-fs>
+  #include <legacy/output-standard>
+  uniform Surface { vec4 mainColor; };
+  in vec3 v_world;
+  in vec3 v_normal;
+  in vec3 v_color;
+
+  vec4 frag () {
+    vec3 n = normalize(v_normal);
+    vec3 sun = -cc_mainLitDir.xyz;
+    float light = max(dot(n, sun), 0.0);
+    #if LEAVES
+      vec3 tint = mix(vec3(0.78, 0.84, 0.84), vec3(1.14, 1.10, 0.94), light);
+      vec3 rgb = v_color * tint * (0.97 + 0.08 * n.y);
+    #else
+      vec3 eye = normalize(cc_matViewInv[2].xyz);
+      vec3 ray = reflect(-eye, n);
+      float edge = pow(1.0 - clamp(dot(eye, n), 0.0, 1.0), 2.4);
+      float sky = smoothstep(-0.65, 0.16, ray.y + 0.10 * v_world.y);
+      vec3 reflection = mix(vec3(0.40, 0.56, 0.62), vec3(0.83, 0.91, 0.94), sky);
+      float glint = pow(max(dot(reflect(-sun, n), eye), 0.0), 24.0);
+      vec3 rgb = mix(v_color * (0.86 + 0.16 * light), reflection, 0.17 + 0.42 * edge);
+      rgb += vec3(0.17, 0.14, 0.09) * glint;
+    #endif
+    vec4 color = vec4(SRGBToLinear(rgb * mainColor.rgb), 1.0);
+    CC_APPLY_FOG(color, v_world);
+    return CCFragOutput(color);
+  }
+}%

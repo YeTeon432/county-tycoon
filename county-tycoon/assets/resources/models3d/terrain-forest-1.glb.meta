@@ -21,15 +21,15 @@
       ],
       "subMetas": {}
     },
-    "49b7c": {
+    "3319a": {
       "importer": "gltf-mesh",
-      "uuid": "dda4c63a-53cc-4804-8d06-93cf150dc363@49b7c",
+      "uuid": "dda4c63a-53cc-4804-8d06-93cf150dc363@3319a",
       "displayName": "",
-      "id": "49b7c",
-      "name": "柱体.mesh",
+      "id": "3319a",
+      "name": "锥体.mesh",
       "userData": {
         "gltfIndex": 0,
-        "triangleCount": 1320
+        "triangleCount": 2120
       },
       "ver": "1.1.1",
       "imported": true,
@@ -78,7 +78,7 @@
     },
     "assetFinder": {
       "meshes": [
-        "dda4c63a-53cc-4804-8d06-93cf150dc363@49b7c"
+        "dda4c63a-53cc-4804-8d06-93cf150dc363@3319a"
       ],
       "skeletons": [],
       "textures": [],

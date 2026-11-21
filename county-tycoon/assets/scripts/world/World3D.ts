@@ -63,14 +63,13 @@ export class World3D extends Component {
     private _iso!: IsoMath;
     private _model!: TownModel;
     private _cam!: Camera;
-    private _sun!: Node;
     private _root!: Node;
     private _groundNode: Node | null = null;
     private _edgeMesh: Mesh | null = null;
     private _streetNode: Node | null = null;
     private _streetMat: Material | null = null;
     private readonly _groundCapacity = new WeakMap<Node, number>();
-    private _mats: { lit: Material; emit: Material; ground: Material; relief: Material } | null = null;
+    private _mats: { lit: Material; emit: Material; ground: Material; relief: Material; foliage: Material; glass: Material } | null = null;
     private readonly _prefabs = new Map<string, Prefab>();
     private readonly _missing = new Set<string>();
     /** uid → 楼的节点 */
@@ -129,14 +128,22 @@ export class World3D extends Component {
         this._iso = iso;
         this._model = model;
         const g = director.getScene()!.globals;
-        // 线性色调映射（= Blender 出图的 Standard；默认 ACES 会把白墙压灰）；灯光是按 2D 图量化拟合的（D033）
+        // 线性色调映射与 Blender 卡片一致。暖阳光配冷色天光，白墙保留朝向差异。
         g.postSettings.toneMappingType = 1;
-        g.ambient.skyIllum = 70000;
-        g.ambient.skyLightingColor = new Color().fromHEX('#8cb4ff');
-        g.ambient.groundLightingColor = new Color().fromHEX('#303030');
-        // 影子先不开（和 2D 版一致：楼自己院子里的暗部已经烘在顶点色里）。平面投影在运行时开没生效，
-        // 要不要落地影子放到 T540g 性能那一步一起定
-        g.shadows.enabled = false;
+        g.ambient.skyIllum = 58000;
+        g.ambient.skyLightingColor = new Color().fromHEX('#c4dcf2');
+        g.ambient.groundLightingColor = new Color().fromHEX('#5b5449');
+        // 正交相机距焦点 150 格，仅对焦点以远的街区逐渐加入空气色。
+        g.fog.type = 0;
+        g.fog.fogColor = new Color(211, 226, 223);
+        g.fog.fogStart = 150;
+        g.fog.fogEnd = 292;
+        g.fog.enabled = true;
+        g.shadows.type = 0; // 平面阴影。道路叠层在 0.012，接收面略高于它。
+        g.shadows.planeHeight = 0.015;
+        g.shadows.planeBias = 0.001;
+        g.shadows.shadowColor = new Color(50, 60, 72, 83);
+        g.shadows.enabled = true;
 
         this._root = this.child(this.node, 'Objects');
         const camNode = this.child(this.node, 'Cam3D');
@@ -147,27 +154,30 @@ export class World3D extends Component {
         cam.priority = 0;
         cam.clearFlags = gfx.ClearFlagBit.ALL;
         cam.clearColor = background;
-        cam.visibility = World3D.LAYER;
+        // Cocos 的平面阴影队列要求相机包含 DEFAULT。UI 仍由优先级 1 的相机绘制。
+        cam.visibility = World3D.LAYER | Layers.Enum.DEFAULT;
         this._cam = cam;
 
-        this._sun = this.child(this.node, 'Sun');
-        const sun = this._sun.addComponent(DirectionalLight);
-        sun.illuminance = 100000;
-        sun.color = new Color(255, 245, 230, 255);
+        const sunNode = this.child(this.node, 'Sun');
+        const sun = sunNode.addComponent(DirectionalLight);
+        sunNode.setRotationFromEuler(-54, 98, 0);
+        sun.shadowEnabled = true;
+        sun.illuminance = 103000;
+        sun.color = new Color(255, 240, 215, 255);
         sun.visibility = World3D.LAYER;
 
         resources.load('models3d/actor-sprite', Material, (err, mat) => {
             if (err) { console.error('[World3D] 人车材质', err.message); return; }
             this._actorMat = mat;
         });
-        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands'], Material, (err, mats) => {
+        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands', 'models3d/foliage', 'models3d/glazing'], Material, (err, mats) => {
             if (err) {
                 console.error('[World3D] 材质', err.message);
                 director.emit('town-load-error');
                 return;
             }
             const by = (n: string) => mats.find((m) => m.name === n)!;
-            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands') };
+            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands'), foliage: by('foliage'), glass: by('glazing') };
             const street = new Material();
             street.initialize({ effectAsset: this._mats.emit.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
             this._streetMat = street;
@@ -249,8 +259,6 @@ export class World3D extends Component {
         cam.node.setRotation(q);
         cam.node.setPosition(gx + back.x * 150, back.y * 150, gy + back.z * 150);
         cam.orthoHeight = view.getVisibleSize().height / 2 / (iso.hw * Math.SQRT2 * zoom);
-        // 太阳跟着相机转：光永远从屏幕左上来，四个方向亮暗面一致（同预渲染图）
-        this._sun.setRotationFromEuler(-50, yaw + 60, 0);
         this.drawActors(q, back);
     }
 
@@ -564,7 +572,10 @@ export class World3D extends Component {
         node.walk((child) => {
             const mr = child.getComponent(MeshRenderer);
             if (!mr) return;
-            for (let i = 0; i < mr.sharedMaterials.length; i++) mr.setSharedMaterial(mats[i === 1 ? 1 : 0], i);
+            for (let i = 0; i < mr.sharedMaterials.length; i++) {
+                mr.setSharedMaterial(mats[mr.sharedMaterials[i] === this._mats!.emit ? 1 : 0], i);
+            }
+            mr.shadowCastingMode = 0;
             if (mr.model) mr.model.priority = 2;   // 先画贴地的格线和占格
         });
         this._preview = { node, key, ok: p.ok };
@@ -643,9 +654,15 @@ export class World3D extends Component {
             c.layer = World3D.LAYER;
             const mr = c.getComponent(MeshRenderer);
             if (!mr) return;
-            // 子网格 0 受光（顶点色已乘环境光遮蔽），1 招牌 / 灯（不受光，阴面也亮）
-            for (let i = 0; i < mr.sharedMaterials.length; i++) mr.setMaterial(i === 1 ? this._mats!.emit : this._mats!.lit, i);
-            mr.shadowCastingMode = 0;
+            const mats = this._mats!;
+            const diffuse = id === 'tree' || id.startsWith('terrain-forest-') ? mats.foliage : mats.lit;
+            for (let i = 0; i < mr.sharedMaterials.length; i++) {
+                let surface = diffuse;
+                if (mr.sharedMaterials[i]?.name === 'glass') surface = mats.glass;
+                else if (i === 1) surface = mats.emit; // 旧版模型的第二个子网格为招牌灯。
+                mr.setSharedMaterial(surface, i);
+            }
+            mr.shadowCastingMode = 1;
         });
         return pivot;
     }

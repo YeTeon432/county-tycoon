@@ -1,0 +1,19 @@
+{
+  "__type__": "cc.Material",
+  "_name": "foliage",
+  "_objFlags": 0,
+  "_native": "",
+  "_effectAsset": {
+    "__uuid__": "ccbf3dc4-c1de-406a-bc46-20051957a850"
+  },
+  "_techIdx": 0,
+  "_defines": [
+    {}
+  ],
+  "_states": [
+    {}
+  ],
+  "_props": [
+    {}
+  ]
+}

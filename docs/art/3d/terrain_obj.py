@@ -14,16 +14,29 @@ def _flat(o):
     return o
 
 
-def round_tree(x, y, s=1.0, z=0.0, seed=0, light='leaf_light', dark='leaf'):
-    """阔叶树：树干 + 三四团树冠，随机一点错落。"""
+def round_tree(x, y, s=1.0, z=0.0, seed=0, light='#93b475', dark='#638857'):
+    """分叉的树干托住几簇不等大的叶冠，树冠外缘露出枝间空隙。"""
     rnd = random.Random(seed)
-    cyl(x, y, z, 0.045 * s, 0.34 * s, 'trunk', 8)
-    ball(x, y, z + 0.5 * s, 0.25 * s, dark)
-    for k in range(3):
-        a = rnd.random() * 6.28
-        ball(x + math.cos(a) * 0.1 * s, y + math.sin(a) * 0.1 * s, z + (0.58 + 0.06 * rnd.random()) * s,
-             (0.15 + 0.04 * rnd.random()) * s, light)
-    ball(x + 0.06 * s, y - 0.06 * s, z + 0.7 * s, 0.13 * s, light)
+    cyl(x, y, z, 0.037 * s, 0.56 * s, '#927b61', 8, r2=0.025 * s)
+    phase = rnd.uniform(0, 2 * math.pi)
+    for i in range(6):
+        angle = phase + i * 2.40
+        reach = (0.17 if i < 4 else 0.073) * s
+        cx, cy = x + math.cos(angle) * reach, y + math.sin(angle) * reach
+        cz = z + (0.57 + i * 0.057 + rnd.uniform(-0.02, 0.02)) * s
+        branch = Vector((cx - x, cy - y, cz - z - 0.37 * s))
+        twig = cyl(x, y, z, 0.017 * s, branch.length, '#89785d', 6, r2=0.009 * s)
+        twig.location = Vector((x, y, z + 0.37 * s)) + branch / 2
+        twig.rotation_euler = branch.to_track_quat('Z', 'Y').to_euler()
+        radius = s * rnd.uniform(0.155, 0.205)
+        crown = ball(cx, cy, cz, radius, dark if i < 3 else light, 2, scale=(1.0, 0.88, 0.93))
+        # 叶簇疏密决定边缘形状，几处透光的偏黄叶面留在冠层上方。
+        crown.data.materials.append(M('#a5bd76' if i >= 3 else '#7c9f62'))
+        for vertex in crown.data.vertices:
+            vertex.co *= rnd.uniform(0.81, 1.16)
+        for poly in crown.data.polygons:
+            if poly.normal.z > 0.22 and rnd.random() < 0.24:
+                poly.material_index = 1
 
 
 def pine(x, y, s=1.0, z=0.0):
@@ -35,15 +48,10 @@ def pine(x, y, s=1.0, z=0.0):
 # ---------------------------------------------------------------- 行道树
 @sprite('tree', 1, 1, facing=False)
 def tree_big():
-    """行道树：一棵大圆冠树 + 方形小树池。"""
-    box(0.36, 0.36, 0, 0.28, 0.28, 0.035, 'curb')
-    box(0.39, 0.39, 0.035, 0.22, 0.22, 0.002, M('#7a5a3a'))
-    s = 1.0
-    cyl(0.5, 0.5, 0, 0.06, 0.75, 'trunk', 10)
-    for (dx, dy, dz, r, m) in [(0, 0, 0.95, 0.36, 'leaf'), (0.14, -0.12, 1.05, 0.24, 'leaf_light'),
-                               (-0.15, 0.1, 1.12, 0.24, 'leaf_light'), (0.05, 0.12, 1.25, 0.22, 'leaf'),
-                               (-0.05, -0.1, 1.3, 0.2, 'leaf_light')]:
-        ball(0.5 + dx, 0.5 + dy, dz, r, m)
+    """沿街榉树，抬高分枝点，给行人留出树下空间。"""
+    box(0.33, 0.35, 0, 0.34, 0.30, 0.016, '#b5ac99')
+    box(0.355, 0.375, 0.016, 0.29, 0.25, 0.006, '#877864')
+    round_tree(0.5, 0.5, 1.34, z=0.022, seed=17)
 
 
 # ---------------------------------------------------------------- 树林
@@ -65,7 +73,7 @@ def _forest(i):
             if kind == 'p':
                 pine(x, y, s)
             else:
-                pal = rnd.choice([('leaf_light', 'leaf'), ('leaf', 'leaf_dark'), ('#7cc84e', 'leaf_light')])
+                pal = rnd.choice([('#98b87e', '#698f62'), ('#86a772', '#608666'), ('#a8b77b', '#849e69')])
                 round_tree(x, y, s, 0, seed=k + 10 * i, light=pal[0], dark=pal[1])
         for _ in range(3):
             bx, by = 0.15 + rnd.random() * 0.7, 0.15 + rnd.random() * 0.7

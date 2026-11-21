@@ -728,8 +728,11 @@ def school_wing(name, outline, bottom, floors, glazing, wall):
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
-    for color in colors:
-        mesh.materials.append(M(color))
+    for index, color in enumerate(colors):
+        material = M(color, rough=0.22) if index >= 4 else M(color)
+        if index >= 4:
+            material['town_glass'] = True
+        mesh.materials.append(material)
     for poly, slot in zip(mesh.polygons, slots):
         poly.material_index = slot
     return top
@@ -748,16 +751,17 @@ def school_house():
     box(0.25, 0.607, Z0 + 0.055, 1.41, 0.035, 0.27, '#617f84')
     for x in (0.28, 0.55, 0.82, 1.07, 1.34, 1.62):
         box(x, 0.579, Z0 + 0.02, 0.032, 0.061, 0.33, stone)
-    box(0.14, 0.492, lobby_top - 0.036, 1.67, 1.26, 0.038, trim)
+    box(0.14, 0.492, lobby_top - 0.036, 1.67, 1.26, 0.038, trim, bevel=0.009)
     box(0.77, 0.18, Z0 + 0.006, 0.62, 0.43, 0.014, '#dccbb2')
-    box(0.76, 0.32, Z0 + 0.302, 0.62, 0.29, 0.026, '#a48768')
+    box(0.76, 0.32, Z0 + 0.302, 0.62, 0.29, 0.026, '#a48768', bevel=0.006)
     for x in (0.785, 1.336):
         box(x, 0.342, Z0 + 0.017, 0.018, 0.018, 0.286, '#968c76')
     for k in range(3):
         box(0.05 + k * 0.65, 0.026, Z0, 0.639, 0.176, 0.009, '#e1d7c3')
 
     # 七层砖翼与九层切角塔错开，低翼屋顶作为可达的公共露台。
-    wing = [(0.18, 0.57), (0.88, 0.57), (0.88, 1.67), (0.18, 1.67)]
+    # 首层向前伸出，砖翼外角收成窄斜面；屋顶和门廊边口各留一道受光棱线。
+    wing = [(0.18, 0.60), (0.21, 0.57), (0.88, 0.57), (0.88, 1.67), (0.18, 1.67)]
     terrace = school_wing('StoneWing', wing, lobby_top, 7, False, '#ca987e')
     # 砖翼的一列转角阳台朝向院落。横向楼板和内侧的砖墙在远景也有明暗差。
     for floor in (1, 2, 3, 5, 6):
@@ -767,11 +771,16 @@ def school_house():
         box(0.167, 0.452, z + 0.101, 0.40, 0.011, 0.012, trim)
         for x in (0.167, 0.558):
             box(x, 0.452, z + 0.023, 0.011, 0.118, 0.09, '#a8b7b4')
-    box(0.158, 0.548, terrace, 0.744, 1.144, 0.036, stone)
+    box(0.158, 0.548, terrace, 0.744, 1.144, 0.036, stone, bevel=0.009)
     parapet(0.18, 0.57, terrace + 0.036, 0.70, 1.10, h=0.064, t=0.021, m=stone)
     for y in (0.64, 1.48):
         box(0.24, y, terrace + 0.037, 0.48, 0.11, 0.067, '#9b8c73')
         box(0.254, y + 0.011, terrace + 0.104, 0.452, 0.087, 0.073, '#859f71')
+    for x in (0.28, 0.58):
+        for y in (0.89, 1.21):
+            box(x, y, terrace + 0.036, 0.017, 0.017, 0.195, '#998773')
+    for k in range(5):
+        box(0.244 + 0.084 * k, 0.868, terrace + 0.231, 0.044, 0.397, 0.021, '#d6bd96')
     # 塔楼临街两角削斜，转动镜头时仍然读得出不同玻璃面的明暗。
     tower = [(0.86, 0.71), (1.01, 0.56), (1.51, 0.56), (1.75, 0.80),
              (1.75, 1.62), (1.64, 1.73), (0.86, 1.73)]
@@ -792,7 +801,7 @@ def school_house():
     for x, w in ((0.06, 0.63), (1.45, 0.48)):
         box(x, 0.22, Z0 + 0.003, w, 0.30, 0.046, stone)
         box(x + 0.021, 0.241, Z0 + 0.049, w - 0.042, 0.258, 0.014, lawn)
-    for x, y in ((0.25, 0.37), (1.74, 0.40)):
+    for x, y in ((0.24, 0.42), (1.82, 0.48)):
         cyl(x, y, Z0 + 0.055, 0.021, 0.29, '#8c7961', 8)
         for dx, dy, dz, r in ((0, 0, 0.37, 0.154), (-0.054, -0.035, 0.32, 0.112),
                               (0.045, 0.025, 0.425, 0.109)):

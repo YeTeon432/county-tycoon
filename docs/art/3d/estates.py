@@ -6,12 +6,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import Z0, box, bush, lamp, lot, pyramid, run, sprite, text, tree
 
 
-def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False):
+def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z0):
     height = floors * 0.24
-    box(x, y, Z0, w, d, height, wall, bevel=0.01)
+    box(x, y, base, w, d, height, wall, bevel=0.01)
     cols = max(2, round(w / 0.28))
     for floor in range(floors):
-        z = Z0 + 0.06 + floor * 0.24
+        z = base + 0.06 + floor * 0.24
         for col in range(cols):
             wx = x + (col + 0.5) * w / cols - 0.075
             for wy in (y - 0.012, y + d - 0.002):
@@ -22,8 +22,8 @@ def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False):
                 box(wx - 0.03, y - 0.085, z - 0.025, 0.21, 0.014, 0.065, 'tile_white')
         for side in (x - 0.012, x + w - 0.002):
             box(side, y + d * 0.4, z, 0.014, 0.13, 0.13, 'glass')
-    box(x + w * 0.5 - 0.06, y - 0.018, Z0, 0.12, 0.02, 0.185, 'brown')
-    top = Z0 + height
+    box(x + w * 0.5 - 0.06, y - 0.018, base, 0.12, 0.02, 0.185, 'brown')
+    top = base + height
     box(x - 0.018, y - 0.018, top, w + 0.036, d + 0.036, 0.045, roof)
     if pitched:
         pyramid(x - 0.035, y - 0.035, top + 0.04, w + 0.07, d + 0.07, 0.15, roof)
@@ -62,12 +62,22 @@ def resettlement():
 
 @sprite('highrise', 2, 2)
 def highrise():
-    lot(2, 2, 'pave')
-    for x, y, floors in ((0.13, 1.03, 12), (1.11, 0.64, 10)):
-        block(x, y, 0.73, 0.74, floors, 'paint_grey', 'glass_dark', balconies=True)
-        box(x + 0.29, y + 0.68, Z0, 0.20, 0.12, floors * 0.24 + 0.26, 'paint_blue')
-    tree(0.29, 0.37, 0.78, z=Z0)
-    gate('云景华庭', 'glass_dark')
+    lot(2, 2, '#cfcbc0')
+    # 后塔较高，临街翼退两层，塔顶的设备房藏在格栅后。
+    for x, y, floors, wall in ((0.13, 1.03, 9, '#ead9c0'), (1.11, 0.64, 6, '#ddd7c5')):
+        block(x, y, 0.75, 0.77, floors, wall, '#a6b5b4', balconies=True)
+        shoulder = Z0 + floors * 0.24 + 0.045
+        block(x + 0.09, y + 0.12, 0.57, 0.54, 2, wall, '#8faaa9', base=shoulder)
+        box(x + 0.54, y + 0.20, Z0, 0.15, 0.45, shoulder + 0.49 - Z0, '#b59377', bevel=0.025)
+        for k in range(4):
+            box(x + 0.552, y + 0.191, shoulder + 0.33 + k * 0.035, 0.118, 0.016, 0.015, '#7f8c87')
+    box(0.14, 0.22, Z0, 0.49, 0.61, 0.03, '#9ead84')
+    tree(0.36, 0.53, 0.70, z=Z0 + 0.03)
+    for x in (0.68, 1.35):
+        box(x, 0.17, Z0, 0.036, 0.048, 0.28, '#b89975')
+    box(0.60, 0.113, Z0 + 0.28, 0.87, 0.37, 0.045, '#f2e7d0', bevel=0.01)
+    box(0.63, 0.115, Z0 + 0.245, 0.38, 0.024, 0.073, '#617b79')
+    text('云景华庭', 0.82, 0.11, Z0 + 0.28, 0.063, 'sign_white', 'front')
 
 
 @sprite('garden-estate', 2, 2)

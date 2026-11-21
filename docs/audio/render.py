@@ -78,15 +78,24 @@ def soft_piano(midi, seconds):
 
 
 def theme():
-    # Four short phrases, one piano. Start time, pitch, sustain, touch.
+    # G-major pentatonic. A two-note pickup returns in the third phrase.
+    # Each event is (beat, MIDI note, length in beats, touch).
+    beat = 60 / 96
     score = [
-        (.25, 67, 1.6, .23), (1.92, 64, 2.9, .18),
-        (7.2, 62, 1.3, .20), (8.58, 64, 1.15, .17), (9.79, 67, 2.8, .21),
-        (15.3, 69, 1.9, .22), (17.32, 67, 2.6, .18),
-        (22.1, 64, 1.35, .19), (23.55, 62, 3.05, .21),
+        (.50, 67, .44, .17), (1.00, 69, .44, .18), (1.50, 71, 1.35, .23),
+        (3.00, 74, 1.65, .21), (5.00, 71, .66, .18), (5.75, 69, 1.55, .19),
+
+        (8.20, 71, .68, .19), (9.00, 69, .42, .16), (9.50, 67, 1.40, .22),
+        (11.25, 64, .66, .17), (12.00, 67, 2.60, .21),
+
+        (16.50, 67, .44, .16), (17.00, 69, .44, .18), (17.50, 71, 1.35, .22),
+        (19.00, 74, .70, .19), (19.75, 76, 1.65, .21), (21.75, 74, 1.35, .18),
+
+        (24.00, 71, 1.30, .21), (25.50, 74, .66, .18), (26.25, 69, 1.35, .18),
+        (28.00, 67, 2.75, .21),
     ]
-    samples = mix(28, [(start, soft_piano(pitch, sustain), gain)
-                       for start, pitch, sustain, gain in score])
+    samples = mix(32 * beat, [(start * beat, soft_piano(pitch, length * beat), gain)
+                              for start, pitch, length, gain in score])
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(RATE),
                     '-ac', '1', '-i', '-', '-codec:a', 'libmp3lame', '-b:a', '64k',
                     str(OUT / 'town-theme.mp3')], input=pcm(samples), check=True)

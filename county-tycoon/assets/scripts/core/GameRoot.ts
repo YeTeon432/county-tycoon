@@ -183,6 +183,13 @@ export class GameRoot extends Component {
                 if (!platform.setItem(MAP_GRID_PREFERENCE_KEY, on ? '1' : '0')) ui.say('网格设置未能保存');
             };
             view.onBuildingTapped = (uid) => ui.onBuildingTapped(uid);
+            view.onPlacementCancelled = () => {
+                townAudio.action('tap');
+                if (view.demolishing) return;
+                this._branchSource = undefined;
+                this._bar?.clearSelection();
+                this.updatePlacementHint();
+            };
             ui.requestToggleFacing = (uid) => view.toggleFacingByUid(uid);
             const sim = this._sim;
             // T425 居民追踪：档案里点「追踪」→ 地图上箭头标出这个人（橙）和他家（蓝）
@@ -243,13 +250,6 @@ export class GameRoot extends Component {
                     this.updatePlacementHint();
                     return null;
                 };
-                view.onPlacementCancelled = () => {
-                    townAudio.action('tap');
-                    if (this._branchSource === undefined) return;
-                    this._branchSource = undefined;
-                    view.selectBuilding(null);
-                    this.updatePlacementHint();
-                };
                 ui.requestPlace = (defId) => {
                     this._branchSource = undefined;
                     if (!this._bar || !this._bar.selectById(defId)) return false;
@@ -300,6 +300,7 @@ export class GameRoot extends Component {
     private updatePlacementHint(): void {
         const ui = this._ui, view = this._view;
         if (!ui || !view) return;
+        this._bar?.showCancelBuild(!!view.selectedBuilding);
         // 预览中：能凑特色街道就提示（D026，DESIGN 21）
         const p = view.pending, sim = this._sim;
         if (this._branchSource !== undefined && view.selectedBuilding) {
@@ -480,6 +481,7 @@ export class GameRoot extends Component {
         const bar = barRoot.addComponent(BuildingBar);
         this._bar = bar;
         bar.build(defs);
+        bar.onCancelBuild = () => this._view?.cancelPending();
 
         bar.onSelect = (def) => {
             this._branchSource = undefined;

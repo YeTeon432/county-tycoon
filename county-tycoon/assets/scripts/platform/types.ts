@@ -48,6 +48,10 @@ export type VibrateKind = 'short' | 'long';
 export interface IPlatform {
     readonly name: PlatformName;
 
+    /** 本次运行只能使用内存存档（浏览器禁用本地存储）。 */
+    readonly sessionOnly?: boolean;
+    /** 枚举本机档案目录（Web 档案选择页）。 */
+    keys?(): string[];
     /** 读存档；没有或读失败返回 null */
     getItem(key: string): string | null;
     /** 写存档；失败返回 false（比如超出配额），调用方可以据此提示玩家 */

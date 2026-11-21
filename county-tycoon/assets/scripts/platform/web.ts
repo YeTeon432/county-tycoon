@@ -35,6 +35,16 @@ export function createWebPlatform(): IPlatform {
 
     return {
         name: 'web',
+        sessionOnly: !storage,
+        keys(): string[] {
+            if (!storage) return Array.from(memory.keys());
+            const keys: string[] = [];
+            for (let i = 0; i < storage.length; i++) {
+                const key = storage.key(i);
+                if (key !== null) keys.push(key);
+            }
+            return keys;
+        },
 
         getItem(key: string): string | null {
             try {
@@ -52,9 +62,7 @@ export function createWebPlatform(): IPlatform {
                 else memory.set(key, value);
                 return true;
             } catch (e) {
-                // 配额满（QuotaExceededError）。退到内存，至少这一局不丢
-                console.warn('[platform:web] 写存储失败，改用内存', key, e);
-                memory.set(key, value);
+                console.warn('[platform:web] 写存储失败', key, e);
                 return false;
             }
         },
@@ -100,8 +108,13 @@ function pickStorage(): Storage | null {
         const s = typeof localStorage !== 'undefined' ? localStorage : null;
         if (!s) return null;
         const probe = '__ct_probe__';
-        s.setItem(probe, '1');
-        s.removeItem(probe);
+        try {
+            s.setItem(probe, '1');
+            s.removeItem(probe);
+        } catch {
+            // 配额已满时旧档仍可读，应继续使用它，并向写入方报告失败。
+            return s.length > 0 ? s : null;
+        }
         return s;
     } catch (e) {
         return null;

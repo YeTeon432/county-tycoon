@@ -87,7 +87,7 @@
     }
     #load-count { font-variant-numeric: tabular-nums; }
     #load-count:empty { display: none; }
-    #startup button {
+    #reload {
       position: absolute;
       top: calc(100% + 8px);
       left: 50%;
@@ -100,7 +100,35 @@
       font: 650 14px system-ui, sans-serif;
       cursor: pointer;
     }
-    #startup [hidden] { display: none; }
+    #startup button { cursor: pointer; font-family: inherit; }
+    #startup button:focus-visible { outline: 3px solid #156d6c; outline-offset: 3px; }
+    #start-game, #new-profile {
+      border: 2px solid #704521; border-radius: 12px; padding: 11px 36px;
+      background: linear-gradient(#ffe299, #efb452); color: #50321b;
+      box-shadow: 0 3px 0 #744921; font-size: 19px; font-weight: 800;
+    }
+    #startup.choosing { align-items: center; padding: 16px; }
+    .profiles {
+      box-sizing: border-box; display: flex; flex-direction: column; gap: 14px;
+      width: min(450px, 100%); max-height: calc(100dvh - 32px);
+      padding: clamp(16px, 4vh, 28px); border: 2px solid #805932; border-radius: 20px;
+      background: #fffaec; color: #463724; box-shadow: 0 5px 0 #845830, 0 14px 45px #203f4666;
+    }
+    .profiles h2 { margin: 0; font-size: 26px; }
+    #profile-list { display: grid; gap: 8px; overflow-y: auto; padding: 4px; margin: -4px; }
+    .profile-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; padding: 12px 15px; border: 1px solid #d7c8aa; border-radius: 10px;
+      background: #fffefa; color: inherit; text-align: left;
+    }
+    .profile-row:hover { border-color: #619989; background: #f5faf2; }
+    .profile-row strong, .profile-row small { display: block; }
+    .profile-row strong { font-size: 18px; }
+    .profile-row small { margin-top: 4px; font-size: 13px; color: #655d4e; }
+    .profile-row b { color: #306e5c; white-space: nowrap; }
+    #profile-error { margin: 0; color: #933d25; font-size: 14px; }
+    #profile-error:empty { display: none; }
+    #startup[hidden], #startup [hidden] { display: none; }
     #GameDiv[inert] { visibility: hidden; }
 
     #GameDiv {
@@ -128,8 +156,15 @@
             <span id="load-count" aria-hidden="true">0%</span>
           </div>
         </div>
-        <button type="button" hidden onclick="location.reload()">重新加载</button>
+        <button id="reload" type="button" hidden onclick="location.reload()">重新加载</button>
       </div>
+      <button id="start-game" type="button" hidden>开始游戏</button>
+    </section>
+    <section class="profiles" aria-labelledby="profile-title" hidden>
+      <h2 id="profile-title">本机档案</h2>
+      <div id="profile-list"></div>
+      <p id="profile-error" role="status"></p>
+      <button id="new-profile" type="button">＋ 新建档案</button>
     </section>
   </div>
   <div id="GameDiv" inert cc_exact_fit_screen="false">
@@ -140,7 +175,21 @@
   <script>
     const startup = document.getElementById('startup');
     const statusText = document.getElementById('startup-status');
-    const retry = startup.querySelector('button');
+    const retry = document.getElementById('reload');
+    const loadingTown = startup.querySelector('.loading-town');
+    const details = startup.querySelector('.load-details');
+    const startButton = document.getElementById('start-game');
+    const picker = startup.querySelector('.profiles');
+    const list = document.getElementById('profile-list');
+    const message = document.getElementById('profile-error');
+    const newButton = document.getElementById('new-profile');
+    function showLoading() {
+      picker.hidden = true;
+      startup.classList.remove('choosing');
+      loadingTown.hidden = false;
+      details.hidden = false;
+      startButton.hidden = true;
+    }
     const track = document.getElementById('load-track');
     const fill = document.getElementById('load-fill');
     const count = document.getElementById('load-count');
@@ -156,6 +205,7 @@
     function startupFailed(error) {
       if (failed) return;
       failed = true;
+      showLoading();
       clearTimeout(slowTimer);
       console.error('[城镇加载]', error);
       statusText.textContent = '加载失败，请重新加载。';
@@ -163,7 +213,7 @@
       retry.hidden = false;
     }
 
-    // 资源解码、地图、图集、建造栏和绘制首帧均完成后才到 100%。
+    // 启动进度表示资源解码进度；选档后等城镇首帧完成再显示画布。
     let totalSteps = 0;
     let completedSteps = 0;
     function showProgress(percent) {
@@ -192,7 +242,7 @@
       include('models3d', Prefab);
       include('models3d', Material, path => /^models3d\/[^/]+$/.test(path));
 
-      totalSteps = assets.length + readyEvents.length + 1;
+      totalSteps = assets.length;
       statusText.textContent = '正在加载城镇资源';
       showProgress(10);
       // 使用游戏本身的资源缓存。每项在解码及其依赖就绪后计入进度。
@@ -203,7 +253,7 @@
           resolve();
         });
       })));
-      if (!failed) statusText.textContent = '正在绘制城镇…';
+      if (!failed) statusText.textContent = '正在读取档案…';
     }
     const frame = document.getElementById('GameDiv');
     const designWidth = <%= previewWidth %>;
@@ -232,15 +282,101 @@
       showProgress(2);
       statusText.textContent = '正在读取游戏配置…';
       director.once('town-load-error', startupFailed);
-      const ready = name => new Promise(resolve => director.once(name, resolve));
-      Promise.all(readyEvents.map(name => ready(name).then(() => advanceProgress()))).then(() => {
-        director.once(Director.EVENT_AFTER_DRAW, () => {
-          if (failed) return;
-          advanceProgress();
-          clearTimeout(slowTimer);
-          requestAnimationFrame(() => {
+      let returning = false;
+      let releaseProfile;
+      director.on('town-return-profiles', () => {
+        returning = true;
+        frame.setAttribute('inert', '');
+        startup.hidden = false;
+        showLoading();
+        statusText.textContent = '正在读取档案…';
+        markActivity();
+      });
+      director.on('town-profiles-ready', (profiles, enter) => {
+        if (failed) return;
+        if (releaseProfile) { releaseProfile(); releaseProfile = null; }
+        clearTimeout(slowTimer);
+        retry.hidden = true;
+        let entering = false;
+        function showProfiles(error = '') {
+          startup.classList.add('choosing');
+          loadingTown.hidden = true;
+          picker.hidden = false;
+          list.replaceChildren();
+          message.textContent = error;
+          for (const profile of profiles()) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'profile-row';
+            row.disabled = !profile.readable;
+            const info = document.createElement('span');
+            const name = document.createElement('strong');
+            name.textContent = '档案 ' + profile.id;
+            const stats = document.createElement('small');
+            stats.textContent = profile.readable
+              ? '第 ' + (Math.floor(profile.month / 12) + 1) + ' 年 ' + (profile.month % 12 + 1) + ' 月 · ' + profile.population + ' 人'
+              : '档案暂时无法读取';
+            info.append(name, stats);
+            if (profile.savedAt) {
+              const time = document.createElement('small');
+              time.textContent = '上次游玩 ' + new Date(profile.savedAt).toLocaleString('zh-CN', {hour12: false});
+              info.append(time);
+            }
+            const action = document.createElement('b');
+            action.textContent = profile.readable ? '继续 ›' : '';
+            row.append(info, action);
+            row.onclick = () => choose(profile.id, false);
+            list.append(row);
+          }
+          (list.querySelector('button:enabled') || newButton).focus();
+        }
+        async function choose(id, create) {
+          if (entering) return;
+          entering = true;
+          function open() {
+            const error = enter(id, create);
+            if (error) { entering = false; showProfiles(error); return false; }
+            showLoading();
+            statusText.textContent = '正在绘制城镇…';
+            markActivity();
+            return true;
+          }
+          try {
+            if (navigator.locks) {
+              await navigator.locks.request('county-profile-' + id, { ifAvailable: true }, async lock => {
+                if (!lock) {
+                  entering = false;
+                  showProfiles('这个档案已在另一个页面打开，请选择其他档案。');
+                  return;
+                }
+                if (open()) await new Promise(resolve => { releaseProfile = resolve; });
+              });
+            } else {
+              open();
+            }
+          } catch (error) { startupFailed(error); }
+        }
+        function create() {
+          const next = profiles().reduce((max, p) => Math.max(max, p.id), 0) + 1;
+          choose(next, true);
+        }
+        newButton.onclick = create;
+        startButton.onclick = () => profiles().length ? showProfiles() : create();
+        if (returning) {
+          returning = false;
+          showProfiles();
+        } else {
+          details.hidden = true;
+          startButton.hidden = false;
+          startButton.focus();
+        }
+        Promise.all(readyEvents.map(name => new Promise(resolve => director.once(name, resolve)))).then(() => {
+          director.once(Director.EVENT_AFTER_DRAW, () => {
+            if (failed) return;
+            clearTimeout(slowTimer);
             frame.removeAttribute('inert');
-            startup.remove();
+            startup.hidden = true;
+            document.getElementById('GameCanvas').focus();
           });
         });
       });

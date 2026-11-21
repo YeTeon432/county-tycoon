@@ -83,6 +83,7 @@ export class UiRoot extends Component {
     private _panelLayer: Node | null = null;
     /** 当前打开的建筑详情 */
     private _topPanel: BuildingPanel | null = null;
+    switchProfile: (() => void) | null = null;
     onTownUpgraded: (() => void) | null = null;
     onResidentChanged: (() => void) | null = null;
     /** 叠在建筑详情上面的居民档案 */
@@ -315,7 +316,7 @@ export class UiRoot extends Component {
         const layer = this._panelLayer, read = this.getGridPreference, write = this.setGridPreference;
         if (!layer || !read || !write) return;
         this.closeTopPanel();
-        const panel = SettingsPanel.show(layer, read(), write, () => this.say('声音设置未能保存'));
+        const panel = SettingsPanel.show(layer, read(), write, () => this.say('声音设置未能保存'), this.switchProfile);
         panel.onClosed = () => {
             if (this._settingsPanel === panel) this._settingsPanel = null;
         };

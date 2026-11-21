@@ -19,7 +19,7 @@ import { getPlatform } from '../platform/Platform';
 
 /** 当前存档格式版本。加字段不用改；改了结构才加 1，并在这里写迁移 */
 export const SAVE_VERSION = 1;
-/** 存档 key。读旧版本时用 LEGACY_KEYS 挨个试 */
+/** 第一个档案沿用旧键，已有城市可以直接继续。 */
 export const SAVE_KEY = 'county-save-v1';
 
 /** 一栋建筑在存档里的样子。defId 而不是整个 def：参数改数值后老存档自动吃到新数值 */
@@ -119,12 +119,12 @@ const SLOTS = ['a', 'b'];
 
 interface SaveIndex { chunked: true; slot: string; n: number; len: number; prev?: { slot: string; n: number; len: number } }
 
-function chunkKey(slot: string, i: number): string {
-    return `${SAVE_KEY}.${slot}.${i}`;
+function chunkKey(key: string, slot: string, i: number): string {
+    return `${key}.${slot}.${i}`;
 }
 
-function readIndex(): SaveIndex | null {
-    const text = getPlatform().getItem(SAVE_KEY);
+function readIndex(key: string): SaveIndex | null {
+    const text = getPlatform().getItem(key);
     if (!text || text.charCodeAt(0) !== 123 /* { */ || text.length > 1000) return null;
     try {
         const v = JSON.parse(text);
@@ -134,11 +134,11 @@ function readIndex(): SaveIndex | null {
     }
 }
 
-function readSlot(slot: string, n: number, len: number): string | null {
+function readSlot(key: string, slot: string, n: number, len: number): string | null {
     const p = getPlatform();
     let text = '';
     for (let i = 0; i < n; i++) {
-        const part = p.getItem(chunkKey(slot, i));
+        const part = p.getItem(chunkKey(key, slot, i));
         if (part === null) return null;
         text += part;
     }
@@ -146,38 +146,38 @@ function readSlot(slot: string, n: number, len: number): string | null {
 }
 
 /** 把一整份存档文本分段写进去。返回 false 时上一份存档不受影响 */
-export function writeSaveText(text: string): boolean {
+export function writeSaveText(text: string, key = SAVE_KEY): boolean {
     const p = getPlatform();
-    const old = readIndex();
+    const old = readIndex(key);
     const slot = old && old.slot === SLOTS[0] ? SLOTS[1] : SLOTS[0];
     const n = Math.max(1, Math.ceil(text.length / CHUNK));
     for (let i = 0; i < n; i++) {
-        if (!p.setItem(chunkKey(slot, i), text.slice(i * CHUNK, (i + 1) * CHUNK))) {
+        if (!p.setItem(chunkKey(key, slot, i), text.slice(i * CHUNK, (i + 1) * CHUNK))) {
             console.error(`[SaveGame] 存档第 ${i + 1}/${n} 段写失败，保留上一份`);
             return false;
         }
     }
     // 这个槽上次可能分得更多段，多出来的删掉
-    for (let i = n; p.getItem(chunkKey(slot, i)) !== null; i++) p.removeItem(chunkKey(slot, i));
+    for (let i = n; p.getItem(chunkKey(key, slot, i)) !== null; i++) p.removeItem(chunkKey(key, slot, i));
     const index: SaveIndex = { chunked: true, slot, n, len: text.length };
     if (old) index.prev = { slot: old.slot, n: old.n, len: old.len };
-    return p.setItem(SAVE_KEY, JSON.stringify(index));
+    return p.setItem(key, JSON.stringify(index));
 }
 
 /** 读出整份存档文本：新格式按目录拼段（坏了退回备份槽），老格式直接返回 */
-export function readSaveText(): string | null {
-    const raw = getPlatform().getItem(SAVE_KEY);
+export function readSaveText(key = SAVE_KEY): string | null {
+    const raw = getPlatform().getItem(key);
     if (!raw) return null;
-    const index = readIndex();
+    const index = readIndex(key);
     if (!index) return raw;   // 老存档：整份 JSON
-    const text = readSlot(index.slot, index.n, index.len);
+    const text = readSlot(key, index.slot, index.n, index.len);
     if (text !== null) return text;
     console.warn('[SaveGame] 最新存档段不全，读上一份');
-    return index.prev ? readSlot(index.prev.slot, index.prev.n, index.prev.len) : null;
+    return index.prev ? readSlot(key, index.prev.slot, index.prev.n, index.prev.len) : null;
 }
 
 /** 写存档。返回 false 表示存储写失败（配额满等），调用方据此提示玩家 */
-export function writeSave(state: SimState, model: TownModel): boolean {
+export function writeSave(state: SimState, model: TownModel, key = SAVE_KEY): boolean {
     const file: SaveFile = {
         version: SAVE_VERSION,
         savedAt: Date.now(),
@@ -191,7 +191,7 @@ export function writeSave(state: SimState, model: TownModel): boolean {
         console.error('[SaveGame] 存档序列化失败（状态里有循环引用？）', e);
         return false;
     }
-    return writeSaveText(text);
+    return writeSaveText(text, key);
 }
 
 /**
@@ -200,8 +200,8 @@ export function writeSave(state: SimState, model: TownModel): boolean {
  * 任何异常都变成 { ok: false }，不往外抛：
  * 存档坏了只该回到新游戏，不该白屏。
  */
-export function readSave(): LoadResult {
-    const text = readSaveText();
+export function readSave(key = SAVE_KEY): LoadResult {
+    const text = readSaveText(key);
     if (!text) return { ok: false, reason: 'empty' };
 
     let raw: any;
@@ -231,11 +231,28 @@ export function readSave(): LoadResult {
     return { ok: true, save: migrated };
 }
 
-/** 删档（重开一局用） */
-export function clearSave(): void {
+/** 每座城独立提交 A/B 槽，不另存一份可能失同步的总目录。 */
+export function profileKey(id: number): string {
+    return id === 1 ? SAVE_KEY : `${SAVE_KEY}-profile-${id}`;
+}
+
+export function listProfiles() {
     const p = getPlatform();
-    for (const slot of SLOTS) for (let i = 0; p.getItem(chunkKey(slot, i)) !== null; i++) p.removeItem(chunkKey(slot, i));
-    p.removeItem(SAVE_KEY);
+    const ids = (p.keys?.() ?? []).filter(key => /^county-save-v1-profile-[1-9]\d*$/.test(key))
+        .map(key => Number(key.slice(key.lastIndexOf('-') + 1))).filter(id => id > 1 && Number.isSafeInteger(id));
+    if (p.getItem(SAVE_KEY) !== null) ids.push(1);
+    return ids.map(id => {
+        const save = readSave(profileKey(id)).save;
+        return { id, readable: !!save, month: save?.sim.month ?? 0,
+            population: save?.sim.residents.length ?? 0, savedAt: save?.savedAt ?? 0 };
+    }).sort((a, b) => b.savedAt - a.savedAt || b.id - a.id);
+}
+
+/** 删档（重开一局用） */
+export function clearSave(key = SAVE_KEY): void {
+    const p = getPlatform();
+    for (const slot of SLOTS) for (let i = 0; p.getItem(chunkKey(key, slot, i)) !== null; i++) p.removeItem(chunkKey(key, slot, i));
+    p.removeItem(key);
 }
 
 /**
@@ -273,7 +290,7 @@ export class SaveManager {
     private _onHideBound = () => this.saveNow();
     private _hooked = false;
 
-    constructor(getState: () => SimState | null, getTown: () => TownModel | null) {
+    constructor(getState: () => SimState | null, getTown: () => TownModel | null, private readonly key = SAVE_KEY) {
         this._getState = getState;
         this._getTown = getTown;
     }
@@ -283,7 +300,7 @@ export class SaveManager {
         const state = this._getState();
         const town = this._getTown();
         if (!state || !town) return false;
-        return writeSave(state, town);
+        return writeSave(state, town, this.key);
     }
 
     /** 接上平台的切后台事件，开始自动存 */

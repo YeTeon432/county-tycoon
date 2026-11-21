@@ -1,5 +1,6 @@
 import { townAudio } from '../core/TownAudio';
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { ArtLibrary } from '../core/ArtLibrary';
 import { InputGuard } from '../core/InputGuard';
 import { getPlatform } from '../platform/Platform';
 import { SimApi } from '../core/sim/SimApi';
@@ -7,7 +8,7 @@ import { Notice, Resident } from '../core/sim/types';
 import { openBulletin } from './Bulletin';
 import { Portrait } from './Portrait';
 import { TopBar } from './TopBar';
-import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
+import { drawGraphicsOnEnable, drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, makeButton, UI_COLOR, UI_FONT, UI_HUD, UI_PALETTE } from './UiTheme';
 
 const { ccclass } = _decorator;
 
@@ -55,7 +56,10 @@ export class NoticeLayer extends Component {
     private _card: Node | null = null;
     private _cardTimer = 0;
 
-    static create(parent: Node, sim: SimApi): NoticeLayer {
+    art: ArtLibrary | null = null;
+    private goResearch!: () => void;
+
+    static create(parent: Node, sim: SimApi, goResearch: () => void): NoticeLayer {
         const node = new Node('NoticeLayer');
         node.layer = Layers.Enum.UI_2D;
         const vis = view.getVisibleSize();
@@ -63,6 +67,7 @@ export class NoticeLayer extends Component {
         parent.addChild(node);
         const c = node.addComponent(NoticeLayer);
         c._sim = sim;
+        c.goResearch = goResearch;
         c.build();
         return c;
     }
@@ -203,8 +208,15 @@ export class NoticeLayer extends Component {
     /** 展开 / 收起最近 12 条 */
     private toggleList(): void {
         if (this._list) { this.closeList(); return; }
+        this.showBulletin(false);
+    }
+
+    private showBulletin(promotions: boolean): void {
+        this.closeList();
+        if (!this._sim) return;
         if (this._hornDot) this._hornDot.active = false;
-        const box = openBulletin(this.node.parent!, this.history, () => this.closeList());
+        const box = openBulletin(this.node.parent!, this.history, this._sim.state, this.art, promotions,
+            () => this.closeList(), () => { this.closeList(); this.goResearch(); });
         InputGuard.add(box, 'panel');
         this._list = box;
     }
@@ -262,16 +274,25 @@ export class NoticeLayer extends Component {
         const l2 = makeLabel(card, 'Line', line, UI_FONT.body, UI_COLOR.textDim, W - 60);
         l2.overflow = Label.Overflow.RESIZE_HEIGHT;
         l2.node.setPosition(0, -50, 0);
-        const tip = makeLabel(card, 'Tip', '点任意处继续', UI_FONT.small, UI_COLOR.textDim, W);
-        tip.node.setPosition(0, -H / 2 + 36, 0);
-        card.setScale(0.6, 0.6, 1);
-        tween(card).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-        root.on(Node.EventType.TOUCH_END, () => {
+        const dismiss = () => {
             InputGuard.remove(root);
+            root.active = false;
             root.destroy();
             this._celebrate = null;
+        };
+        const continueBtn = makeButton(card, 'Continue', '继续经营', 152, 56, 'secondary', dismiss);
+        continueBtn.node.setPosition(-94, -H / 2 + 49, 0);
+        const details = makeButton(card, 'Changes', '查看变化', 164, 56, 'primary', () => {
+            dismiss();
+            this.showBulletin(true);
+        });
+        details.node.setPosition(88, -H / 2 + 49, 0);
+        card.setScale(0.6, 0.6, 1);
+        tween(card).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        root.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            if (event.target === root || event.target === card) dismiss();
         }, this);
-        InputGuard.add(root);
+        InputGuard.add(root, 'panel');
         this._celebrate = root;
         townAudio.event('promote');
     }

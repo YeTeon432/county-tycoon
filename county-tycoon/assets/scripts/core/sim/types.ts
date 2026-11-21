@@ -242,7 +242,34 @@ export interface MoneyFlows {
     outflow: { goodsCost: number; upkeep: number; construction: number; fuel: number; leavers: number; privateProfit: number; research: number; subsidy: number; talent: number };
 }
 
+export const LEVEL_NAME: Record<TownLevel, string> = {
+    village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县',
+};
+
+export interface PromotionProject {
+    id: string;
+    name: string;
+    artId: string;
+    newlyAvailable: boolean;
+    cost: number;
+    days: number;
+    effect: string;
+    missing: string[];
+}
+
+export interface PromotionRecord {
+    from: TownLevel;
+    to: TownLevel;
+    month: number;
+    population: number;
+    reward: number;
+    changes: string[];
+    projects: PromotionProject[];
+}
+
 export interface SimState {
+    /** 晋升时的实况，随存档保留。旧存档从下一次实际晋升开始记录。 */
+    promotions?: PromotionRecord[];
     version: 1;
     seed: number;
     rngState: number;            // 随机数生成器当前状态，存档后接着算结果一致

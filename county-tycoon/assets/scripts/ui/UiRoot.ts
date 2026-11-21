@@ -2,7 +2,7 @@ import { townAudio } from '../core/TownAudio';
 import { _decorator, BlockInputEvents, Component, JsonAsset, Layers, Node, profiler, resources, UIOpacity, UITransform } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
-import { MonthlyReport, TownLevel } from '../core/sim/types';
+import { MonthlyReport, TownLevel, LEVEL_NAME } from '../core/sim/types';
 import { TownModel } from '../core/TownModel';
 import { Portrait } from './Portrait';
 import { BuildingBar } from './BuildingBar';
@@ -127,7 +127,7 @@ export class UiRoot extends Component {
         this.buildTopBar();
         this.buildClock();
         this.buildTrackChip();
-        this._notices = NoticeLayer.create(this.node, this.sim);
+        this._notices = NoticeLayer.create(this.node, this.sim, () => this.openCenter('research'));
         this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
@@ -158,6 +158,7 @@ export class UiRoot extends Component {
     /** 给建造栏缩略图用的贴图仓库（WorldView 那一份）。集成在 WorldView 加 `get art()` 后调这个最干净 */
     setArt(art: ArtLibrary): void {
         if (this._bar) this._bar.setArt(art);
+        if (this._notices) this._notices.art = art;
         Portrait.setArt(art);
         CenterPanel.setArt(art);
     }
@@ -581,8 +582,13 @@ export class UiRoot extends Component {
 
     private onLevelUp(lv: TownLevel): void {
         this.onTownUpgraded?.();
-        const name: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
-        if (this._notices) this._notices.celebrate(`咱们成了「${name[lv]}」！`, '新的产业研究开放了，上级还拨了一笔发展奖励。去发展中心看看新目标吧。');
+        const history = this.sim?.state.promotions ?? [];
+        const record = history[history.length - 1];
+        if (record && record.to === lv) {
+            const ready = record.projects.find(p => p.newlyAvailable && !p.missing.length);
+            const line = ready ? `现在可以研究「${ready.name}」` : record.changes[0] ?? '晋升详情已记入游戏公告';
+            this._notices?.celebrate(`${LEVEL_NAME[record.from]} → ${LEVEL_NAME[lv]}`, line);
+        }
         if (this._bar) this._bar.refreshUnlocks();
         if (this._topBar) this._topBar.refresh();
     }

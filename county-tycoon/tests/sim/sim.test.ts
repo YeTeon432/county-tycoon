@@ -1119,6 +1119,77 @@ suite('研究 / 目标 / 心愿（D026 第二批）', () => {
         eq(sim.state.finance.funds, f0 + cfg.progress!.levelReward.town!);
     });
 
+    test('每次晋升单独留档，失败申请不写历史，读档不会重算日期、资金和人口差额', () => {
+        const cfg = loadFullConfig();
+        const town = basicTown(cfg);
+        const sim = new Simulation(cfg, town.view);
+        eq(sim.upgradeLevel(), null);
+        eq(sim.state.promotions?.length ?? 0, 0);
+        sim.state.finance.funds = 0;
+        for (const level of ['village', 'town', 'county', 'city'] as const) {
+            cfg.progress!.goals[level] = [{ kind: 'pop', target: 1, text: '有居民', of: [] }];
+            sim.state.month += 12;
+            ok(sim.upgradeLevel());
+        }
+        const records = sim.state.promotions!;
+        eq(records.map(r => r.to).join(','), 'town,county,city,top100');
+        eq(records[0].reward, 30000);
+        eq(records[0].month, 12);
+        const road = records[0].projects.find(p => p.id === 'r-road')!;
+        ok(road.newlyAvailable);
+        eq(road.missing.length, 0, '到账后的奖励付得起城市道路研究');
+        const school = records[0].projects.find(p => p.id === 'r-school')!;
+        ok(school.missing.some(m => m.indexOf(`还差 ${30 - records[0].population} 位居民`) >= 0));
+        ok(school.missing.some(m => m.indexOf('10,000') >= 0));
+        eq(records[2].projects.filter(p => p.newlyAvailable).length, 0);
+        eq(records[3].projects.filter(p => p.newlyAvailable).length, 0);
+        eq(sim.upgradeLevel(), null);
+        eq(records.length, 4);
+        const original = JSON.stringify(records);
+        sim.state.finance.funds = 1000000;
+        sim.stepMonth();
+        const save = JSON.parse(JSON.stringify(sim.state));
+        const loaded = new Simulation(cfg, town.view, { state: save });
+        eq(JSON.stringify(loaded.state.promotions), original);
+        delete save.promotions;
+        const old = new Simulation(cfg, town.view, { state: save });
+        eq(old.state.promotions?.length ?? 0, 0, '不替旧档编造历史');
+    });
+
+    test('同样升镇，26 人的学校还差 4 人，32 人的学校可以立刻研究', () => {
+        for (const population of [26, 32]) {
+            const cfg = loadFullConfig();
+            cfg.progress!.goals.village = [{ kind: 'pop', target: 1, text: '有居民', of: [] }];
+            const sim = new Simulation(cfg, basicTown(cfg).view);
+            while (sim.state.residents.length < population) {
+                sim.state.residents.push({ ...sim.state.residents[0], id: sim.state.nextResidentId++ });
+            }
+            eq(sim.upgradeLevel(), 'town');
+            const school = sim.state.promotions![0].projects.find(p => p.id === 'r-school')!;
+            eq(school.missing.length === 0, population >= 30);
+            if (population < 30) ok(school.missing[0].indexOf('还差 4 位居民') >= 0);
+            eq(sim.startResearch(school.id) === null, school.missing.length === 0);
+        }
+    });
+
+    test('晋升记录同时列出缺少的建筑、学历、经费和研究位，跳过已研究和进行中的项目', () => {
+        const cfg = loadFullConfig();
+        const sim = new Simulation(cfg, basicTown(cfg).view);
+        sim.state.level = 'town';
+        cfg.progress!.goals.town = [{ kind: 'pop', target: 1, text: '有居民', of: [] }];
+        sim.state.research = [{ id: 'r-road', total: 2, left: 1 }];
+        sim.state.researched = ['r-milk-tea'];
+        for (const p of sim.state.residents) p.education = 0;
+        cfg.progress!.research.find(r => r.id === 'r-electronics')!.cost = 200000;
+        sim.state.finance.funds = 0;
+        eq(sim.upgradeLevel(), 'county');
+        const projects = sim.state.promotions![0].projects;
+        const gaps = projects.find(p => p.id === 'r-electronics')!.missing.join(' ');
+        for (const word of ['学校', '5 位高中', '120,000', '研究位']) ok(gaps.indexOf(word) >= 0, gaps);
+        ok(!projects.some(p => p.id === 'r-road' || p.id === 'r-milk-tea'));
+        ok(projects.every(p => p.missing.length > 0));
+    });
+
     test('心愿：附近缺店 → 冒心愿（有建议）→ 盖了店 → 实现、幸福度涨、计数', () => {
         const cfg = loadFullConfig();
         cfg.progress!.wishes.chance = 1;

@@ -1,6 +1,6 @@
 import { _decorator, Color, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
-import { Education, Offer, TownLevel } from '../core/sim/types';
+import { Education, Offer, TownLevel, LEVEL_NAME } from '../core/sim/types';
 import { centerArtId } from '../core/BuildingConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { Panel } from './Panel';
@@ -20,7 +20,6 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
     { key: 'invest', label: '招商引资', icon: 'coin' },
     { key: 'streets', label: '特色街道', icon: 'shop' },
 ];
-const LEVEL_NAME: Record<TownLevel, string> = { village: '村口', town: '镇上', county: '县城', city: '县级市', top100: '百强县' };
 const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'county', county: 'city', city: 'top100' };
 
 const INK = new Color(37, 72, 66);
@@ -321,7 +320,7 @@ export class CenterPanel extends Panel {
         const reward = makeLabelLeft(body, 'Reward', '发展奖励', UI_FONT.body, INK, W - 310);
         reward.isBold = true;
         reward.node.setPosition(-W / 2 + 56, y + 15, 0);
-        const tip = makeLabelLeft(body, 'Tip', '解锁产业研究，获得建设资金', UI_FONT.small, UI_COLOR.textDim, W - 310);
+        const tip = makeLabelLeft(body, 'Tip', '晋升后领取建设资金，查看本次发展变化', UI_FONT.small, UI_COLOR.textDim, W - 310);
         tip.node.setPosition(-W / 2 + 56, y - 16, 0);
         const all = goals.length > 0 && done === goals.length;
         const btn = makeButton(body, 'Upgrade', all ? '申请升级' : `还差 ${goals.length - done} 项`, 198, 62,

@@ -1,5 +1,7 @@
 import { BlockInputEvents, Graphics, Node, resources, Sprite, SpriteFrame, UITransform, view } from 'cc';
-import { Notice } from '../core/sim/types';
+import { ArtLibrary } from '../core/ArtLibrary';
+import { showPromotions } from './PromotionBulletin';
+import { Notice, SimState } from '../core/sim/types';
 import { ListRow, ScrollList } from './ScrollList';
 import { drawHudTile, drawShadow, makeLabel, makeLabelLeft, makePanelNode, makeRoundButton, UI_COLOR, UI_FONT, UI_HUD, UI_RADIUS } from './UiTheme';
 
@@ -36,7 +38,8 @@ function adviceRow(row: Node, index: number, w: number, h: number): void {
     body.node.setPosition(tx, -29, 0);
 }
 
-export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text' | 'kind'>[], close: () => void): Node {
+export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text' | 'kind'>[], state: SimState,
+    art: ArtLibrary | null, startWithPromotion: boolean, close: () => void, goResearch: () => void): Node {
     const { width, height } = view.getVisibleSize();
     const root = makePanelNode(parent, 'Bulletin', width, height);
     root.addComponent(BlockInputEvents);
@@ -48,23 +51,16 @@ export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text'
     shade.on(Node.EventType.TOUCH_END, close);
 
     const w = Math.min(1120, width - 44), rowH = 156;
-    const h = Math.min(3 * rowH + 102, height - 156);
-    const box = makePanelNode(root, 'Board', w, h);
+    const box = makePanelNode(root, 'Board', w, 0);
     box.on(Node.EventType.TOUCH_END, () => {});
     const g = box.addComponent(Graphics);
-    const left = -w / 2, top = h / 2;
-    drawShadow(g, left, -top, w, h, UI_RADIUS, 4);
-    drawHudTile(g, left, -top, w, h, UI_RADIUS, UI_HUD.base, UI_HUD.rim);
-    g.fillColor = UI_COLOR.panel;
-    g.roundRect(left + 7, -top + 7, w - 14, h - 87, 10);
-    g.fill();
-
+    const left = -w / 2;
     const head = makePanelNode(box, 'Header', w - 32, 72);
-    head.setPosition(0, top - 40, 0);
-    const tabW = Math.min(164, w * 0.21);
+    const titles = ['开局建议', '晋升公告', '县城消息'];
+    const tabW = Math.min(164, w * 0.17);
     const closeX = w / 2 - 45;
     const titleX = left + 32;
-    const tabsLeft = closeX - 48 - tabW * 2;
+    const tabsLeft = closeX - 48 - tabW * titles.length;
     const title = makeLabelLeft(head, 'Title', '游戏公告', UI_FONT.title, UI_COLOR.text, tabsLeft - titleX - 16);
     title.isBold = true;
     title.node.setPosition(titleX, 0, 0);
@@ -72,10 +68,9 @@ export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text'
     cross.setActive(true);
     cross.node.setPosition(closeX, 0, 0);
 
-    const listW = w - 48, listH = h - 102;
-    let list: ScrollList | null = null;
+    const listW = w - 48;
+    let page: Node | null = null;
     let selectedTab = -1;
-    const titles = ['开局建议', '县城消息'];
     const tabs = titles.map((caption, i) => {
         const tab = makePanelNode(head, 'Tab' + i, tabW - 6, 50);
         tab.setPosition(tabsLeft + tabW * (i + 0.5), 0, 0);
@@ -86,12 +81,19 @@ export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text'
     const select = (active: number) => {
         if (selectedTab === active) return;
         selectedTab = active;
-        if (list) {
-            list.node.active = false;
-            list.node.destroy();
-        }
-        list = ScrollList.mount(box, 'Entries', listW, listH);
-        list.node.setPosition(0, -36, 0);
+        const h = Math.min(active === 1 && state.promotions?.length ? 814 : 3 * rowH + 102, height - 110);
+        const top = h / 2, listH = h - 102;
+        box.getComponent(UITransform)!.setContentSize(w, h);
+        g.clear();
+        drawShadow(g, left, -top, w, h, UI_RADIUS, 4);
+        drawHudTile(g, left, -top, w, h, UI_RADIUS, UI_HUD.base, UI_HUD.rim);
+        g.fillColor = UI_COLOR.panel;
+        g.roundRect(left + 7, -top + 7, w - 14, h - 87, 10);
+        g.fill();
+        head.setPosition(0, top - 40, 0);
+        if (page) { page.active = false; page.destroy(); }
+        page = makePanelNode(box, 'Page', listW, listH);
+        page.setPosition(0, -36, 0);
         tabs.forEach(({ bg, label }, i) => {
             const on = i === active;
             bg.clear();
@@ -100,6 +102,11 @@ export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text'
             label.color = on ? UI_HUD.onAccent : UI_HUD.text;
             label.isBold = on;
         });
+        if (active === 1) {
+            showPromotions(page, listW, listH, state.promotions ?? [], art, goResearch, state.level === 'top100');
+            return;
+        }
+        const list = ScrollList.mount(page, 'Entries', listW, listH);
         if (active === 0) {
             list.setRows(advice.map((_, i) => ({ height: rowH, build: row => adviceRow(row, i, listW, rowH) })));
             return;
@@ -117,6 +124,6 @@ export function openBulletin(parent: Node, history: readonly Pick<Notice, 'text'
         list.setRows(rows);
     };
     tabs.forEach(({ tab }, i) => tab.on(Node.EventType.TOUCH_END, () => select(i)));
-    select(0);
+    select(startWithPromotion ? 1 : 0);
     return root;
 }

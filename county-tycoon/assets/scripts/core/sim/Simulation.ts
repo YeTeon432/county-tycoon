@@ -227,6 +227,39 @@ export class Simulation implements SimApi {
         return true;
     }
 
+    roadUpgradeQuote(): { count: number; cost: number } | null {
+        const dirt = this._cfg.building('dirt-road'), city = this._cfg.building('road');
+        if (!this.isUnlocked('road') || !dirt || !city) return null;
+        const count = this._town.allBuildings().filter(b => b.defId === 'dirt-road').length;
+        return { count, cost: count * Math.max(0, city.cost - dirt.cost) };
+    }
+
+    upgradeDirtRoads(replaceOnMap: (uids: ReadonlySet<number>) => boolean): string | null {
+        const quote = this.roadUpgradeQuote();
+        if (!quote) return '请先解锁城市道路';
+        if (!quote.count) return '全城已没有土路';
+        const gap = Math.ceil(quote.cost - this.state.finance.funds);
+        if (gap > 0) return `升级全部土路还差 ¥${gap.toLocaleString('en-US')}`;
+
+        const uids = new Set(this._town.allBuildings().filter(b => b.defId === 'dirt-road').map(b => b.uid));
+        if (!replaceOnMap(uids)) return '路网已变化，请重新查看升级费用';
+        // 开局道路只有地图记录，玩家后来铺的道路也有经营记录。
+        const registered = new Set<number>();
+        for (const b of this.state.buildings) {
+            if (!uids.has(b.uid)) continue;
+            b.defId = 'road';
+            registered.add(b.uid);
+        }
+        for (const uid of uids) {
+            if (!registered.has(uid)) this.state.buildings.push(Simulation.newBuilding(uid, 'road'));
+        }
+        this.state.finance.funds -= quote.cost;
+        this._constructionSpent += quote.cost;
+        this._flows.outflow.construction += quote.cost;
+        this._town.refresh?.();
+        return null;
+    }
+
     onDemolished(uid: number): void {
         this._town.refresh?.();
         this._distCache.clear();

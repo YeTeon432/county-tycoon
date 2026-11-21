@@ -289,6 +289,14 @@ export class TownModel {
         return placed;
     }
 
+    upgradeDirtRoads(cityRoad: BuildingDef, uids: ReadonlySet<number>): boolean {
+        const roads = this.allBuildings().filter(b => b.def.id === 'dirt-road');
+        if (roads.length !== uids.size || roads.some(b => !uids.has(b.uid)
+            || b.def.width !== cityRoad.width || b.def.height !== cityRoad.height)) return false;
+        for (const road of roads) road.def = cityRoad;
+        return true;
+    }
+
     /** 原地换成同尺寸的另一种建筑（住户自家翻盖，D026）。尺寸不同返回 false */
     replaceDef(uid: number, def: BuildingDef): boolean {
         let found = false;

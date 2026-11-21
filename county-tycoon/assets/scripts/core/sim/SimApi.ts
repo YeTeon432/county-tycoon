@@ -17,6 +17,8 @@ export interface SimApi {
      * dayProgress = 盖下的这一刻本月走到了哪儿（0..1，DayClock.progress）：工期从这里算起，不从月初算。
      */
     onBuilt(uid: number, defId: string, dayProgress?: number, branchOf?: number): boolean;
+    roadUpgradeQuote?(): { count: number; cost: number } | null;
+    upgradeDirtRoads?(replaceOnMap: (uids: ReadonlySet<number>) => boolean): string | null;
     branchOffer?(uid: number): { cost: number; jobs: number } | null;
     branchTransferCount?(uid: number, col: number, row: number, w: number, h: number): number;
     /** 玩家拆了一栋 */

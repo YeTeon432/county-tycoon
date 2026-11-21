@@ -176,7 +176,7 @@ export class GameRoot extends Component {
         sim.onMonth = () => {
             this.syncCenterAppearance();
             this.save();
-            if (this._branchSource !== undefined) this.updatePlacementHint();
+            if (this._branchSource !== undefined || this._view?.selectedBuilding?.id === 'road') this.updatePlacementHint();
         };
 
         townAudio.attach(this.node);
@@ -334,7 +334,9 @@ export class GameRoot extends Component {
     private updatePlacementHint(): void {
         const ui = this._ui, view = this._view;
         if (!ui || !view) return;
-        this._bar?.showCancelBuild(!!view.selectedBuilding);
+        const cityRoad = view.selectedBuilding?.id === 'road';
+        const quote = cityRoad ? this._sim?.roadUpgradeQuote?.() : null;
+        this._bar?.showBuildActions(!!view.selectedBuilding, !!quote?.count);
         // 预览中：能凑特色街道就提示（D026，DESIGN 21）
         const p = view.pending, sim = this._sim;
         if (this._branchSource !== undefined && view.selectedBuilding) {
@@ -356,6 +358,10 @@ export class GameRoot extends Component {
             ui.setPlacementHint(reach);
         } else if (view.demolishing) {
             ui.setPlacementHint('拆除模式：点选建筑，再按「拆除」');
+        } else if (cityRoad) {
+            ui.setPlacementHint(!quote ? '在发展中心研究城市道路后可铺设和升级'
+                : quote.count ? `点空地铺路 · 全城 ${quote.count} 格土路升级共 ¥${quote.cost.toLocaleString('en-US')}`
+                : '全城已没有土路 · 点空地铺设城市道路');
         } else if (view.selectedBuilding) {
             ui.setPlacementHint(view.selectedBuilding.flat
                 ? `修路：${view.selectedBuilding.name}，点地块直接铺`
@@ -515,6 +521,20 @@ export class GameRoot extends Component {
         const bar = barRoot.addComponent(BuildingBar);
         this._bar = bar;
         bar.build(defs);
+        bar.onUpgradeRoads = () => {
+            const view = this._view, def = view?.selectedBuilding, model = this._model;
+            if (!view || def?.id !== 'road' || !model || !this._sim?.upgradeDirtRoads) return;
+            const reason = this._sim.upgradeDirtRoads(uids => model.upgradeDirtRoads(def, uids));
+            if (reason) {
+                townAudio.action('blocked');
+                this._ui?.say(reason);
+                return;
+            }
+            townAudio.action('road');
+            view.redrawTown();
+            this._ui?.notifyBuilt();
+            view.onTownChanged?.();
+        };
         bar.onCancelBuild = () => this._view?.cancelPending();
 
         bar.onSelect = (def) => {

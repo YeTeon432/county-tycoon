@@ -1207,10 +1207,29 @@ export class Simulation implements SimApi {
         const ids = jobTarget ? [jobTarget.defId] : eligible.map((e) => e.id);
         const vacancy = this.bestJobFor(r, world, jobTarget);
         const guidance = vacancy ? { hint: `${this.buildingName(vacancy.building.defId)}正在招${vacancy.slot.title}`, suggest: '' }
-            : this.suggestFor(ids, '建一座');
+            : this.jobBuildHint(ids, jobTarget, world);
         const looking = r.monthsUnemployed > 0 ? `我已经 ${r.monthsUnemployed} 个月没找到工作了` : '我想找一份工作';
         return { kind: 'job', jobTarget, text: jobTarget ? `${looking}，想去${this.buildingName(jobTarget.defId)}做${jobTarget.title}` : looking,
             ...guidance, radius: 0 };
+    }
+
+    private jobBuildHint(ids: string[], target: Wish['jobTarget'], world: World): { hint: string; suggest: string } {
+        const site = this.state.construction?.find(c => ids.includes(c.defId));
+        if (site) return { hint: `${this.buildingName(site.defId)}正在施工，完工后再看空岗。`, suggest: '' };
+        if (target) return this.suggestFor([target.defId], '建一座');
+
+        const examples = ids.filter(id => this.isUnlocked(id)).slice(0, 3);
+        if (!examples.length) return this.suggestFor(ids, '建一座');
+        const build = `可增设岗位，如建${examples.map(id => this.buildingName(id)).join('、')}。`;
+        // 先说明最近一处适合他的单位为什么没有空岗。
+        const employer = this.state.buildings.slice().reverse().find(b => ids.includes(b.defId));
+        if (!employer) return { hint: build, suggest: '' };
+        const econ = this._cfg.building(employer.defId)!;
+        const name = this.buildingName(employer.defId);
+        let reason = `${name}已招满。`;
+        if (employer.freezeMonths) reason = `${name}暂停招聘。`;
+        else if (staffing(employer, econ, world.residentsById).open.length) reason = `${name}的空岗要求更高学历。`;
+        return { hint: `${reason}\n${build}`, suggest: '' };
     }
 
     private referralOpening(id: number, uid?: number, title?: string): Opening | null {

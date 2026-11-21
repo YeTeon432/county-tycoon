@@ -1576,10 +1576,34 @@ suite('覆盖范围：放置预览 / 心愿范围', () => {
 });
 
 suite('居民引导与用工', () => {
+    test('不限意向的旧心愿列出多个选择，已开工的快递驿站完工后可以就业', () => {
+        const m = new MapBuilder();
+        m.build('house', 2, 2);
+        const sim = new Simulation(loadFullConfig(), m.view(), { seed: 81 });
+        const r = sim.state.residents[0];
+        r.savings = 0;
+        r.wish = { kind: 'job', text: '', hint: '建一座早餐铺', suggest: 'breakfast', radius: 0, since: 0, until: 9 };
+        sim.openGuidance(r.id);
+        ok(r.wish!.hint.includes('快递驿站') && r.wish!.hint.includes('小作坊'));
+        ok(!r.wish!.hint.includes('奶茶店'), '只举已解锁的例子');
+        eq(r.wish!.suggest, '');
+        eq(r.wish!.until, 9);
+
+        const shop = m.build('parcel', 4, 2);
+        ok(sim.onBuilt(shop, 'parcel'));
+        sim.openGuidance(r.id);
+        ok(r.wish!.hint.includes('快递驿站正在施工'));
+        eq(sim.jobReferral(r.id), null);
+        sim.stepMonth();
+        eq(r.jobId, shop);
+        eq(r.jobTitle, '快递员');
+        ok(r.wish?.kind !== 'job');
+    });
+
     test('开局介绍工作：按扣分排序、重查空岗、成功才结算一次', () => {
         const m = new MapBuilder();
         m.build('house', 2, 2); m.build('house', 3, 2);
-        const shop = m.build('breakfast', 4, 2);
+        const shop = m.build('parcel', 4, 2);
         const sim = new Simulation(loadFullConfig(), m.view(), { seed: 81 });
         const [a, b] = sim.state.residents;
         for (const r of [a, b]) {
@@ -1594,6 +1618,8 @@ suite('居民引导与用工', () => {
         eq(sim.introduceJob(a.id, shop, '不合适的岗位'), false);
         eq(sim.introduceJob(a.id, shop, offered.title), true);
         eq(sim.introduceJob(b.id, shop, offered.title), false);
+        sim.openGuidance(b.id);
+        ok(b.wish!.hint.includes('快递驿站已招满'));
         eq(sim.introduceJob(a.id, shop, offered.title), false);
         eq(sim.state.wishesDone, 1);
         eq(a.jobId, shop);

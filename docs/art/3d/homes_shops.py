@@ -17,11 +17,11 @@ def house_terrace():
 
 
 def lane_house(terrace):
-    plaster = '#e3ceb1' if terrace else '#e7d9c5'
-    brick = '#a85e48' if terrace else '#916147'
-    trim = '#f6e7c8'
-    glass = '#729291' if terrace else '#668895'
-    lot(1, 1, '#b9a58d')
+    plaster = '#ffebc9' if terrace else '#fff1d9'
+    brick = '#e99072' if terrace else '#daa176'
+    trim = '#fff5db'
+    glass = '#a7d4d4' if terrace else '#94cbe1'
+    lot(1, 1, '#e2cbb0')
     # 主体后退，留下整段有深度的廊道。楼梯间凸出到街面一侧。
     fh = 0.29
     top = Z0 + 4 * fh
@@ -29,8 +29,8 @@ def lane_house(terrace):
     bay_x = 0.13 if terrace else 0.39
     box(0.09, 0.32, Z0, 0.80, 0.55, 4 * fh, plaster, bevel=0.01)
     box(tower_x, 0.18, Z0, 0.22, 0.44, 4 * fh, brick)
-    box(0.08, 0.11, Z0, 0.82, 0.22, 0.032, '#967f68')
-    box(bay_x, 0.291, Z0 + 0.032, 0.40, 0.031, 0.231, '#5b4538')
+    box(0.08, 0.11, Z0, 0.82, 0.22, 0.032, '#c1a387')
+    box(bay_x, 0.291, Z0 + 0.032, 0.40, 0.031, 0.231, '#9b735b')
     window_front(bay_x + 0.21, Z0 + 0.055, 0.17, 0.19, y=0.29, frame=trim, glass=glass, sill=False)
     for f in range(4):
         z = Z0 + f * fh
@@ -38,26 +38,26 @@ def lane_house(terrace):
         window_side(0.49, z + 0.065, 0.25, 0.17, 0.89, frame=trim, glass=glass)
         if f == 0:
             continue
-        window_front(bay_x + 0.055, z + 0.035, 0.34, 0.21, y=0.32, frame='#84664e', glass=glass, sill=False)
+        window_front(bay_x + 0.055, z + 0.035, 0.34, 0.21, y=0.32, frame='#b78965', glass=glass, sill=False)
         box(bay_x + 0.207, 0.287, z + 0.047, 0.023, 0.021, 0.186, trim)
         # 厚楼板、矮砌墙和架空扶手，留一道背光的空隙。
         box(bay_x - 0.03, 0.12, z, 0.51, 0.212, 0.04, trim)
         box(bay_x - 0.03, 0.12, z + 0.04, 0.51, 0.025, 0.064, plaster)
         for dx in (0, 0.23, 0.47):
             box(bay_x - 0.02 + dx, 0.126, z + 0.104, 0.014, 0.014, 0.033, glass)
-        box(bay_x - 0.03, 0.12, z + 0.137, 0.51, 0.023, 0.013, '#755443')
+        box(bay_x - 0.03, 0.12, z + 0.137, 0.51, 0.023, 0.013, '#a1775d')
         if f == 2:
             box(bay_x + 0.26, 0.14, z + 0.065, 0.17, 0.075, 0.055, brick)
-            bush(bay_x + 0.34, 0.174, 0.066, z + 0.11, '#668558')
+            bush(bay_x + 0.34, 0.174, 0.066, z + 0.11, '#8ab86b')
     box(0.07, 0.17, top, 0.84, 0.72, 0.04, trim)
     parapet(0.09, 0.20, top + 0.04, 0.8, 0.67, h=0.063, t=0.026, m=plaster)
     if terrace:
         box(0.27, 0.45, top + 0.04, 0.54, 0.33, 0.14, plaster)
-        prism(0.23, 0.40, top + 0.18, 0.63, 0.43, 0.12, '#995540')
+        prism(0.23, 0.40, top + 0.18, 0.63, 0.43, 0.12, '#e98668')
         window_front(0.39, top + 0.058, 0.23, 0.105, y=0.45, frame=trim, glass=glass, sill=False)
     else:
         box(0.10, 0.23, top + 0.04, 0.28, 0.41, 0.22, brick)
-        box(0.075, 0.205, top + 0.26, 0.33, 0.46, 0.04, '#655347')
+        box(0.075, 0.205, top + 0.26, 0.33, 0.46, 0.04, '#bc8668')
         window_front(0.17, top + 0.105, 0.14, 0.11, y=0.23, frame=trim, glass=glass, sill=False)
         solar_heater(0.44, 0.53, top + 0.04, w=0.31)
 
@@ -65,18 +65,18 @@ def lane_house(terrace):
 @sprite('milk-tea', 1, 1)
 def milk_tea():
     """木窗茶铺：街角取茶台、浆果色布篷、斜瓦顶和大杯招牌。"""
-    lot(1, 1, '#c5ac8f')
-    wood, cream, berry = '#704b37', '#ffebc8', '#a7434b'
-    box(0.09, 0.32, Z0, 0.78, 0.55, 0.48, '#d7b68b', bevel=0.012)
-    box(0.08, 0.29, Z0, 0.81, 0.59, 0.075, '#936b53')
+    lot(1, 1, '#ebd3b2')
+    wood, cream, berry = '#a57351', '#fff1d5', '#f17977'
+    box(0.09, 0.32, Z0, 0.78, 0.55, 0.48, '#f9dca5', bevel=0.012)
+    box(0.08, 0.29, Z0, 0.81, 0.59, 0.075, '#c59974')
     box(0.14, 0.295, Z0 + 0.075, 0.46, 0.035, 0.32, wood)
-    box(0.172, 0.283, Z0 + 0.16, 0.396, 0.018, 0.196, '#394f49')
-    box(0.119, 0.16, Z0 + 0.137, 0.51, 0.16, 0.034, '#e7c392')
-    for x, color in ((0.22, cream), (0.29, '#d89b67')):
+    box(0.172, 0.283, Z0 + 0.16, 0.396, 0.018, 0.196, '#678e90')
+    box(0.119, 0.16, Z0 + 0.137, 0.51, 0.16, 0.034, '#ffe0a8')
+    for x, color in ((0.22, cream), (0.29, '#efb97e')):
         cyl(x, 0.227, Z0 + 0.171, 0.022, 0.057, color, r2=0.027)
     box(0.65, 0.302, Z0, 0.17, 0.025, 0.33, wood)
-    window_front(0.663, Z0 + 0.09, 0.145, 0.212, y=0.298, frame=wood, glass='#55716c', sill=False)
-    window_side(0.405, Z0 + 0.116, 0.36, 0.228, 0.87, frame=wood, glass='#587772')
+    window_front(0.663, Z0 + 0.09, 0.145, 0.212, y=0.298, frame=wood, glass='#97c3c2', sill=False)
+    window_side(0.405, Z0 + 0.116, 0.36, 0.228, 0.87, frame=wood, glass='#95c6c7')
     box(0.863, 0.48, Z0 + 0.12, 0.036, 0.024, 0.22, wood)
     # 前檐布篷从墙面斜挑至人行道，两端用立柱承托。
     for x in (0.115, 0.834):
@@ -87,24 +87,24 @@ def milk_tea():
         box(x, 0.075, Z0 + 0.361, 0.115, 0.264, 0.023, c, rot=(0.27, 0, 0))
         box(x, 0.076, Z0 + 0.303, 0.115, 0.024, 0.037, c)
     box(0.062, 0.278, Z0 + 0.465, 0.84, 0.63, 0.045, wood)
-    prism(0.05, 0.262, Z0 + 0.51, 0.864, 0.65, 0.19, '#647f72')
+    prism(0.05, 0.262, Z0 + 0.51, 0.864, 0.65, 0.19, '#84bca9')
     # 瓦垄沿两坡伸向檐口；加宽间距，远景也能读出屋面的方向。
     for i in range(7):
         x = 0.085 + i * 0.126
         for y, pitch in ((0.257, 0.529), (0.581, -0.529)):
-            box(x, y - 0.023, Z0 + 0.600, 0.017, 0.376, 0.014, '#7d9483', rot=(pitch, 0, 0))
-    box(0.038, 0.567, Z0 + 0.677, 0.888, 0.04, 0.03, '#50685d')
+            box(x, y - 0.023, Z0 + 0.600, 0.017, 0.376, 0.014, '#acd3b9', rot=(pitch, 0, 0))
+    box(0.038, 0.567, Z0 + 0.677, 0.888, 0.04, 0.03, '#689e92')
     box(0.21, 0.263, Z0 + 0.407, 0.47, 0.035, 0.123, wood)
     text('奶茶', 0.445, 0.257, Z0 + 0.464, 0.102, M('#ffdf9c', emit=0.45), 'front')
     cx, cy, cz = 0.66, 0.59, Z0 + 0.657
-    cyl(cx, cy, cz, 0.105, 0.255, '#d5a570', r2=0.139)
+    cyl(cx, cy, cz, 0.105, 0.255, '#f1bf85', r2=0.139)
     cyl(cx, cy, cz + 0.085, 0.123, 0.067, berry, r2=0.131)
     for dx, dz in ((-0.050, 0.040), (0.014, 0.029), (0.06, 0.056)):
         ball(cx + dx, cy - 0.094, cz + dz, 0.022, '#5b392e', 1)
     cyl(cx, cy, cz + 0.255, 0.15, 0.029, cream)
     cyl(cx + 0.028, cy, cz + 0.278, 0.014, 0.13, berry, 8, rot=(0, 0.22, 0))
-    cyl(0.908, 0.23, Z0, 0.060, 0.083, '#a76e50')
-    bush(0.908, 0.23, 0.069, Z0 + 0.083, '#71885b')
+    cyl(0.908, 0.23, Z0, 0.060, 0.083, '#d38e67')
+    bush(0.908, 0.23, 0.069, Z0 + 0.083, '#94b971')
 
 
 # ================================================================ 本文件自用零件

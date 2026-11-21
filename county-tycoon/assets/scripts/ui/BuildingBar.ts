@@ -89,6 +89,7 @@ export class BuildingBar extends Component {
     private static readonly THUMB_H = 84;
 
     onSelect: ((def: BuildingDef | null) => void) | null = null;
+    onCancelBuild: (() => void) | null = null;
     onDemolishToggle: ((on: boolean) => void) | null = null;
     /** 点了未解锁 / 买不起的卡片：给一句提示（UiRoot 接到顶栏提示条） */
     onNotice: ((text: string) => void) | null = null;
@@ -116,6 +117,7 @@ export class BuildingBar extends Component {
     private _drawDemolish: (() => void) | null = null;
     private _sheet: Node | null = null;
     private _hint: Label | null = null;
+    private _cancelBuild: Node | null = null;
     private _selectedId: string | null = null;
 
     private _sim: SimApi | null = null;
@@ -250,7 +252,8 @@ export class BuildingBar extends Component {
             else this.buildTabSymbol(node, t.key === '工业');
             node.on(Node.EventType.TOUCH_END, () => {
                 if (this._dragging) return;
-                if (this._tab !== t.key) townAudio.action('tap');
+                if (this._cancelBuild?.active) this.onCancelBuild?.();
+                else if (this._tab !== t.key) townAudio.action('tap');
                 this.selectTab(t.key);
             }, this);
             this._tabs.push({ key: t.key, node, g, label, w });
@@ -284,7 +287,7 @@ export class BuildingBar extends Component {
         g.fill();
     }
 
-    /** 切页签（开局提示、外部跳转也能调）。不清当前选中的建筑 */
+    /** 切页签（开局提示、外部跳转也能调）。 */
     selectTab(key: string): void {
         if (!BAR_TABS.some((t) => t.key === key)) return;
         this._tab = key;
@@ -647,6 +650,28 @@ export class BuildingBar extends Component {
         this._hint.enableWrapText = true;
         this._hint.node.getComponent(UITransform)!.setContentSize(width - 36, height - 8);
         this._hint.node.setPosition(-width / 2 + 24, 0, 0);
+
+        const btnW = 112, btnH = 48;
+        const cancel = makePanelNode(node, 'CancelBuild', btnW, btnH);
+        cancel.setPosition(width / 2 - 6 - btnW / 2, 0, 0);
+        drawGraphicsOnEnable(cancel, g => {
+            drawHudTile(g, -btnW / 2, -btnH / 2, btnW, btnH, 9, UI_HUD.key, UI_HUD.rim);
+        });
+        makeLabel(cancel, 'Text', '取消建造', 21, UI_HUD.text, btnW - 8).isBold = true;
+        cancel.on(Node.EventType.TOUCH_END, () => {
+            if (!this._dragging) this.onCancelBuild?.();
+        }, this);
+        cancel.active = false;
+        this._cancelBuild = cancel;
+    }
+
+    showCancelBuild(show: boolean): void {
+        const btn = this._cancelBuild, hint = this._hint;
+        if (!btn || !hint || btn.active === show) return;
+        btn.active = show;
+        const box = hint.node.getComponent(UITransform)!;
+        const width = hint.node.parent!.getComponent(UITransform)!.width;
+        box.setContentSize(width - 36 - (show ? btn.getComponent(UITransform)!.width : 0), box.height);
     }
 
     setHint(text: string): void {

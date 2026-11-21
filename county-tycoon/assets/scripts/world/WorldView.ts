@@ -180,8 +180,9 @@ export class WorldView extends Component {
     canAfford: ((def: BuildingDef) => boolean) | null = null;
     /** 盖不了的原因（没解锁 / 预算不够），预览里显示；接了就优先用它，不再问 canAfford */
     blockReason: ((def: BuildingDef) => string | null) | null = null;
-    /** 放置或拆除预览改变时通知确认条。 */
+    /** 玩家取消建造或拆除预览。 */
     onPlacementCancelled: (() => void) | null = null;
+    /** 放置或拆除预览改变时通知确认条。 */
     onPendingChanged: (() => void) | null = null;
 
     /** 追踪用：这位居民的名字和家（每帧问一次，搬家了箭头跟着换）；null = 人没了 */
@@ -780,7 +781,7 @@ export class WorldView extends Component {
 
     cancelPending(): void {
         if (this._pendingDemolition) this.setPendingDemolition(null);
-        else this.setPending(null);
+        else this.selectBuilding(null);
         this.onPlacementCancelled?.();
     }
 

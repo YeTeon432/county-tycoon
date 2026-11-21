@@ -7,6 +7,7 @@ import { TownModel } from '../core/TownModel';
 import { Portrait } from './Portrait';
 import { BuildingBar } from './BuildingBar';
 import { BuildingPanel } from './BuildingPanel';
+import { BuildingCatalog } from './BuildingCatalog';
 import { IntroCards } from './IntroCards';
 import { MonthReportPanel } from './MonthReportPanel';
 import { ResidentListPanel } from './ResidentListPanel';
@@ -91,6 +92,7 @@ export class UiRoot extends Component {
     /** 月度账单 */
     private _reportPanel: MonthReportPanel | null = null;
     private _settingsPanel: SettingsPanel | null = null;
+    private _catalog: BuildingCatalog | null = null;
     /** 上月账单（「账单」按钮重新打开用） */
     private _lastReport: MonthlyReport | null = null;
 
@@ -127,7 +129,7 @@ export class UiRoot extends Component {
         this.buildTopBar();
         this.buildClock();
         this.buildTrackChip();
-        this._notices = NoticeLayer.create(this.node, this.sim, () => this.openCenter('research'));
+        this._notices = NoticeLayer.create(this.node, this.sim, () => this.openCenter('research'), () => this.openCatalog());
         this.buildPanelLayer();
         this.refreshCenterStatus();
         this.buildIntroLayer();
@@ -301,6 +303,14 @@ export class UiRoot extends Component {
         this._panelLayer = layer;
     }
 
+    private openCatalog(): void {
+        if (!this._panelLayer || !this.sim || !this._bar) return;
+        this.closeTopPanel();
+        const panel = BuildingCatalog.show(this._panelLayer, this.sim, this._bar);
+        panel.onClosed = () => { if (this._catalog === panel) this._catalog = null; };
+        this._catalog = panel;
+    }
+
     openSettings(): void {
         const layer = this._panelLayer, read = this.getGridPreference, write = this.setGridPreference;
         if (!layer || !read || !write) return;
@@ -335,6 +345,7 @@ export class UiRoot extends Component {
     }
 
     refreshOpenPanels(): void {
+        this._catalog?.refreshAvailability();
         if (this._residentPanel?.node?.isValid) this._residentPanel.refresh();
         if (this._centerPanel?.node?.isValid) this._centerPanel.fill();
     }
@@ -599,6 +610,7 @@ export class UiRoot extends Component {
             node.destroy();
         }
         this._settingsPanel = null;
+        this._catalog = null;
         this._centerPanel = null;
         this._reportPanel = null;
         this._listPanel = null;

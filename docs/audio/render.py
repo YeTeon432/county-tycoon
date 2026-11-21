@@ -63,75 +63,30 @@ def cues():
             out.writeframes(pcm(samples))
 
 
-def swell(t, duration, attack, release):
-    """A raised-cosine fade on each end, with zero slope at the joins."""
-    rise = np.sin(np.pi / 2 * np.minimum(1, t / attack)) ** 2
-    fall = np.sin(np.pi / 2 * np.minimum(1, (duration - t) / release)) ** 2
-    return rise * fall
-
-
-def strings(midi, seconds):
+def soft_piano(midi, seconds):
     t = time(seconds)
-    phase = 2 * np.pi * 440 * 2 ** ((midi - 69) / 12) * t
-    # Slightly spread tuning and a slow bow stroke soften the held chord.
-    body = .66 * np.sin(phase) + .34 * np.sin(phase * 1.0011)
-    body += .17 * np.sin(2 * phase) + .09 * np.sin(3 * phase)
-    return body * swell(t, seconds, 2.4, 2.6)
-
-
-def flute(phrase, air):
-    """One breath per phrase. Slide into the next pitch without a new attack."""
-    seconds = sum(length for _, length in phrase)
-    t = time(seconds)
-    pitches = np.full(len(t), float(phrase[0][0]))
-    position = 0
-    for pitch, length in phrase:
-        if position:
-            glide = np.clip((t - position + .07) / .13, 0, 1)
-            pitches += (pitch - previous) * glide**2 * (3 - 2 * glide)
-        previous = pitch
-        position += length
-    freq = 440 * 2 ** ((pitches - 69) / 12)
-    freq *= 1 + .0018 * np.sin(2 * np.pi * 4.4 * t) * np.minimum(1, t)
-    phase = 2 * np.pi * np.cumsum(freq) / RATE
-    body = np.sin(phase) + .19 * np.sin(2 * phase) + .07 * np.sin(3 * phase)
-    breath = np.convolve(air.normal(size=len(t)), np.ones(8) / 8, 'same')
-    dynamics = .86 + .14 * np.sin(np.pi * t / seconds)
-    return (body + .10 * breath) * dynamics * swell(t, seconds, .54, .88)
+    freq = 440 * 2 ** ((midi - 69) / 12)
+    tone = np.zeros_like(t)
+    # Two nearly unison strings. Higher partials decay first under a felt hammer.
+    for harmonic, weight in enumerate((1, .38, .19, .09, .04), start=1):
+        phase = 2 * np.pi * freq * harmonic * (1 + .00009 * harmonic**2) * t
+        strings = .68 * np.sin(phase) + .32 * np.sin(phase * 1.0008)
+        tone += weight * strings * np.exp(-t * (.84 + .5 * harmonic))
+    attack = 1 - np.exp(-t / .024)
+    release = np.clip((seconds - t) / .30, 0, 1)
+    return tone * attack * release
 
 
 def theme():
-    # Free-time D major. All score positions and lengths are in seconds.
-    duration = 76
-    chords = [(0, (50, 57, 64, 66)), (11, (47, 54, 62, 69)),
-              (20, (43, 55, 62, 69)), (30, (50, 57, 62, 66)),
-              (39, (52, 59, 62, 67)), (50, (43, 55, 62, 66)),
-              (60, (45, 57, 62, 64)), (68, (45, 54, 61, 64))]
-    # Render the tail of the last chord across the loop boundary.
-    bed = np.zeros(round((duration + 3) * RATE))
-    for i, (start, chord) in enumerate(chords):
-        end = chords[i + 1][0] if i + 1 < len(chords) else duration
-        for pitch, gain in zip(chord, (.077, .059, .042, .037)):
-            sound = strings(pitch, end - start + 2.6)
-            offset = round(start * RATE)
-            bed[offset:offset + len(sound)] += gain * sound
-    samples = bed[:duration * RATE].copy()
-    tail = bed[duration * RATE:]
-    samples[:len(tail)] += tail
-
-    phrases = [
-        (3.6, [(69, 2.1), (73, 1.2), (74, 3.5)]),
-        (13.4, [(74, 1.5), (71, 2.8), (69, 2.6)]),
-        (24.8, [(67, 2.5), (69, 1.4), (74, 3.1), (73, 1.6)]),
-        (38.1, [(71, 2.4), (74, 1.8), (76, 3.3)]),
-        (50.5, [(78, 1.9), (76, 1.3), (74, 3.6)]),
-        (63.3, [(71, 2.1), (69, 2.8), (66, 3.4)]),
+    # Four short phrases, one piano. Start time, pitch, sustain, touch.
+    score = [
+        (.25, 67, 1.6, .23), (1.92, 64, 2.9, .18),
+        (7.2, 62, 1.3, .20), (8.58, 64, 1.15, .17), (9.79, 67, 2.8, .21),
+        (15.3, 69, 1.9, .22), (17.32, 67, 2.6, .18),
+        (22.1, 64, 1.35, .19), (23.55, 62, 3.05, .21),
     ]
-    air = np.random.default_rng(1565)
-    melody = mix(duration, [(start, flute(phrase, air), .155) for start, phrase in phrases])
-    samples += melody
-    for delay, gain in [(.081, .085), (.173, .045), (.281, .025)]:
-        samples += gain * np.roll(melody, round(delay * RATE))
+    samples = mix(28, [(start, soft_piano(pitch, sustain), gain)
+                       for start, pitch, sustain, gain in score])
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 's16le', '-ar', str(RATE),
                     '-ac', '1', '-i', '-', '-codec:a', 'libmp3lame', '-b:a', '64k',
                     str(OUT / 'town-theme.mp3')], input=pcm(samples), check=True)

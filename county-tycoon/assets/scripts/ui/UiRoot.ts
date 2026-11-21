@@ -191,7 +191,7 @@ export class UiRoot extends Component {
 
     // ───────────────────────── 开局（T407） ─────────────────────────
 
-    /** 新档：暂停时间 → 开场卡片 → 资金滚上来 + 「店铺」页签上的箭头 */
+    /** 新档：暂停时间 → 开场卡片 → 资金滚上来 + 「道路·设施」页签上的箭头 */
     private playOpening(startFunds: number): void {
         const layer = this._introLayer;
         if (!layer || !this.sim) return;
@@ -205,6 +205,7 @@ export class UiRoot extends Component {
             this.applySpeed(resume === 0 ? 1 : resume);
             if (this._topBar) this._topBar.rollFunds(0, 1);
             this.startFirstBuildHint();
+            this._notices?.say('info', '开局建议：先接土路，再沿路建房。点此看游戏公告');
         };
     }
 
@@ -215,14 +216,13 @@ export class UiRoot extends Component {
 
     private startFirstBuildHint(): void {
         if (!this.model) return;
-        if (this._bar) this._bar.showTabHint('店铺');
+        if (this._bar) this._bar.showTabHint('设施');
         this._baseBuildings = this.countBuildings();
         this._waitFirstBuild = true;
     }
 
-    /** 不算道路：开局提示是「盖几家店」，修路不算 */
     private countBuildings(): number {
-        return this.model ? this.model.allBuildings().filter((b) => !b.def.flat).length : 0;
+        return this.model ? this.model.allBuildings().length : 0;
     }
 
     private refreshCenterStatus(): void {
@@ -238,7 +238,7 @@ export class UiRoot extends Component {
         this._goalsReady = ready;
     }
 
-    /** 首次盖好非道路建筑时收起开局箭头。 */
+    /** 首次铺路或建造时收起开局箭头。 */
     notifyBuilt(): void {
         this.refreshCenterStatus();
         if (this._topBar) this._topBar.refresh();

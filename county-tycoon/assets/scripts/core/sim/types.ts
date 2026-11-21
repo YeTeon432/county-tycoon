@@ -134,7 +134,7 @@ export interface MoodPart {
  */
 export interface Notice {
     kind: 'arrive' | 'leave' | 'warn' | 'stay' | 'layoff' | 'info' | 'wish' | 'wishDone' | 'research' | 'levelUp'
-        | 'street' | 'renovate' | 'offer' | 'deal';
+        | 'complete' | 'street' | 'renovate' | 'offer' | 'deal';
     text: string;
     residentIds: number[];
     /** 来的理由 / 走的原因 */

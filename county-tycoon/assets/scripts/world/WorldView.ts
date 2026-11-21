@@ -763,7 +763,11 @@ export class WorldView extends Component {
         const p = this._pending;
         if (!p) return false;
         const fresh = this.evalPending(p.def, p.col, p.row, p.facing);   // 资金可能刚变过
-        if (!fresh.ok) { this.setPending(fresh); return false; }
+        if (!fresh.ok) {
+            this.setPending(fresh);
+            if (p.ok) this.onPlaceRejected?.(p.def, fresh.reason);
+            return false;
+        }
         const ok = this.doPlace(p.def, p.col, p.row, p.facing);
         if (ok && !p.def.flat) {
             this.selectBuilding(null);
@@ -802,12 +806,12 @@ export class WorldView extends Component {
         const placed = model.place(def, col, row, facing);
         if (!placed) {
             // 放不下（越界或已占用）：给一点反馈，但不弹窗打断操作
-            console.log(`[WorldView] ${def.name} 放不下：(${col}, ${row})`);
+            this.onPlaceRejected?.(def, '这里放不下');
             return false;
         }
         if (this.onBuilt && !this.onBuilt(placed)) {
             model.removeAt(col, row);
-            if (this.onPlaceRejected) this.onPlaceRejected(def, '建设资金不够');
+            this.onPlaceRejected?.(def, this.blockReason?.(def) ?? '当前无法建设');
             return false;
         }
         this.redrawTown();

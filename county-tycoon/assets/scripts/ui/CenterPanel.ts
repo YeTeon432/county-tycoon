@@ -151,7 +151,7 @@ export class CenterPanel extends Panel {
     /** 开始研究后（刷新底栏、顶栏资金） */
     onChanged: (() => void) | null = null;
     /** 研究失败的原因等（UiRoot 接到提示条） */
-    onHint: ((text: string) => void) | null = null;
+    onHint: ((text: string, rejected?: boolean) => void) | null = null;
     /** 招商签约后：去地图上选址交地（UiRoot 关面板 + 自动挑一块地放好预览） */
     onPlace: ((defId: string) => void) | null = null;
     /** 建筑 id → 名字 */
@@ -186,7 +186,7 @@ export class CenterPanel extends Panel {
         if (!head) return;
         const W = 148, H = 52;
         const btn = makeButton(head, 'FacingBtn', '换朝向', W, H, 'secondary', () => {
-            if (!toggle() && this.onHint) this.onHint('这栋楼只有一个朝向');
+            if (!toggle() && this.onHint) this.onHint('这栋楼只有一个朝向', true);
         }, 'rotate');
         btn.node.setPosition(this.cardW / 2 - Panel.PAD_X - 56 - 14 - W / 2 + 8, 0, 0);
     }
@@ -421,7 +421,7 @@ export class CenterPanel extends Panel {
         const sim = this._sim;
         if (!sim || !sim.startResearch) return;
         const err = sim.startResearch(r.id);
-        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (err) { if (this.onHint) this.onHint(err, true); return; }
         if (this.onHint) this.onHint(`开始研究「${r.name}」，${r.days} 天后完成`);
         if (this.onChanged) this.onChanged();
         this.fill();
@@ -431,7 +431,7 @@ export class CenterPanel extends Panel {
         const sim = this._sim;
         if (!sim || !sim.openResearchSlot) return;
         const err = sim.openResearchSlot();
-        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (err) { if (this.onHint) this.onHint(err, true); return; }
         if (this.onHint) this.onHint('研究位开好了，可以同时多研究一项');
         if (this.onChanged) this.onChanged();
         this.fill();
@@ -441,7 +441,7 @@ export class CenterPanel extends Panel {
         const sim = this._sim;
         if (!sim || !sim.rushResearch) return;
         const err = sim.rushResearch(r.id);
-        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (err) { if (this.onHint) this.onHint(err, true); return; }
         if (this.onHint) this.onHint(`「${r.name}」研究好了`);
         if (this.onChanged) this.onChanged();
         this.fill();
@@ -516,7 +516,7 @@ export class CenterPanel extends Panel {
         const sim = this._sim;
         if (!sim || !sim.hireTalents) return;
         const err = sim.hireTalents(edu);
-        if (err) { if (this.onHint) this.onHint(err); return; }
+        if (err) { if (this.onHint) this.onHint(err, true); return; }
         if (this.onHint) this.onHint(`招来 6 位${label}学历的年轻人，已经安排住下`);
         if (this.onChanged) this.onChanged();
         this.fill();
@@ -746,6 +746,7 @@ export class CenterPanel extends Panel {
         const err = sim.acceptOffer(o.id, mode, this._taxBreak);
         if (this.onChanged) this.onChanged();
         if (err) {
+            this.onHint?.(err, true);
             // 条件不够（按钮本该是灰的，资金可能刚变过）→ 重画确认卡片；谈不成 → 结果卡片
             if (sim.state.offers && sim.state.offers.some((x) => x.id === o.id)) { this.openConfirm(o, mode); return; }
             this.fill();

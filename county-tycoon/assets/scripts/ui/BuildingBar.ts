@@ -1,3 +1,4 @@
+import { townAudio } from '../core/TownAudio';
 import {
     _decorator, Color, Component, director, EventTouch, Graphics, JsonAsset, Label, Layers, Mask, Node, resources, Sprite, SpriteFrame,
     tween, Tween, UIOpacity, UITransform, Vec3, view,
@@ -248,6 +249,7 @@ export class BuildingBar extends Component {
             else this.buildTabSymbol(node, t.key === '工业');
             node.on(Node.EventType.TOUCH_END, () => {
                 if (this._dragging) return;
+                if (this._tab !== t.key) townAudio.action('tap');
                 this.selectTab(t.key);
             }, this);
             this._tabs.push({ key: t.key, node, g, label, w });

@@ -1,3 +1,4 @@
+import { townAudio } from '../core/TownAudio';
 import { _decorator, Component, JsonAsset, Layers, Node, profiler, resources, UITransform } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { SimApi } from '../core/sim/SimApi';
@@ -268,6 +269,7 @@ export class UiRoot extends Component {
         const bar = node.addComponent(TopBar);
         bar.build(this.sim);
         bar.onSpeedChange = (speed) => {
+            if (this._clock && this._clock.speed !== speed) townAudio.action('tap');
             if (this._clock) this._clock.setSpeed(speed);
         };
         bar.onReportTap = () => this.openReport();
@@ -302,7 +304,7 @@ export class UiRoot extends Component {
         const layer = this._panelLayer, read = this.getGridPreference, write = this.setGridPreference;
         if (!layer || !read || !write) return;
         this.closeTopPanel();
-        const panel = SettingsPanel.show(layer, read(), write);
+        const panel = SettingsPanel.show(layer, read(), write, () => this.say('声音设置未能保存'));
         panel.onClosed = () => {
             if (this._settingsPanel === panel) this._settingsPanel = null;
         };
@@ -385,7 +387,7 @@ export class UiRoot extends Component {
             (text) => this._topPanel?.showFeedback(text),
             this.requestBranch ? (source) => {
                 const reason = this.requestBranch!(source);
-                if (reason) this._topPanel?.showFeedback(reason);
+                if (reason) { townAudio.action('blocked'); this._topPanel?.showFeedback(reason); }
                 else this.closeTopPanel();
             } : null,
         );
@@ -440,9 +442,11 @@ export class UiRoot extends Component {
         const onTrack = this.requestTrack ? (id: number, focusHome?: boolean) => this.startTrack(id, focusHome) : undefined;
         const panel = ResidentPanel.show(layer, this.sim, this.model, residentId, onTrack);
         if (panel) {
+            townAudio.action('tap');
             const previous = this._listPanel ?? this._topPanel;
             if (previous) previous.node.active = false;
             panel.onJobChanged = (message) => {
+                townAudio.event('wish');
                 panel.showFeedback(message);
                 this._notices?.say('info', message);
                 this._topBar?.refresh();
@@ -544,7 +548,8 @@ export class UiRoot extends Component {
         const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
         const p = CenterPanel.show(layer, this.sim, tab, toggle);
-        p.onHint = (text) => {
+        p.onHint = (text, rejected) => {
+            if (rejected) townAudio.action('blocked');
             p.showFeedback(text);
             this._notices?.say('info', text);
         };

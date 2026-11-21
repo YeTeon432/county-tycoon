@@ -1,3 +1,4 @@
+import { townAudio } from '../core/TownAudio';
 import { _decorator, Color, Component, EventTouch, Graphics, Label, Layers, Node, tween, Tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { InputGuard } from '../core/InputGuard';
 import { getPlatform } from '../platform/Platform';
@@ -47,7 +48,7 @@ export class NoticeLayer extends Component {
     private _hornDot: Node | null = null;
     private history: { kind: Notice['kind']; text: string }[] = [];
     private _list: Node | null = null;
-    private _queue: { kind: Notice['kind']; text: string }[] = [];
+    private _queue: { kind: Notice['kind']; text: string; onShown?: () => void }[] = [];
     private _showing = 0;
 
     private _tipIndex = 0;
@@ -75,10 +76,12 @@ export class NoticeLayer extends Component {
 
     /** 一个月的通知进来：公告栏全收，来人 / 走人上大公示 */
     push(notices: readonly Notice[]): void {
+        const lead = notices.find(n => n.kind === 'wishDone') ?? notices.find(n => n.kind === 'complete');
         for (const n of notices) {
             if (n.kind === 'levelUp') continue;   // 升级走全屏庆祝
             // 心愿的建议很长，公告栏只放心愿本身（点楼顶气泡看建议）
-            this.say(n.kind, n.reason && n.kind === 'arrive' ? `${n.text}：「${n.reason}」` : n.text);
+            const cue = n === lead ? townAudio.whenShown(n.kind === 'wishDone' ? 'wish' : 'complete') : undefined;
+            this.say(n.kind, n.reason && n.kind === 'arrive' ? `${n.text}：「${n.reason}」` : n.text, cue);
         }
         const big = notices.filter((n) => n.kind === 'arrive' || n.kind === 'leave');
         const arrive = big.filter((n) => n.kind === 'arrive');
@@ -93,12 +96,12 @@ export class NoticeLayer extends Component {
     }
 
     /** 往公告栏发一条（界面自己的提示也走这里，比如「建设资金不够」） */
-    say(kind: Notice['kind'], text: string): void {
+    say(kind: Notice['kind'], text: string, onShown?: () => void): void {
         this.history.push({ kind, text });
         if (this.history.length > 30) this.history.shift();
         if (this._hornDot) this._hornDot.active = true;
 
-        this._queue.push({ kind, text });
+        this._queue.push({ kind, text, onShown });
         this._tipsLeft = 0;   // 有真消息了就不再轮播提示
     }
 
@@ -166,9 +169,10 @@ export class NoticeLayer extends Component {
         g.stroke();
     }
 
-    private showBar(kind: Notice['kind'], text: string): void {
+    private showBar(kind: Notice['kind'], text: string, onShown?: () => void): void {
         const bar = this._bar, label = this._barText;
         if (!bar || !label) return;
+        onShown?.();
         label.string = text;
         label.color = kind === 'leave' || kind === 'warn' || kind === 'layoff' ? UI_COLOR.down
             : kind === 'arrive' || kind === 'stay' || kind === 'wishDone' || kind === 'research' || kind === 'street' || kind === 'deal' || kind === 'renovate' ? UI_COLOR.up
@@ -310,6 +314,7 @@ export class NoticeLayer extends Component {
         }, this);
         InputGuard.add(root);
         this._celebrate = root;
+        townAudio.event('promote');
     }
 
     // ───────────────────────── 大公示 ─────────────────────────
@@ -393,12 +398,12 @@ export class NoticeLayer extends Component {
         if (this._showing > 0) {
             this._showing -= dt;
             if (this._showing <= 0) {
-                if (this._queue.length) { const n = this._queue.shift()!; this.showBar(n.kind, n.text); }
+                if (this._queue.length) { const n = this._queue.shift()!; this.showBar(n.kind, n.text, n.onShown); }
                 else this.hideBar();
             }
         } else if (this._queue.length) {
             const n = this._queue.shift()!;
-            this.showBar(n.kind, n.text);
+            this.showBar(n.kind, n.text, n.onShown);
         } else if (this._tipsLeft > 0) {
             this._tipTimer -= dt;
             if (this._tipTimer <= 0) {

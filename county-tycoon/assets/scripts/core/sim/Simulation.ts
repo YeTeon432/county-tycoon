@@ -1329,7 +1329,7 @@ export class Simulation implements SimApi {
             const moved = this.openBuilding(c.uid, c.defId, c.deal, c.branch);
             const message = !c.branch ? `${this.buildingName(c.defId)}完工了`
                 : `${this.buildingName(c.defId)}分厂投产，${moved} 名老员工就近调岗`;
-            this.notice('info', message, []);
+            this.notice('complete', message, []);
         }
         s.construction = s.construction.filter((x) => x.left > 0);
         this._town.refresh?.();

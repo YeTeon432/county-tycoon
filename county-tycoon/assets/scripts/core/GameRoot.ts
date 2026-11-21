@@ -1,3 +1,4 @@
+import { townAudio } from './TownAudio';
 import { DayClock } from './DayClock';
 import { Color, _decorator, Component, Node, UITransform, Layers, macro, director, Camera, gfx, screen, view as gameView, ResolutionPolicy } from 'cc';
 import { Spike3D } from '../spike/Spike3D';
@@ -78,6 +79,7 @@ export class GameRoot extends Component {
     protected onDestroy(): void {
         gameView.off('canvas-resize', this.fitViewport, this);
         if (this._saver) this._saver.stopAutoSave();
+        townAudio.detach();
     }
 
     protected start(): void {
@@ -159,6 +161,7 @@ export class GameRoot extends Component {
             if (this._branchSource !== undefined) this.updatePlacementHint();
         };
 
+        townAudio.attach(this.node);
         this.buildWorld(world, model);
         this.syncCenterAppearance();
         if (this._view) this._view.focusCell(this._openingCell[0], this._openingCell[1]);
@@ -241,6 +244,7 @@ export class GameRoot extends Component {
                     return null;
                 };
                 view.onPlacementCancelled = () => {
+                    townAudio.action('tap');
                     if (this._branchSource === undefined) return;
                     this._branchSource = undefined;
                     view.selectBuilding(null);
@@ -419,7 +423,12 @@ export class GameRoot extends Component {
             const dealBefore = !!(sim && sim.state.pendingDeal);
             // 把开工时刻（本月走到哪儿）传给模拟层：工期从这一刻算，进度条才不会一出现就半满
             const ok = sim ? sim.onBuilt(b.uid, b.def.id, DayClock.progress(), this._branchSource) : true;
-            if (ok && this._ui) this._ui.notifyBuilt();
+            if (ok) {
+                if (b.def.flat) townAudio.action('road');
+                else if (sim?.state.construction?.some(site => site.uid === b.uid)) townAudio.action('build');
+                else townAudio.action('tap');
+                this._ui?.notifyBuilt();
+            }
             // 招商供地选址完成（D026）：退出放置，免得接着盖第二栋要自己掏钱
             if (ok && dealBefore && sim && !sim.state.pendingDeal) {
                 this.scheduleOnce(() => {
@@ -430,8 +439,14 @@ export class GameRoot extends Component {
             }
             return ok;
         };
-        worldView.onDemolished = (uid) => { if (this._sim) this._sim.onDemolished(uid); };
-        worldView.onPlaceRejected = (d, why) => console.log(`[GameRoot] ${d.name} 没盖成：${why}`);
+        worldView.onDemolished = (uid) => {
+            this._sim?.onDemolished(uid);
+            townAudio.action('remove');
+        };
+        worldView.onPlaceRejected = (d, why) => {
+            townAudio.action('blocked');
+            this._ui?.say(`${d.name}：${why}`);
+        };
         // 非道路建筑确认放置后退出选中：底栏取消高亮，玩家点别处不会再开新预览
         worldView.onBuildingConfirmed = () => {
             this._branchSource = undefined;

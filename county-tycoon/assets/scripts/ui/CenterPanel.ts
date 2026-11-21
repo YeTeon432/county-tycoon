@@ -1,4 +1,5 @@
 import { _decorator, Color, Graphics, Label, Node, Sprite, UITransform, view } from 'cc';
+import type { BusStops } from '../core/sim/types';
 import { GoalStatus, ResearchStatus, SimApi } from '../core/sim/SimApi';
 import { Education, Offer, TownLevel, LEVEL_NAME } from '../core/sim/types';
 import { centerArtId } from '../core/BuildingConfig';
@@ -11,7 +12,7 @@ import {
 
 const { ccclass } = _decorator;
 
-type Tab = 'goals' | 'research' | 'talent' | 'market' | 'invest' | 'streets';
+type Tab = 'goals' | 'research' | 'talent' | 'market' | 'invest' | 'streets' | 'transit';
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
     { key: 'goals', label: '发展目标', icon: 'center' },
     { key: 'research', label: '产业研究', icon: 'calendar' },
@@ -19,6 +20,7 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
     { key: 'market', label: '人才市场', icon: 'bill' },
     { key: 'invest', label: '招商引资', icon: 'coin' },
     { key: 'streets', label: '特色街道', icon: 'shop' },
+    { key: 'transit', label: '交通中心', icon: 'center' },
 ];
 const NEXT: Partial<Record<TownLevel, TownLevel>> = { village: 'town', town: 'county', county: 'city', city: 'top100' };
 
@@ -155,14 +157,17 @@ export class CenterPanel extends Panel {
     onPlace: ((defId: string) => void) | null = null;
     /** 建筑 id → 名字 */
     nameOf: (id: string) => string = (id) => id;
+    private commuterId?: number;
+    onTransitChanged: (() => void) | null = null;
     private _taxBreak = false;
     /** 招商确认 / 结果卡片（盖在面板上） */
     private _restoreModal: (() => void) | null = null;
     private _modal: Node | null = null;
 
-    static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null): CenterPanel {
+    static show(parent: Node, sim: SimApi, tab: Tab = 'goals', toggleFacing: (() => boolean) | null = null, commuterId?: number): CenterPanel {
         const p = Panel.open(CenterPanel, parent, '发展中心', LEVEL_NAME[sim.state.level]);
         p._sim = sim;
+        p.commuterId = commuterId;
         p._tab = tab;
         p.renderPage = () => {
             const sky = p.rail?.getChildByName('Townscape');
@@ -199,7 +204,7 @@ export class CenterPanel extends Panel {
         const { width, height } = host.getComponent(UITransform)!;
         const gap = 8;
         const w = this.wide ? width - 24 : (width - gap * (TABS.length - 1)) / TABS.length;
-        const h = this.wide ? 76 : 56;
+        const h = this.wide ? 68 : 56;
         TABS.forEach((tab, i) => {
             const node = makePanelNode(host, 'Tab_' + tab.key, w, h);
             const x = this.wide ? 0 : -width / 2 + w / 2 + i * (w + gap);
@@ -223,7 +228,7 @@ export class CenterPanel extends Panel {
     }
 
     private drawTabs(): void {
-        const h = this.wide ? 76 : 56;
+        const h = this.wide ? 68 : 56;
         for (const tab of this._tabNodes) {
             const active = tab.key === this._tab;
             tab.g.clear();
@@ -250,6 +255,7 @@ export class CenterPanel extends Panel {
         else if (this._tab === 'research') this.fillResearch(body, H);
         else if (this._tab === 'talent') this.fillTalent(body, H);
         else if (this._tab === 'market') this.fillMarket(body, H);
+        else if (this._tab === 'transit') this.fillTransit(body, H);
         else if (this._tab === 'streets') this.fillStreets(body, H);
         else this.fillInvest(body, H);
     }
@@ -447,6 +453,101 @@ export class CenterPanel extends Panel {
     }
 
     // ───────────────────────── 人才引进（D030，DESIGN 16.6） ─────────────────────────
+
+    private fillTransit(body: Node, H: number): void {
+        const sim = this._sim!, W = this.W;
+        const proposal = sim.busProposal?.(this.commuterId);
+        const lines = sim.state.busLines ?? [];
+        const left = -W / 2 + 28;
+        const heading = (parent: Node, text: string, y: number, size: number, color = INK) => {
+            const width = parent.name === 'BusProposal' && proposal && this.wide ? W - 370 : W - 56;
+            const label = makeLabelLeft(parent, 'Text', text, size, color, width);
+            label.node.setPosition(left, y, 0);
+            return label;
+        };
+        const panelH = proposal ? 288 : 100;
+        const card = makePanelNode(body, 'BusProposal', W, panelH);
+        card.setPosition(0, H / 2 - panelH / 2, 0);
+        cardSurface(card, W, panelH, MINT);
+        if (proposal) {
+            heading(card, `${proposal.residentName}的通勤推荐`, 96, 23, TEAL);
+            heading(card, `${proposal.fromName}站　⇄　${proposal.toName}站`, 46, 32).isBold = true;
+            heading(card, `预计受益 ${proposal.riders} 人　 ·　每月运营费 ¥${proposal.monthlyCost}`, -5, 26);
+            heading(card, '步行到站、候车、乘车合计更快的居民会搭乘。', -50, 21);
+            if (this.wide) this.drawBusPath(card, sim, proposal);
+            const affordable = sim.state.finance.funds >= proposal.monthlyCost;
+            const btn = makeButton(card, 'OpenBus', affordable ? '开通这条线' : '运营预算不足', 210, 52, 'primary', () => {
+                const error = sim.openBusLine!(proposal);
+                if (!error) this.onTransitChanged?.();
+                this.fill();
+                this.onHint?.(error ?? '通勤公交已开通', !!error);
+            });
+            btn.setEnabled(affordable);
+            btn.node.setPosition(left + 105, -103, 0);
+        } else {
+            heading(card, '通勤公交', 18, 29).isBold = true;
+            const served = this.commuterId !== undefined && sim.commuteInfo?.(this.commuterId)?.bus;
+            heading(card, served ? '这位居民已经可以搭公交上班。' : '暂无合适的新线。居民通勤过远且路网连通时，这里会推荐线路。', -20, 22);
+        }
+        const listTop = H / 2 - panelH - 58;
+        heading(body, `已开线路 · ${lines.length} 条`, listTop + 20, 26).isBold = true;
+        if (!lines.length) {
+            heading(body, '开线后，这里会显示每月乘车人数。', listTop - 30, 22);
+            return;
+        }
+        const listH = listTop + H / 2;
+        const list = ScrollList.mount(body, 'BusLines', W, listH);
+        list.node.setPosition(0, listTop - listH / 2, 0);
+        list.setRows(lines.map(line => ({ height: 110, build: row => {
+            cardSurface(row, W, 100);
+            const connected = (sim.busPath?.(line).length ?? 0) > 1;
+            const stops = `(${sim.busStopCell?.(line.from)}) ⇄ (${sim.busStopCell?.(line.to)})`;
+            const riders = line.lastRiders === null ? '首月待结算' : `上月乘车 ${line.lastRiders} 人`;
+            const name = makeLabelLeft(row, 'Stops', `${line.fromName}站 ⇄ ${line.toName}站`, UI_FONT.body, INK, W - 200);
+            name.node.setPosition(left, 19, 0);
+            const status = makeLabelLeft(row, 'Status', connected ? `${riders}　·　¥${sim.busMonthlyCost?.()}/月　·　${stops}` : '路网中断，暂停运营和计费', 22, TEAL, W - 200);
+            status.node.setPosition(left, -22, 0);
+            makeButton(row, 'CloseBus', '停开', 110, 46, 'secondary', () => {
+                if (list.dragging) return;
+                sim.closeBusLine?.(line.from, line.to);
+                this.onTransitChanged?.();
+                this.fill();
+            }).node.setPosition(W / 2 - 80, 0, 0);
+        } })));
+    }
+
+    /** 按实际道路格缩放，两端用同一比例，家和单位之间的转弯与地图一致。 */
+    private drawBusPath(card: Node, sim: SimApi, route: BusStops): void {
+        if (!sim.busStopCell || !sim.busPath) return;
+        const cells = sim.busPath(route).map(cell => sim.busStopCell!(cell));
+        if (cells.length < 2) return;
+        const w = 280, h = 228;
+        const inset = makePanelNode(card, 'RouteMap', w, h);
+        inset.setPosition(this.W / 2 - w / 2 - 27, 0, 0);
+        const g = cardSurface(inset, w, h, PAPER);
+        const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
+        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+        const step = Math.min(34, (w - 100) / Math.max(1, x1 - x0), (h - 78) / Math.max(1, y1 - y0));
+        const pts = cells.map(([x, y]) => [(x - (x0 + x1) / 2) * step, (y - (y0 + y1) / 2) * step]);
+        g.strokeColor = RULE; g.lineWidth = 1;
+        for (let x = pts[0][0] - Math.floor((pts[0][0] + w / 2 - 8) / step) * step; x < w / 2 - 8; x += step) {
+            if (x > -w / 2 + 8) { g.moveTo(x, -h / 2 + 8); g.lineTo(x, h / 2 - 8); }
+        }
+        for (let y = pts[0][1] - Math.floor((pts[0][1] + h / 2 - 8) / step) * step; y < h / 2 - 8; y += step) {
+            if (y > -h / 2 + 8) { g.moveTo(-w / 2 + 8, y); g.lineTo(w / 2 - 8, y); }
+        }
+        g.stroke();
+        g.strokeColor = TEAL; g.lineWidth = 7;
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (const [x, y] of pts.slice(1)) g.lineTo(x, y);
+        g.stroke();
+        [0, pts.length - 1].forEach(i => {
+            const [x, y] = pts[i];
+            g.fillColor = i === 0 ? TEAL : INK;
+            g.circle(x, y, 18); g.fill();
+            makeLabel(inset, 'Stop', i === 0 ? '家' : '班', 21, PAPER, 34).node.setPosition(x, y, 0);
+        });
+    }
 
     private fillMarket(body: Node, H: number): void {
         const employers = this._sim?.employers?.() ?? [];

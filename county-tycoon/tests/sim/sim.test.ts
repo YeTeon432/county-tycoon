@@ -1803,6 +1803,90 @@ suite('居民通勤', () => {
     });
 });
 
+suite('交通中心与通勤公交', () => {
+    function town() {
+        const cfg = loadFullConfig();
+        cfg.economy.moveChance = 0;
+        const map = new MapBuilder();
+        map.hRoad(0, 18, 4);
+        const home = map.build('house', 1, 3), work = map.build('workshop', 11, 5);
+        const near = map.build('house', 2, 3), reverse = map.build('house', 11, 3);
+        const local = map.build('breakfast', 1, 5), distant = map.build('house', 17, 3);
+        let buildings = map.view().allBuildings();
+        const view = new SimpleTownView(20, 20, () => buildings);
+        const sim = new Simulation(cfg, view, { seed: 501, opening: false });
+        const hire = (house: number, job: number, title: string) => {
+            const p: Resident = (sim as any).createResident(null, 'F', 30);
+            p.birthMonth = 9; p.homeId = house; p.jobId = job; p.salary = 2600; p.jobTitle = title;
+            sim.state.residents.push(p);
+            sim.building(house)!.residentIds.push(p.id);
+            sim.building(job)!.workerIds.push(p.id);
+            return p;
+        };
+        const a = hire(home, work, '工人'), b = hire(near, work, '工人');
+        const c = hire(reverse, local, '店员'), d = hire(distant, work, '工人');
+        const breakRoad = () => {
+            const tile = buildings.find(x => x.road && x.col === 6)!;
+            const before = buildings;
+            buildings = buildings.filter(x => x !== tile);
+            sim.onDemolished(tile.uid);
+            return () => { buildings = before; view.refresh(); };
+        };
+        return { sim, cfg, view, a, b, c, d, breakRoad };
+    }
+
+    test('看推荐免费；双向计人、资金门槛、重复开线、月账单与读档', () => {
+        const { sim, cfg, view, a, b, c, d } = town();
+        const funds = sim.state.finance.funds;
+        const quote = sim.busProposal(a.id)!;
+        eq(quote.riders, 3);
+        eq(sim.state.busLines?.length ?? 0, 0);
+        eq(sim.state.finance.funds, funds);
+        sim.state.finance.funds = quote.monthlyCost - 1;
+        ok(sim.openBusLine(quote));
+        sim.state.finance.funds = funds;
+        eq(sim.openBusLine(quote), null);
+        ok(sim.openBusLine(quote));
+        eq(sim.state.busLines!.length, 1);
+        eq(sim.state.finance.funds, funds);
+        eq(sim.busForTrip(a.id, a.homeId!, a.jobId!)!.forward, true);
+        eq(sim.busForTrip(c.id, c.homeId!, c.jobId!)!.forward, false);
+        eq(sim.commuteInfo(b.id)!.bus, true);
+        eq(sim.commuteInfo(d.id)!.bus, false);
+        eq(sim.busProposal(a.id), null);
+        eq(sim.busProposal(c.id), null);
+        const restored = new Simulation(cfg, view, { state: JSON.parse(JSON.stringify(sim.state)) });
+        const control = new Simulation(cfg, view, { state: JSON.parse(JSON.stringify(sim.state)) });
+        control.closeBusLine(quote.from, quote.to);
+        control.stepMonth();
+        const report = restored.stepMonth();
+        eq(report.expense.buses, quote.monthlyCost);
+        eq(restored.state.finance.funds, control.state.finance.funds - quote.monthlyCost);
+        eq(restored.state.busLines![0].lastRiders, 3);
+        restored.closeBusLine(quote.from, quote.to);
+        eq(restored.commuteInfo(a.id)!.bus, false);
+        eq(restored.stepMonth().expense.buses, 0);
+    });
+
+    test('人数变化需要重看报价；断路自动停运、停止计费', () => {
+        const { sim, a, b, breakRoad } = town();
+        const old = sim.busProposal(a.id)!;
+        b.jobId = b.homeId;
+        ok(sim.openBusLine(old));
+        const updated = sim.busProposal(a.id)!;
+        eq(updated.riders, 2);
+        eq(sim.openBusLine(updated), null);
+        const reconnect = breakRoad();
+        eq(sim.commuteInfo(a.id)!.bus, false);
+        eq(sim.busProposal(a.id), null);
+        eq(sim.stepMonth().expense.buses, 0);
+        eq(sim.state.busLines![0].lastRiders, 0);
+        reconnect();
+        eq(sim.stepMonth().expense.buses, updated.monthlyCost);
+        ok(sim.state.busLines![0].lastRiders! > 0);
+    });
+});
+
 suite('开分厂', () => {
     function county() {
         const cfg = loadFullConfig();

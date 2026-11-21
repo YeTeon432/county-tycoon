@@ -6,7 +6,7 @@ import { WorldConfig } from '../core/WorldConfig';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { IsoMath } from '../core/IsoMath';
 import { BuildingLayer, ReachDraw } from './BuildingLayer';
-import { ServiceReach } from '../core/sim/SimApi';
+import { ServiceReach, SimApi } from '../core/sim/SimApi';
 import { GridMap } from './GridMap';
 import { LifeLayer } from './LifeLayer';
 import { Tracker, TrackWhat } from './Tracker';
@@ -1084,6 +1084,11 @@ export class WorldView extends Component {
      * 越界返回 null。
      */
     /** 行人层（GameRoot 接居民名单用） */
+    setTransit(sim: SimApi): void {
+        if (this._3d) this._3d.transit = sim;
+        if (this._life) this._life.transit = sim;
+    }
+
     get life(): LifeLayer | null {
         return this._life;
     }

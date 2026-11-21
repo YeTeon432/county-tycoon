@@ -36,6 +36,7 @@ const EXPENSE_ROWS: { key: keyof MonthlyReport['expense']; label: string }[] = [
     { key: 'services', label: '公共服务' },
     { key: 'publicWages', label: '公职工资' },
     { key: 'pension', label: '养老金' },
+    { key: 'buses', label: '公交通勤' },
     { key: 'commuteBikes', label: '通勤配车' },
     { key: 'promotion', label: '招商补贴' },
     { key: 'research', label: '研究费' },

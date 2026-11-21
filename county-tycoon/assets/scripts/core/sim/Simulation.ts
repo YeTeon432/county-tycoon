@@ -1,4 +1,4 @@
-import { Employer, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
+import { BusProposal, Employer, JobReferral, GoalStatus, ResearchStatus, ServiceReach, SimApi, SimSummary, StreetStatus } from './SimApi';
 import { ResearchDef, SimConfig, StreetDef, VEHICLE_ORDER, VehicleTier } from './config';
 import { chance, nextFloat, nextInt, rngFromSeed } from './rng';
 import { Reach, TownView } from './townView';
@@ -7,7 +7,7 @@ import { consumeForResident, shopCapacity, shopRadius } from './consumption';
 import { buildWorld, World } from './world';
 import { makeName } from './names';
 import {
-    BuildingEcon, BuildingSim, PromotionRecord, LEVEL_NAME, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
+    BusStops, BusLine, BuildingEcon, BuildingSim, PromotionRecord, LEVEL_NAME, DealOwner, FactoryBranch, Education, MoneyFlows, PendingDeal, MoodPart, Notice, Wish, WishKind, Demand, LifeEvent, MonthlyReport, Resident, SimState, TownLevel, Vehicle,
 } from './types';
 
 /**
@@ -578,10 +578,10 @@ export class Simulation implements SimApi {
         }
         // 5. 上班太远
         if (r.jobId !== null) {
-            const dist = this.distance(r.homeId, r.jobId);
+            const dist = this.commuteTrip(r, r.homeId, r.jobId).effective;
             const comfort = this.commuteComfort(r);
             if (isFinite(dist) && dist > comfort + 3) {
-                out.push({ kind: 'commute', text: '我想少花点时间在上班路上', hint: this.branchOffer(r.jobId) ? '可以在家附近开分厂，或在厂边盖房，让我搬近些。' : '单位附近有合适的空房，我家就有机会搬过去。', suggest: '', radius: Math.round(comfort) });
+                out.push({ kind: 'commute', text: '上班太远了，每天来回走好久', hint: this.branchOffer(r.jobId) ? '可以在家附近开分厂，或在厂边盖房，让我搬近些。' : '单位附近有合适的空房，我家就有机会搬过去。', suggest: '', radius: Math.round(comfort) });
             }
         }
         // 6. 环境
@@ -654,7 +654,7 @@ export class Simulation implements SimApi {
             case 'shop': return !!w.demand && !this.hasShopInCircle(r.homeId, w.demand, world);
             case 'commute': {
                 if (r.jobId === null) return false;
-                const d = this.distance(r.homeId, r.jobId);
+                const d = this.commuteTrip(r, r.homeId, r.jobId).effective;
                 return isFinite(d) && d > this.commuteComfort(r) + 3;
             }
             case 'env': return this.homeEnv(r.homeId) < 0;
@@ -675,7 +675,8 @@ export class Simulation implements SimApi {
         r.mood = clamp(0, 100, r.mood + wt.doneMood);
         s.wishesDone = (s.wishesDone ?? 0) + 1;
         s.buzz = Math.min(this._cfg.economy.buzzMax, (s.buzz ?? 0) + wt.doneBuzz);
-        this.notice('wishDone', `${r.name}的心愿实现了：${WISH_DONE_TEXT[w.kind] ?? w.text}`, [r.id]);
+        const result = w.kind === 'commute' && this.commuteInfo(r.id)?.bus ? '现在能坐公交上班了' : WISH_DONE_TEXT[w.kind] ?? w.text;
+        this.notice('wishDone', `${r.name}的心愿实现了：${result}`, [r.id]);
         this.log(r, `心愿实现了：${w.text}`);
         if (r.leaving && r.mood >= this._cfg.economy.stayMood) {
             r.leaving = null;
@@ -982,14 +983,104 @@ export class Simulation implements SimApi {
         return this._cfg.economy.commuteComfort * this.tier(r).range;
     }
 
+    busStopCell(cell: number): [number, number] {
+        return [cell % this._town.width, Math.floor(cell / this._town.width)];
+    }
+
+    busMonthlyCost(): number { return this._cfg.economy.busMonthlyCost; }
+
+    busPath(line: BusStops): readonly number[] { return this._town.busPath(line.from, line.to); }
+
+    /** 总耗时以步行一格为单位，包括两端步行、等车和车程。 */
+    private busTime(home: number, job: number, line: BusStops): number {
+        const path = this.busPath(line);
+        if (path.length < 2) return Infinity;
+        const cfg = this._cfg.economy;
+        return Math.min(this.busWalk(home, job, line.from, line.to), this.busWalk(home, job, line.to, line.from))
+            + cfg.busWait + (path.length - 1) / cfg.busSpeedRatio;
+    }
+
+    private busWalk(home: number, job: number, start: number, end: number): number {
+        const a = this._town.walkToStop(home, start), b = this._town.walkToStop(job, end);
+        return Math.max(a, b) <= this._cfg.economy.busStopRadius ? a + b : Infinity;
+    }
+
+    private commuteTrip(r: Resident, home: number, job: number) {
+        const range = this.tier(r).range;
+        const distance = this.distance(home, job);
+        let time = distance / range, line: BusLine | null = null;
+        for (const candidate of this.state.busLines ?? []) {
+            const t = this.busTime(home, job, candidate);
+            if (t < time) { time = t; line = candidate; }
+        }
+        return { distance, effective: line ? time * range : distance, time, line };
+    }
+
+    busForTrip(id: number, origin: number, destination: number) {
+        const r = this.resident(id);
+        if (!r || r.homeId === null || r.jobId === null) return null;
+        if (!(origin === r.homeId && destination === r.jobId || origin === r.jobId && destination === r.homeId)) return null;
+        const line = this.commuteTrip(r, r.homeId, r.jobId).line;
+        if (!line) return null;
+        const forward = this.busWalk(origin, destination, line.from, line.to) <= this.busWalk(origin, destination, line.to, line.from);
+        return { line, forward };
+    }
+
+    busProposal(residentId?: number): BusProposal | null {
+        const people = this.state.residents;
+        const eligible = (r: Resident) => r.homeId !== null && r.jobId !== null
+            && this.commuteTrip(r, r.homeId, r.jobId).effective > this.commuteComfort(r);
+        const candidates = residentId === undefined ? people.filter(eligible) : people.filter(r => r.id === residentId && eligible(r));
+        for (const r of candidates) {
+            const pair = this._town.stationPair(r.homeId!, r.jobId!);
+            if (!pair || pair[0] === pair[1]) continue;
+            const stop = (uid: number) => {
+                const b = this.building(uid)!;
+                return this.buildingName(b.defId) + (b.branchOf === undefined ? '' : '分厂');
+            };
+            const route = { from: pair[0], to: pair[1], fromName: stop(r.homeId!), toName: stop(r.jobId!) };
+            const benefits = (p: Resident) => p.homeId !== null && p.jobId !== null
+                && this.busTime(p.homeId, p.jobId, route) < this.commuteTrip(p, p.homeId, p.jobId).time;
+            if (!benefits(r)) continue;
+            return { ...route, residentId: r.id, residentName: r.name, riders: people.filter(benefits).length, monthlyCost: this.busMonthlyCost() };
+        }
+        return null;
+    }
+
+    openBusLine(quote: BusProposal): string | null {
+        const fresh = this.busProposal(quote.residentId);
+        if (!fresh || fresh.from !== quote.from || fresh.to !== quote.to || fresh.riders !== quote.riders || fresh.monthlyCost !== quote.monthlyCost)
+            return '通勤需求已变化，请查看最新推荐';
+        if (this.state.finance.funds < fresh.monthlyCost) return '建设资金不足一个月的运营费';
+        (this.state.busLines ??= []).push({ from: fresh.from, to: fresh.to, fromName: fresh.fromName, toName: fresh.toName, lastRiders: null });
+        return null;
+    }
+
+    closeBusLine(from: number, to: number): void {
+        this.state.busLines = (this.state.busLines ?? []).filter(l => l.from !== from || l.to !== to);
+    }
+
+    private settleBusService(): number {
+        const lines = this.state.busLines ?? [];
+        if (!lines.length) return 0;
+        for (const line of lines) line.lastRiders = 0;
+        for (const r of this.state.residents) {
+            if (r.homeId === null || r.jobId === null) continue;
+            const line = this.commuteTrip(r, r.homeId, r.jobId).line;
+            if (line) line.lastRiders!++;
+        }
+        return lines.filter(line => this.busPath(line).length > 1).length * this.busMonthlyCost();
+    }
+
     commuteInfo(id: number) {
         const r = this.resident(id);
         if (!r || r.homeId === null || r.jobId === null) return null;
-        const distance = this.distance(r.homeId, r.jobId);
+        const { distance, effective, line, time } = this.commuteTrip(r, r.homeId, r.jobId);
         const comfort = this.commuteComfort(r);
         const vehicles = this._cfg.economy.vehicles;
-        const canRide = r.vehicle === 'walk' && r.age >= vehicles.minAge && r.age <= vehicles.maxAge;
-        return { distance, comfort, bikeCost: canRide && isFinite(distance) && distance > comfort ? vehicles.tiers.ebike.price : null };
+        const canRide = r.vehicle === 'walk' && r.age >= vehicles.minAge && r.age <= vehicles.maxAge
+            && distance / vehicles.tiers.ebike.range < time;
+        return { distance, effective, bus: !!line, comfort, bikeCost: canRide && isFinite(distance) && effective > comfort ? vehicles.tiers.ebike.price : null };
     }
 
     provideCommuteBike(id: number): boolean {
@@ -1013,7 +1104,7 @@ export class Simulation implements SimApi {
         const savings = adults.reduce((sum, m) => sum + Math.max(0, m.savings), 0);
         const commuters = adults.filter(m => m.jobId !== null).map(m => {
             const comfort = this.commuteComfort(m);
-            return { job: m.jobId!, comfort, excess: Math.max(0, this.distance(home.uid, m.jobId!) - comfort) };
+            return { resident: m, job: m.jobId!, comfort, excess: Math.max(0, this.commuteTrip(m, home.uid, m.jobId!).effective - comfort) };
         });
         let best: BuildingSim | null = null;
         const currentExcess = commuters.reduce((sum, c) => sum + c.excess, 0);
@@ -1025,7 +1116,7 @@ export class Simulation implements SimApi {
             if (savings < (e.rent || cfg.rentPerPerson) * adults.length * cfg.moveRentMonths) continue;
             let totalExcess = 0, totalDistance = 0;
             for (const c of commuters) {
-                const d = this.distance(b.uid, c.job);
+                const d = this.commuteTrip(c.resident, b.uid, c.job).effective;
                 const excess = Math.max(0, d - c.comfort);
                 if (!isFinite(d) || excess > c.excess) { totalExcess = Infinity; break; }
                 totalExcess += excess;
@@ -1663,6 +1754,8 @@ export class Simulation implements SimApi {
             construction: this._constructionSpent, upkeep: 0, publicWages: 0, pension: 0, promotion: 0,
             research: this._researchSpent, talent: this._talentSpent,
         };
+        expense.buses = this.settleBusService();
+        this._flows.outflow.upkeep += expense.buses;
         expense.commuteBikes = s.finance.pendingCommuteBikes ?? 0;
         s.finance.pendingCommuteBikes = 0;
         expense.promotion += this._subsidySpent;
@@ -1781,7 +1874,7 @@ export class Simulation implements SimApi {
         // 施工款在盖的时候已经扣过了（onBuilt），这里只记账不再扣——以前这里扣了第二遍（D026 修）
         // 招商的土地出让金 / 补贴、研究费都在发生时已经进出财政，这里只记账不再算（D026）
         const net = income.business + income.industry + income.income + income.land + income.profit + income.rent
-            - expense.upkeep - expense.publicWages - expense.pension - (expense.services ?? 0);
+            - expense.buses - expense.upkeep - expense.publicWages - expense.pension - (expense.services ?? 0);
         s.finance.funds += net;
 
         // 财政见底：上级拨款，不会游戏结束（DESIGN 3）
@@ -2091,7 +2184,7 @@ export class Simulation implements SimApi {
         // 通勤：有车的人能接受的距离更远（DESIGN 11.2）
         const tier = this.tier(r);
         if (r.jobId !== null && r.homeId !== null) {
-            const d = this.distance(r.homeId, r.jobId);
+            const d = this.commuteTrip(r, r.homeId, r.jobId).effective;
             const comfort = this.commuteComfort(r);
             if (isFinite(d) && d > comfort) add('commute', '上班太远', -Math.min(15, (d - comfort) * 2.5));
         }
@@ -2362,7 +2455,7 @@ export class Simulation implements SimApi {
         for (const o of openings) {
             if (uid !== undefined && (o.building.uid !== uid || o.slot.title !== title)) continue;
             if (target && (o.building.defId !== target.defId || o.slot.title !== target.title)) continue;
-            const d = r.homeId === null ? 0 : this.distance(r.homeId, o.building.uid);
+            const d = r.homeId === null ? 0 : this.commuteTrip(r, r.homeId, o.building.uid).effective;
             const dist = isFinite(d) ? d : this._cfg.economy.serviceRadius * 2;
             const score = o.slot.salary - dist * penalty;
             if (score > bestScore) { best = o; bestScore = score; }

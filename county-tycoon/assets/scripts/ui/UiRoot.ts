@@ -469,6 +469,7 @@ export class UiRoot extends Component {
             const opacity = previous && (previous.node.getComponent(UIOpacity) ?? previous.node.addComponent(UIOpacity));
             if (opacity) opacity.opacity = 0;
             panel.node.addComponent(BlockInputEvents);
+            panel.onCommuteRoutes = id => this.openCenter('transit', undefined, id);
             panel.onResidentChanged = (message) => {
                 townAudio.event('wish');
                 panel.showFeedback(message);
@@ -565,20 +566,21 @@ export class UiRoot extends Component {
     }
 
     /** 打开发展中心面板 */
-    openCenter(tab: 'goals' | 'research' | 'invest' | 'streets' = 'goals', uid?: number): void {
+    openCenter(tab: 'goals' | 'research' | 'invest' | 'streets' | 'transit' = 'goals', uid?: number, commuterId?: number): void {
         const layer = this._panelLayer;
         if (!this.sim || !layer) return;
         this.closeTopPanel();
         // 换朝向：点楼进来的用那栋楼；从「目标」小牌进来的找地图上的发展中心
         const cid = uid ?? this.model?.allBuildings().find((b) => b.def.id === 'center')?.uid;
         const toggle = cid !== undefined && this.requestToggleFacing ? () => this.requestToggleFacing!(cid) : null;
-        const p = CenterPanel.show(layer, this.sim, tab, toggle);
+        const p = CenterPanel.show(layer, this.sim, tab, toggle, commuterId);
         p.onHint = (text, rejected) => {
             if (rejected) townAudio.action('blocked');
             p.showFeedback(text);
             this._notices?.say('info', text);
         };
         p.onChanged = () => { if (this._topBar) this._topBar.refresh(); this.refreshCenterStatus(); };
+        p.onTransitChanged = () => this.onResidentChanged?.();
         p.onUpgraded = (lv) => this.onLevelUp(lv);
         if (this._bar) { const defs = this._bar.defs; p.nameOf = (id) => defs.find((d) => d.id === id)?.name ?? id; p.fill(); }
         p.onPlace = (defId) => {

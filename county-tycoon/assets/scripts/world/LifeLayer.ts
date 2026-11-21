@@ -1,3 +1,6 @@
+import type { SimApi } from '../core/sim/SimApi';
+import type { BusLine } from '../core/sim/types';
+import { busPosition } from './CommuteBus';
 import { _decorator, Color, Component, Graphics, JsonAsset, Label, Layers, Node, Sprite, Tween, UIOpacity, UITransform, Vec3, resources, tween } from 'cc';
 import { ArtLibrary } from '../core/ArtLibrary';
 import { DayClock } from '../core/DayClock';
@@ -119,6 +122,7 @@ interface Person {
     trips: Trip[];
     next: number;
     agent: Agent | null;
+    ride?: { line: BusLine; board: number; from: number; to: number };
 }
 
 const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
@@ -142,6 +146,7 @@ function rnd(id: number, day: number, k: number): number {
 
 @ccclass('LifeLayer')
 export class LifeLayer extends Component {
+    transit: SimApi | null = null;
     /** 行人每走多少格换一帧腿（0.6 格/秒 ≈ 每秒换 4 次） */
     private static readonly STRIDE = 0.15;
     /** 淡入淡出秒数 */
@@ -231,6 +236,16 @@ export class LifeLayer extends Component {
     whereIs(id: number): { walking: boolean; x: number; y: number; uid: number | null; to: number | null } | null {
         const p = this._people.get(id);
         if (!p) return null;
+        if (p.ride) {
+            const hour = DayClock.hour();
+            const path = this.transit?.busPath?.(p.ride.line);
+            if (hour >= p.ride.board && path && path.length >= 2) {
+                const pos = busPosition(path, this._model!.width, hour);
+                const point = this._iso!.toLocal(pos.x, pos.z);
+                return { walking: true, x: point.x, y: point.y + 12, uid: null, to: p.ride.to };
+            }
+            return { walking: false, x: 0, y: 0, uid: p.ride.from, to: null };
+        }
         const a = p.agent;
         if (a && a.node.isValid) {
             const pos = this._iso!.toLocal(a.view.gx, a.view.gy);
@@ -287,7 +302,13 @@ export class LifeLayer extends Component {
         // 到点的人出门
         const hour = DayClock.hour();
         this._people.forEach((p) => {
-            while (!p.agent && p.next < p.trips.length && hour >= p.trips[p.next].at) this.depart(p);
+            if (p.ride) {
+                const running = this.transit?.state.busLines?.indexOf(p.ride.line) ?? -1;
+                if (running >= 0 && this.transit!.busPath!(p.ride.line).length > 1 && hour < p.ride.board + 1) return;
+                p.loc = p.ride.to;
+                p.ride = undefined;
+            }
+            while (!p.ride && !p.agent && p.next < p.trips.length && hour >= p.trips[p.next].at) this.depart(p);
         });
 
         const speed = DayClock.speed();
@@ -350,7 +371,7 @@ export class LifeLayer extends Component {
     private newDay(advance: boolean): void {
         if (advance) this._day++;
         for (let i = this._agents.length - 1; i >= 0; i--) this.arrive(i, false);
-        this._people.forEach((p) => { p.trips = []; p.next = 0; p.loc = null; });
+        this._people.forEach((p) => { p.trips = []; p.next = 0; p.loc = null; p.ride = undefined; });
         this._planTimer = 0;
         this._planned = false;
     }
@@ -492,6 +513,13 @@ export class LifeLayer extends Component {
         const info = this._info.get(p.id);
         const from = p.loc ?? info?.homeId ?? null;
         if (from === null || from === trip.to || !this.buildingByUid(trip.to)) return;
+        const bus = this.transit?.busForTrip?.(p.id, from, trip.to);
+        if (bus) {
+            const next = Math.ceil(DayClock.hour());
+            const board = next % 2 === (bus.forward ? 0 : 1) ? next : next + 1;
+            p.ride = { line: bus.line, board, from, to: trip.to };
+            return;
+        }
         const path = this.route(from, trip.to);
         // 不通路、或者街上人太多：直接「到了」，不画
         if (!path || !info || (this._agents.length >= this._traffic.maxOnStreet && p.id !== this.tracked)) { p.loc = trip.to; return; }

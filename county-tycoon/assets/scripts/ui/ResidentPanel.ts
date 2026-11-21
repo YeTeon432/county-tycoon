@@ -29,6 +29,7 @@ export class ResidentPanel extends Panel {
     private _sim: SimApi | null = null;
     private _residentId = 0;
     private _findingJob = false;
+    onCommuteRoutes: ((id: number) => void) | null = null;
     onResidentChanged: ((message: string) => void) | null = null;
     private _model: TownModel | null = null;
     /** 「追踪」（T425）；心愿卡片的「看范围」也走它（T538：追踪时地图画出心愿范围） */
@@ -89,7 +90,7 @@ export class ResidentPanel extends Panel {
             const who = makeLabelLeft(content, 'Who', `${BODY_NAME[bodyOf(r)]} · ${r.age} 岁`, UI_FONT.body, UI_COLOR.text, W - faceSize - 24);
             who.isBold = true;
             who.node.setPosition(tx, y - 40, 0);
-            const v = ({ walk: '步行', ebike: '骑电动车', moto: '骑摩托车', car: '开汽车' } as Record<string, string>)[r.vehicle ?? 'walk'] ?? '步行';
+            const v = sim.commuteInfo?.(r.id)?.bus ? '搭公交通勤' : ({ walk: '步行', ebike: '骑电动车', moto: '骑摩托车', car: '开汽车' } as Record<string, string>)[r.vehicle ?? 'walk'] ?? '步行';
             const sub = makeLabelLeft(content, 'Sub', `${r.jobTitle || (r.age < 18 ? '上学 / 在家' : r.age >= 60 ? '退休' : r.idle ? '赋闲' : '待业')} · ${v}`, UI_FONT.small, UI_COLOR.textDim, W - faceSize - 24);
             sub.node.setPosition(tx, y - 80, 0);
             y -= faceSize + 20;
@@ -133,7 +134,14 @@ export class ResidentPanel extends Panel {
             if (job && !this._findingJob) detail = target
                 ? `想做${target.title}，帮我问问有没有空位吧。` : '只要学历合适，有空岗我就愿意去。';
             if (referral) detail = `${referral.employer} · ${referral.title}`;
-            line('Detail', detail, 45, UI_FONT.small, ranged || job ? 55 : 85);
+            const transit = wish?.kind === 'commute';
+            line('Detail', detail, 45, UI_FONT.small, ranged || job || transit ? 55 : 85);
+            if (transit) {
+                const open = () => { if (this.node.activeInHierarchy) this.onCommuteRoutes?.(r.id); };
+                card.on(Node.EventType.TOUCH_END, open);
+                const btn = makeButton(card, 'BusRecommendation', '查看推荐公交线', 224, 44, 'primary', open);
+                btn.node.setPosition(-W / 2 + 130, h / 2 - 124, 0);
+            }
             if (ranged || job) {
                 const btn = makeButton(card, 'Action', ranged ? '看范围' : !this._findingJob ? '帮他找工作' :
                     referral ? '介绍入职' : '暂无合适空岗', 202, 44, 'primary', () => {
@@ -180,7 +188,13 @@ export class ResidentPanel extends Panel {
         const commute = sim.commuteInfo?.(r.id);
         if (commute) {
             const cost = commute.bikeCost;
-            const distance = isFinite(commute.distance) ? `沿路 ${commute.distance} 格 · 舒适 ${Math.floor(commute.comfort)} 格` : '到单位的路还没接通';
+            const distance = commute.bus ? `搭公交 · 单程沿路 ${commute.distance} 格` : isFinite(commute.distance) ? `沿路 ${commute.distance} 格 · 舒适 ${Math.floor(commute.comfort)} 格` : '到单位的路还没接通';
+            const showRoutes = r.wish?.kind !== 'commute' && isFinite(commute.distance) && commute.effective > commute.comfort;
+            if (showRoutes) rows.unshift({ height: 52, build: row => {
+                makeButton(row, 'FindBus', '查看推荐公交线', 224, 44, 'secondary', () => {
+                    if (!list.dragging) this.onCommuteRoutes?.(r.id);
+                }).node.setPosition(-W / 2 + 128, 0, 0);
+            } });
             rows.unshift({ height: 58, build: (row) => {
                 makeLabelLeft(row, 'Commute', `通勤　${distance}`, UI_FONT.small, UI_COLOR.text, W - (cost === null ? 32 : 292))
                     .node.setPosition(-W / 2 + 16, 0, 0);
@@ -203,6 +217,7 @@ export class ResidentPanel extends Panel {
                 const l = makeLabelLeft(row, 'Part', `${part.label}　${part.value > 0 ? '+' : ''}${part.value}`,
                     UI_FONT.small, part.value < 0 ? UI_COLOR.down : UI_COLOR.up, W - 32);
                 l.node.setPosition(-W / 2 + 16, 0, 0);
+                if (part.key === 'commute') row.on(Node.EventType.TOUCH_END, () => { if (!list.dragging) this.onCommuteRoutes?.(r.id); });
             } });
         }
         rows.push({ height: 62, build: (row) => makeSectionTitle(row, W, 0, '人生记录', UI_PALETTE.green) });

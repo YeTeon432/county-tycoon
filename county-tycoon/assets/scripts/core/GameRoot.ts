@@ -241,6 +241,7 @@ export class GameRoot extends Component {
                 ui.trackWhere = () => view.trackWhere();
             }
             if (view.life && sim) {
+                view.setTransit(sim);
                 view.life.setResidentSource(() => sim.state.residents);
                 // T219：到店飘「+¥N」用真实客单价
                 view.life.priceOf = (defId) => (sim.buildingPrice ? sim.buildingPrice(defId) : 0);

@@ -37,6 +37,10 @@ export interface TownView {
      * 不挨道路、地图上不存在、或路网不连通 → Infinity。
      */
     roadDistance(a: number, b: number): number;
+    /** 站点固定在道路格上，步行接驳按最近的建筑出入口计算。 */
+    stationPair(home: number, job: number): [number, number] | null;
+    walkToStop(uid: number, cell: number): number;
+    busPath(from: number, to: number): readonly number[];
     /** 两栋楼在地块上的直线距离（环境、服务范围判断用，不走道路） */
     gridDistance(a: number, b: number): number;
     /** 地图变了（盖楼 / 拆楼 / 拆路）之后调一次。可选，模拟层会尽量自己调 */
@@ -83,6 +87,9 @@ export class SimpleTownView implements TownView {
     /** 起点 uid → (终点 uid → 步数) */
     private _cache = new Map<number, Map<number, number>>();
 
+    private readonly _stopTrees = new Map<number, { steps: Map<number, number>; parent: Map<number, number> }>();
+    private readonly _busPaths = new Map<string, number[]>();
+
     constructor(width: number, height: number, source: BuildingSource) {
         this.width = Math.max(1, Math.floor(width));
         this.height = Math.max(1, Math.floor(height));
@@ -98,6 +105,8 @@ export class SimpleTownView implements TownView {
         this._roadCells.clear();
         this._doors.clear();
         this._cache.clear();
+        this._stopTrees.clear();
+        this._busPaths.clear();
         for (const b of this._list) {
             this._byUid.set(b.uid, b);
             if (b.road) {
@@ -128,6 +137,60 @@ export class SimpleTownView implements TownView {
             this._cache.set(a, dists);
         }
         return dists.get(b) ?? NO_ROAD;
+    }
+
+    private stopTree(cell: number) {
+        const cached = this._stopTrees.get(cell);
+        if (cached) return cached;
+        const steps = new Map<number, number>(), parent = new Map<number, number>();
+        const queue: number[] = [];
+        if (this._roadCells.has(cell)) { steps.set(cell, 0); queue.push(cell); }
+        for (let i = 0; i < queue.length; i++) {
+            const here = queue[i];
+            for (const next of this.neighbours(here)) {
+                if (steps.has(next)) continue;
+                steps.set(next, steps.get(here)! + 1);
+                parent.set(next, here);
+                queue.push(next);
+            }
+        }
+        const tree = { steps, parent };
+        if (this._stopTrees.size >= MAX_CACHE) this._stopTrees.clear();
+        this._stopTrees.set(cell, tree);
+        return tree;
+    }
+
+    stationPair(home: number, job: number): [number, number] | null {
+        let best: [number, number] | null = null, length = Infinity;
+        for (const from of this._doors.get(home) ?? []) {
+            const tree = this.stopTree(from);
+            for (const to of this._doors.get(job) ?? []) {
+                const steps = tree.steps.get(to) ?? Infinity;
+                if (steps < length) { length = steps; best = [from, to]; }
+            }
+        }
+        return best;
+    }
+
+    walkToStop(uid: number, cell: number): number {
+        const tree = this.stopTree(cell);
+        return Math.min(...(this._doors.get(uid) ?? []).map(door => tree.steps.get(door) ?? Infinity));
+    }
+
+    busPath(from: number, to: number): readonly number[] {
+        const key = from + ':' + to;
+        const cached = this._busPaths.get(key);
+        if (cached) return cached;
+        const tree = this.stopTree(from);
+        const path: number[] = [];
+        if (tree.steps.has(to)) {
+            for (let cell = to; cell !== from; cell = tree.parent.get(cell)!) path.push(cell);
+            path.push(from);
+            path.reverse();
+        }
+        if (this._busPaths.size >= MAX_CACHE) this._busPaths.clear();
+        this._busPaths.set(key, path);
+        return path;
     }
 
     gridDistance(a: number, b: number): number {

@@ -1,5 +1,5 @@
 import type { GoalDef } from './config';
-import { BuildingEcon, BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
+import { BusLine, BusStops, BuildingEcon, BuildingSim, Education, MonthlyReport, Resident, SimState, TownLevel } from './types';
 
 /**
  * 画面层调用模拟层的唯一入口（合同，见 docs/PARALLEL.md）。
@@ -77,7 +77,14 @@ export interface SimApi {
     canAfford(defId: string): boolean;
 
     openGuidance?(id: number): void;
-    commuteInfo?(id: number): { distance: number; comfort: number; bikeCost: number | null } | null;
+    commuteInfo?(id: number): { distance: number; comfort: number; bikeCost: number | null; bus: boolean; effective: number } | null;
+    busProposal?(residentId?: number): BusProposal | null;
+    openBusLine?(quote: BusProposal): string | null;
+    closeBusLine?(from: number, to: number): void;
+    busPath?(line: BusStops): readonly number[];
+    busForTrip?(id: number, origin: number, destination: number): { line: BusLine; forward: boolean } | null;
+    busStopCell?(cell: number): [number, number];
+    busMonthlyCost?(): number;
     provideCommuteBike?(id: number): boolean;
     housingHint?(homeId: number): string;
     resettlementOffer?(homeId: number): { targetUid: number; count: number } | null;
@@ -97,6 +104,13 @@ export interface SimApi {
 
     /** 月结算后的回调（顶栏、账单、行人刷新用） */
     onMonth: ((report: MonthlyReport) => void) | null;
+}
+
+export interface BusProposal extends BusStops {
+    residentId: number;
+    residentName: string;
+    riders: number;
+    monthlyCost: number;
 }
 
 export interface JobReferral {

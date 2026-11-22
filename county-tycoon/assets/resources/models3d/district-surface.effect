@@ -30,6 +30,7 @@ CCProgram district-vs %{
   in vec4 a_color;
   #if HOUSING
     out vec2 v_finishSun;
+    out vec3 v_model;
   #endif
   out vec3 v_world;
   out vec3 v_normal;
@@ -51,7 +52,12 @@ CCProgram district-vs %{
       vec4 turns = max(vec4(axis.x, -axis.y, -axis.x, axis.y), vec4(0.0));
       float packedFinish = floor(a_color.a * 255.0 + 0.5) - 192.0;
       vec4 visibility = mod(floor(packedFinish / vec4(1.0, 2.0, 4.0, 8.0)), 2.0);
+      v_model = a_position;
       v_finishSun = vec2(floor(packedFinish / 16.0), dot(turns, visibility));
+      if (v_finishSun.x < -4.5) {
+        float phase = dot(world.xz, vec2(0.78, 0.48));
+        world.xz += vec2(0.014, 0.008) * sin(1.63 * cc_time.x + phase) * smoothstep(0.15, 0.85, a_position.y);
+      }
     #endif
     v_world = world.xyz;
     v_normal = mat3(cc_matWorldIT) * a_normal;
@@ -70,6 +76,7 @@ CCProgram district-fs %{
   uniform Surface { vec4 mainColor; };
   #if HOUSING
     in vec2 v_finishSun;
+    in vec3 v_model;
   #endif
   in vec3 v_world;
   in vec3 v_normal;
@@ -88,8 +95,26 @@ CCProgram district-fs %{
       vec3 rgb = v_color * (vec3(0.84, 0.88, 0.91) + vec3(0.34, 0.29, 0.22) * direct);
       // 暖砖楼梯间只在靠近时显出灰缝，远景按像素宽度淡出，避免闪烁。
       #if __VERSION__ >= 300 || defined(GL_OES_standard_derivatives)
+      vec3 modelNormal = abs(cross(dFdx(v_model), dFdy(v_model)));
+      vec2 facadeUV = vec2(modelNormal.x > modelNormal.z ? v_model.z : v_model.x, v_model.y);
+      if (v_finishSun.x > -4.5 && v_finishSun.x < -0.5) {
+        vec2 uv = modelNormal.y > max(modelNormal.x, modelNormal.z) ? v_model.xz : facadeUV;
+        vec2 repeats = vec2(4.0, 19.0);
+        if (v_finishSun.x < -3.5) repeats = vec2(16.0, 11.0);
+        else if (v_finishSun.x < -2.5) repeats = vec2(8.0, 1.0);
+        else if (v_finishSun.x < -1.5) repeats = vec2(4.0, 6.0);
+        vec2 grid = uv * repeats;
+        vec2 footprint = fwidth(grid);
+        if (v_finishSun.x < -3.5 || (v_finishSun.x > -2.5 && v_finishSun.x < -1.5))
+          grid.x += 0.5 * mod(floor(grid.y), 2.0);
+        vec2 dist = 0.5 - abs(fract(grid) - 0.5);
+        vec2 joint = (1.0 - smoothstep(vec2(0.012), vec2(0.048) + footprint * 0.5, dist))
+                   * (1.0 - smoothstep(vec2(0.25), vec2(0.85), footprint));
+        if (v_finishSun.x < -2.5 && v_finishSun.x > -3.5) joint.y = 0.0;
+        rgb *= 1.0 - 0.17 * max(joint.x, joint.y);
+      }
       if (v_finishSun.x > 1.5 && v_finishSun.x < 2.5) {
-        vec2 brick = vec2(abs(n.x) > 0.5 ? v_world.z : v_world.x, v_world.y) * vec2(13.0, 33.0);
+        vec2 brick = facadeUV * vec2(13.0, 33.0);
         vec2 pixel = fwidth(brick);
         brick.x += 0.5 * mod(floor(brick.y), 2.0);
         vec2 edge = 0.5 - abs(fract(brick) - 0.5);
@@ -98,13 +123,13 @@ CCProgram district-fs %{
         rgb = mix(rgb, vec3(0.82, 0.78, 0.70), 0.24 * max(mortar.x, mortar.y));
       }
       #endif
-      if (v_finishSun.x < 0.5) {
+      if (abs(v_finishSun.x) < 0.5) {
         vec3 reflected = reflect(-eye, n);
         float sky = smoothstep(-0.65, 0.34, reflected.y);
         float fresnel = pow(1.0 - max(dot(n, eye), 0.0), 3.0);
         vec3 environment = mix(vec3(0.28, 0.36, 0.35), vec3(0.67, 0.79, 0.82), sky);
         rgb = mix(rgb, environment, 0.15 + 0.42 * fresnel);
-      } else if (v_finishSun.x < 1.5) {
+      } else if (abs(v_finishSun.x - 1.0) < 0.5) {
         float highlight = pow(max(dot(n, normalize(sun + eye)), 0.0), 20.0);
         rgb += vec3(0.32, 0.30, 0.24) * highlight * direct;
       }

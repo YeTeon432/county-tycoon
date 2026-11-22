@@ -98,7 +98,26 @@ def _bake_ao(o):
     bpy.data.objects.remove(ground)
 
 
-def bake_balcony_sun(obj, depsgraph, colors):
+ARCHITECTURE = script in {'housing', 'homes_shops', 'new_buildings', 'civic_industry', 'estates'}
+
+
+def surface_finish(material):
+    if not material:
+        return None
+    return material.get('housing_finish') or (material.get('district_finish') if ARCHITECTURE else None)
+
+
+def occluders(objects):
+    from mathutils.bvhtree import BVHTree
+    vertices, faces = [], []
+    for obj in objects:
+        offset = len(vertices)
+        vertices.extend(obj.matrix_world @ v.co for v in obj.data.vertices)
+        faces.extend([offset+i for i in face.vertices] for face in obj.data.polygons)
+    return BVHTree.FromPolygons(vertices, faces)
+
+
+def bake_surface_sun(obj, occlusion, colors):
     """顶点 alpha 的低四位分别记录四个摆放朝向的日光可见度，供着色器逐顶点解码。"""
     from mathutils import Vector
     mesh = obj.data
@@ -107,9 +126,9 @@ def bake_balcony_sun(obj, depsgraph, colors):
     rays = [Vector((x, y, sz)) for x, y in ((sx, sy), (sy, -sx), (-sx, -sy), (-sy, sx))]
     normal_matrix = obj.matrix_world.to_3x3().inverted().transposed()
     cache = {}
-    kinds = {'glass': 0, 'metal': 1, 'brick': 2, 'wall': 3}
+    kinds = {'foliage': -5, 'tile': -4, 'sheet': -3, 'paving': -2, 'wood': -1, 'glass': 0, 'metal': 1, 'brick': 2, 'wall': 3}
     for face in mesh.polygons:
-        finish = mesh.materials[face.material_index].get('housing_finish')
+        finish = surface_finish(mesh.materials[face.material_index])
         if not finish:
             continue
         center = obj.matrix_world @ face.center
@@ -122,10 +141,10 @@ def bake_balcony_sun(obj, depsgraph, colors):
             if key not in cache:
                 visible = 0
                 for turn, ray in enumerate(rays):
-                    if normal.dot(ray) <= 0 or not bpy.context.scene.ray_cast(depsgraph, origin, ray, distance=5)[0]:
+                    if normal.dot(ray) <= 0 or occlusion.ray_cast(origin, ray, 5)[0] is None:
                         visible |= 1 << turn
                 cache[key] = visible
-            # 高两位恒为 1，兼容预览的普通顶点色。接下来的两位区分表面材质。
+            # 高半字节为材质编号，低半字节保留四个朝向的可见度。
             colors.data[li].color[3] = (192 + kinds[finish] * 16 + cache[key]) / 255
 
 
@@ -144,7 +163,7 @@ def export(name, w, h, fn):
     lit = bpy.data.materials.new('lit'); emit = bpy.data.materials.new('emit')
     glass = bpy.data.materials.new('glass')
     housing = bpy.data.materials.new('housing')
-    depsgraph = bpy.context.evaluated_depsgraph_get()
+    occlusion = occluders(objs) if ARCHITECTURE else None
     for o in objs:
         me = o.data
         ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'CORNER')
@@ -152,7 +171,7 @@ def export(name, w, h, fn):
         for poly in me.polygons:
             mat = o.material_slots[poly.material_index].material if o.material_slots else None
             col = _base_color(mat)
-            finish = mat.get('housing_finish') if mat else None
+            finish = surface_finish(mat)
             if finish:
                 surface_slots.append(3)
             else:
@@ -160,7 +179,7 @@ def export(name, w, h, fn):
             for li in poly.loop_indices:
                 ca.data[li].color = col
         if 3 in surface_slots:
-            bake_balcony_sun(o, depsgraph, ca)
+            bake_surface_sun(o, occlusion, ca)
         me.materials.clear()
         me.materials.append(lit); me.materials.append(emit)
         if 2 in surface_slots or 3 in surface_slots:
@@ -175,6 +194,10 @@ def export(name, w, h, fn):
     bpy.context.view_layer.objects.active = objs[0]
     bpy.ops.object.join()
     o = bpy.context.object
+    if ARCHITECTURE:
+        from mathutils import Matrix
+        o.data.transform(o.matrix_world)
+        o.matrix_world = Matrix.Identity(4)
     o.name = name
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.remove_doubles(threshold=0.0005)

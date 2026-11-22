@@ -10,8 +10,8 @@ MUD = lambda: M('#c9a274')
 MUD_D = lambda: M('#a9845a')
 THATCH = lambda: M('#c7a64a')
 THATCH_D = lambda: M('#a88a35')
-TILE_GREY = lambda: M('#6f7780')
-BRICK_RED = lambda: M('#b45e45')
+TILE_GREY = lambda: M('roof_red', color='#6f7780')
+BRICK_RED = lambda: M('tile_brick', color='#ae6a53')
 WOOD_D = lambda: M('#6e4a2c')
 
 
@@ -90,7 +90,7 @@ def detached():
     x0, y0, sx, sy, fh = 0.2, 0.26, 0.64, 0.58, 0.3
     box(x0, y0, Z0, sx, sy, fh * 2, 'tile_beige', bevel=0.006)
     box(x0 - 0.01, y0 - 0.01, Z0 + fh - 0.02, sx + 0.02, sy + 0.02, 0.025, 'white')
-    pyramid(x0 - 0.06, y0 - 0.06, Z0 + fh * 2, sx + 0.12, sy + 0.12, 0.24, M('#4a5058'))
+    hip_roof(x0 - 0.06, y0 - 0.06, Z0 + fh * 2, sx + 0.12, sy + 0.12, 0.24, M('roof_red', color='#56636c'))
     # 一楼落地窗 + 门
     window_front(x0 + 0.06, Z0 + 0.03, 0.26, 0.22, y=y0, sill=False)
     box(x0 + 0.42, y0 - 0.01, Z0, 0.13, 0.02, 0.24, 'wood')
@@ -123,8 +123,8 @@ def villa():
     box(x0, y0, Z0, sx, sy, fh * 2, 'white', bevel=0.008)
     box(x0 + 0.2, y0 + 0.15, Z0 + fh * 2, sx - 0.4, sy - 0.3, fh, 'white', bevel=0.008)
     box(x0 - 0.01, y0 - 0.01, Z0 + fh - 0.02, sx + 0.02, sy + 0.02, 0.025, 'tile_beige')
-    pyramid(x0 - 0.07, y0 - 0.07, Z0 + fh * 2, sx + 0.14, sy + 0.14, 0.18, 'roof_red')
-    pyramid(x0 + 0.15, y0 + 0.1, Z0 + fh * 3, sx - 0.3, sy - 0.2, 0.2, 'roof_red')
+    hip_roof(x0 - 0.07, y0 - 0.07, Z0 + fh * 2, sx + 0.14, sy + 0.14, 0.18, 'roof_red')
+    hip_roof(x0 + 0.15, y0 + 0.1, Z0 + fh * 3, sx - 0.3, sy - 0.2, 0.2, 'roof_red')
     # 门廊立柱 + 大门
     for xx in (x0 + 0.38, x0 + 0.68):
         cyl(xx, y0 - 0.14, Z0, 0.025, fh * 1.6, 'white', 12)

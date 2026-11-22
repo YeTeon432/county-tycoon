@@ -39,6 +39,22 @@
       ],
       "subMetas": {}
     },
+    "50ba1": {
+      "importer": "gltf-material",
+      "uuid": "e64d84b4-87eb-4602-8703-9d4fc3420d04@50ba1",
+      "displayName": "",
+      "id": "50ba1",
+      "name": "housing.material",
+      "userData": {
+        "gltfIndex": 1
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
     "d6a96": {
       "importer": "gltf-scene",
       "uuid": "e64d84b4-87eb-4602-8703-9d4fc3420d04@d6a96",
@@ -83,7 +99,8 @@
       "skeletons": [],
       "textures": [],
       "materials": [
-        "e64d84b4-87eb-4602-8703-9d4fc3420d04@ce988"
+        "e64d84b4-87eb-4602-8703-9d4fc3420d04@ce988",
+        "e64d84b4-87eb-4602-8703-9d4fc3420d04@50ba1"
       ],
       "scenes": [
         "e64d84b4-87eb-4602-8703-9d4fc3420d04@d6a96"

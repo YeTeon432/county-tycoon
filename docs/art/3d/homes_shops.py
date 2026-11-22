@@ -805,8 +805,7 @@ def school_wing(name, outline, bottom, floors, glazing, wall):
     bpy.context.collection.objects.link(obj)
     for index, color in enumerate(colors):
         material = M(color, rough=0.22) if index >= 4 else M(color)
-        if index >= 4:
-            material['town_glass'] = True
+        material['district_finish'] = ('brick', 'metal', 'wall', 'wall', 'glass', 'glass', 'glass')[index]
         mesh.materials.append(material)
     for poly, slot in zip(mesh.polygons, slots):
         poly.material_index = slot
@@ -816,7 +815,7 @@ def school_wing(name, outline, bottom, floors, glazing, wall):
 @sprite('school-house', 2, 2)
 def school_house():
     """书香苑：陶砖住宅翼、切角玻璃塔楼和临街门厅共用同一座院落。"""
-    lot(2, 2, '#c2bbad')
+    lot(2, 2, M('pave', color='#c2bbad'))
     lawn, stone, trim = '#a8bd86', '#e8d9bd', '#eff0df'
     lobby_top = Z0 + 0.38
     # 基座退入柱列，入口通廊从人行道连续伸到门厅。

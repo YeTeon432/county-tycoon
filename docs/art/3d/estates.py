@@ -3,7 +3,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib import curtain_front, parapet, prism, round_tree, street_lot, Z0, box, bush, lamp, lot, pyramid, run, sprite, text, tree
+from lib import sash, curtain_front, parapet, prism, round_tree, street_lot, Z0, box, bush, lamp, lot, hip_roof, run, sprite, text, tree
 
 
 def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z0, rooftop_room=True):
@@ -14,19 +14,19 @@ def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z
         z = base + 0.06 + floor * 0.24
         for col in range(cols):
             wx = x + (col + 0.5) * w / cols - 0.075
-            for wy in (y - 0.012, y + d - 0.002):
-                box(wx, wy, z, 0.15, 0.014, 0.126, 'glass_dark')
-                box(wx + 0.072, wy - 0.002, z, 0.008, 0.018, 0.126, 'white')
+            for face, wy in (('front', y), ('back', y+d)):
+                sash(face, wx, z, 0.15, 0.126, wy, 'tile_beige', 'glass_dark', True)
             if balconies and floor and col % 2 == 0:
                 box(wx - 0.03, y - 0.085, z - 0.05, 0.21, 0.09, 0.025, roof)
                 box(wx - 0.03, y - 0.085, z - 0.025, 0.21, 0.014, 0.065, 'tile_white')
-        for side in (x - 0.012, x + w - 0.002):
-            box(side, y + d * 0.4, z, 0.014, 0.13, 0.13, 'glass')
+        for face, side in (('left', x), ('side', x+w)):
+            sash(face, y + d*0.4, z, 0.13, 0.13, side, 'frame', 'glass', False)
+    box(x+w*0.5-0.115, y-0.074, base+0.192, 0.23, 0.082, 0.021, 'steel', bevel=0.004)
     box(x + w * 0.5 - 0.06, y - 0.018, base, 0.12, 0.02, 0.185, 'brown')
     top = base + height
     box(x - 0.018, y - 0.018, top, w + 0.036, d + 0.036, 0.045, roof)
     if pitched:
-        pyramid(x - 0.035, y - 0.035, top + 0.04, w + 0.07, d + 0.07, 0.15, roof)
+        hip_roof(x - 0.035, y - 0.035, top + 0.04, w + 0.07, d + 0.07, 0.15, roof)
     elif rooftop_room:
         box(x + w * 0.6, y + d * 0.45, top + 0.045, 0.21, 0.19, 0.13, wall)
 

@@ -40,27 +40,28 @@ FONT_FILES = ['/System/Library/Fonts/STHeiti Medium.ttc', '/System/Library/Fonts
 # ---------------------------------------------------------------- 调色（sRGB 十六进制）
 PALETTE = {
     # 地面 / 铺装
-    'grass': '#6cbf4a', 'pave': '#d8d2c4', 'curb': '#c4c1b8', 'concrete': '#b9b6ad', 'asphalt': '#55585e',
+    'grass': '#92af74', 'pave': '#c8c5bb', 'curb': '#c4c1b8', 'concrete': '#b9b6ad', 'asphalt': '#55585e',
     'dirt': '#c9a56e', 'line': '#f2f2ea',
     # 墙
     'tile_white': '#eeeae2', 'tile_beige': '#e9d2b0', 'tile_brick': '#b86a4b', 'paint_cream': '#f3e6c4',
-    'paint_grey': '#c9ccd2', 'paint_blue': '#7fa6d6',
+    'paint_grey': '#c9ccd2', 'paint_blue': '#9cb8c9',
     # 玻璃 / 金属
-    'glass': '#86bdea', 'glass_dark': '#3f5f82', 'frame': '#7a7f87', 'steel': '#c3c8cf', 'dark_metal': '#4a4f57',
+    'glass': '#83a8b5', 'glass_dark': '#526e7c', 'frame': '#7a7f87', 'steel': '#c3c8cf', 'dark_metal': '#4a4f57',
     # 屋顶
-    'roof_red': '#c8483c', 'roof_grey': '#8f949b', 'roof_blue': '#3d6fb6', 'roof_green': '#4f8f5a', 'tank': '#3d7fc4',
+    'roof_red': '#ac6450', 'roof_grey': '#8f949b', 'roof_blue': '#627e94', 'roof_green': '#698775', 'tank': '#798e9b',
     'solar': '#2a3f73',
     # 常用色
     'white': '#ffffff', 'black': '#2b2b2b', 'red': '#d9463b', 'orange': '#f08a24', 'yellow': '#f6c938',
     'green': '#4cae4c', 'blue': '#3a86d6', 'pink': '#f5b7c8', 'pink_dark': '#e0567c', 'purple': '#8f6ad8',
     'brown': '#8a5a34', 'wood': '#a8743f',
     # 植物
-    'trunk': '#7a5434', 'leaf': '#3f9a3a', 'leaf_light': '#58b345', 'leaf_dark': '#2f7a35', 'pine': '#2f7d4a',
+    'trunk': '#7a5434', 'leaf': '#65895c', 'leaf_light': '#88a86d', 'leaf_dark': '#4e7451', 'pine': '#2f7d4a',
     # 招牌底（自发光，阴面也看得清）
     'sign_yellow': '#ffe9a8', 'sign_red': '#e8453c', 'sign_blue': '#2f6fd0', 'sign_white': '#fafafa',
 }
 
 _MATS = {}
+_PANES = {}
 
 
 def M(name, rough=None, metal=None, emit=None, color=None):
@@ -87,12 +88,37 @@ def M(name, rough=None, metal=None, emit=None, color=None):
     if emit:
         p.inputs['Emission Color'].default_value = (*c, 1)
         p.inputs['Emission Strength'].default_value = emit
+    finishes = {
+        'glass': 'glass', 'glass_dark': 'glass', 'solar': 'glass',
+        'steel': 'metal', 'dark_metal': 'metal', 'frame': 'metal', 'tank': 'metal',
+        'roof_red': 'tile', 'roof_blue': 'sheet', 'roof_green': 'sheet', 'roof_grey': 'sheet',
+        'tile_brick': 'brick', 'tile_white': 'wall', 'tile_beige': 'wall',
+        'paint_grey': 'wall', 'paint_cream': 'wall', 'paint_blue': 'wall',
+        'pave': 'paving', 'wood': 'wood',
+    }
+    if name in finishes and not emit:
+        m['district_finish'] = finishes[name]
     _MATS[key] = m
     return m
 
 
 def _mat(m):
     return M(m) if isinstance(m, str) else m
+
+
+def glazing(color):
+    """自定义玻璃颜色只在窗片上参与天空反射，同色的墙面和招牌各用原材质。"""
+    material = _mat(color)
+    if material.get('housing_finish') or material.get('district_finish') or material.get('town_glass'):
+        return material
+    if material not in _PANES:
+        panel = material
+        shader = next(n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+        if shader.inputs['Emission Strength'].default_value == 0:
+            panel = material.copy()
+            panel['district_finish'] = 'glass'
+        _PANES[material] = panel
+    return _PANES[material]
 
 
 # ---------------------------------------------------------------- 基本形状
@@ -170,6 +196,20 @@ def pyramid(x, y, z, sx, sy, sz, m):
     return o
 
 
+def hip_roof(x, y, z, sx, sy, height, roof):
+    """两道长坡接短边斜脊，檐下露出封檐板。"""
+    inset = min(sx * 0.29, sy * 0.48)
+    verts = [(x, y, z), (x+sx, y, z), (x+sx, y+sy, z), (x, y+sy, z),
+             (x+inset, y+sy/2, z+height), (x+sx-inset, y+sy/2, z+height)]
+    mesh = bpy.data.meshes.new('Hipped roof')
+    mesh.from_pydata(verts, [], [(3,2,1,0), (0,1,5,4), (1,2,5), (2,3,4,5), (3,0,4)])
+    mesh.materials.append(_mat(roof))
+    bpy.context.collection.objects.link(bpy.data.objects.new('Hipped roof', mesh))
+    box(x+0.005, y+0.005, z-0.021, sx-0.01, sy-0.01, 0.022, 'wood')
+    box(x+inset-0.015, y+sy/2-0.015, z+height-0.006, sx-2*inset+0.03, 0.03, 0.018, roof,
+        bevel=0.005)
+
+
 def _font():
     for f in FONT_FILES:
         if os.path.exists(f):
@@ -204,35 +244,84 @@ def lot(w, h, m='pave', z=Z0):
 def street_lot(w, h, yard, depth=0.21):
     """临街铺装一直铺到左右地界，后院与铺装齐平。"""
     box(0, depth, 0, w, h - depth, Z0, yard)
-    box(0, 0, 0, w, depth, Z0, '#c7c2b5')
+    box(0, 0, 0, w, depth, Z0, 'pave')
     for i in range(1, w * 4):
         box(i * 0.25, 0.006, Z0, 0.004, depth - 0.012, 0.001, '#b5b0a4')
 
 
-def window_front(x, z, sx, sz, y=0.0, frame='frame', glass='glass', sill=True):
-    """正面（y=常数，朝 -Y）开一扇窗：窗框 + 玻璃略凹。"""
-    _OPENINGS.append(('front', x, z, sx, sz, y, frame, glass, sill))
-    box(x, y - 0.012, z, sx, 0.02, sz, frame)
-    box(x + 0.02, y - 0.02, z + 0.02, sx - 0.04, 0.02, sz - 0.04, glass)
+def sash(face, start, z, width, height, wall, frame, glass, sill):
+    """窗套突出墙面，玻璃靠墙安装。用同一网格做压边、窗洞侧壁和窗扇。"""
+    vertices, faces, slots = [], [], []
+    def quad(points, slot):
+        indices = []
+        for u, v, depth in points:
+            lateral = start + u
+            normal = wall + (depth if face in ('side', 'back') else -depth)
+            xy = (lateral, normal) if face in ('front', 'back') else (normal, lateral)
+            indices.append(len(vertices))
+            vertices.append((*xy, z + v))
+        faces.append(indices[::-1] if face in ('back', 'left') else indices)
+        slots.append(slot)
+
+    def rect(l, b, r, t, d):
+        return [(l,b,d), (r,b,d), (r,t,d), (l,t,d)]
+
+    trim = min(0.015, width * 0.085, height * 0.09)
+    outside = rect(0, 0, width, height, 0.026)
+    inside = rect(trim, trim, width-trim, height-trim, 0.026)
+    pane = rect(trim, trim, width-trim, height-trim, 0.004)
+    base = rect(0, 0, width, height, 0.001)
+    for i in range(4):
+        j = (i+1) % 4
+        for outer, inner in ((base, outside), (outside, inside), (inside, pane)):
+            quad([outer[i], outer[j], inner[j], inner[i]], 0)
+    quad(pane, 1)
+    if width >= 0.12:
+        mid = width * 0.54
+        quad(rect(mid-trim*0.33, trim, mid+trim*0.33, height-trim, 0.012), 0)
+    if height > 0.23:
+        top = height * 0.76
+        quad(rect(trim, top, width-trim, top + trim*0.6, 0.014), 0)
     if sill:
-        box(x - 0.01, y - 0.04, z - 0.02, sx + 0.02, 0.04, 0.02, 'curb')
+        edge = rect(-trim/2, -trim, width+trim/2, 0, 0.043)
+        rear = rect(-trim/2, -trim, width+trim/2, 0, 0.001)
+        quad(edge, 2)
+        for i in range(4):
+            j = (i+1) % 4
+            quad([rear[i], rear[j], edge[j], edge[i]], 2)
+    mesh = bpy.data.meshes.new('Window reveal')
+    mesh.from_pydata(vertices, [], faces)
+    for m in (frame, glazing(glass), 'curb'):
+        mesh.materials.append(_mat(m))
+    for f, slot in zip(mesh.polygons, slots):
+        f.material_index = slot
+    obj = bpy.data.objects.new('Window reveal', mesh)
+    bpy.context.collection.objects.link(obj)
+
+
+def window_front(x, z, sx, sz, y=0.0, frame='frame', glass='glass', sill=True):
+    _OPENINGS.append(('front', x, z, sx, sz, y, frame, glass, sill))
+    sash('front', x, z, sx, sz, y, frame, glass, sill)
 
 
 def window_side(y, z, sy, sz, x, frame='frame', glass='glass', sill=True):
-    """侧面（x=常数，朝 +X）开一扇窗。"""
     _OPENINGS.append(('side', y, z, sy, sz, x, frame, glass, sill))
-    box(x - 0.008, y, z, 0.02, sy, sz, frame)
-    box(x, y + 0.02, z + 0.02, 0.02, sy - 0.04, sz - 0.04, glass)
-    if sill:
-        box(x, y - 0.01, z - 0.02, 0.04, sy + 0.02, 0.02, 'curb')
+    sash('side', y, z, sy, sz, x, frame, glass, sill)
 
 
 def awning_front(x, z, sx, y=0.0, depth=0.2, c1='red', c2='white', stripes=None):
     """正面条纹雨棚，向 -Y 斜挑出 depth（不要超过离占地边的距离）。"""
     n = stripes or max(3, int(sx / 0.12))
     sw = sx / n
+    drop = depth * 0.28
+    span = math.hypot(depth, drop)
     for i in range(n):
-        box(x + i * sw, y - depth, z, sw, depth, 0.02, c1 if i % 2 == 0 else c2, rot=(-0.35, 0, 0))
+        cloth = c1 if i % 2 == 0 else c2
+        box(x+i*sw, y-(depth+span)/2, z-drop/2, sw, span, 0.012, cloth,
+            rot=(math.atan2(drop, depth), 0, 0))
+        box(x+i*sw, y-depth-0.004, z-drop-0.024, sw, 0.009, 0.032, cloth)
+    for offset in (0.035, sx-0.035):
+        box(x+offset, y-depth, z-drop-0.014, 0.009, depth, 0.012, 'dark_metal')
 
 
 def round_tree(x, y, s=1.0, z=0.0, seed=0, light='#93b475', dark='#638857'):
@@ -253,6 +342,8 @@ def round_tree(x, y, s=1.0, z=0.0, seed=0, light='#93b475', dark='#638857'):
         crown = ball(cx, cy, cz, radius, dark if i < 3 else light, 2, scale=(1.0, 0.88, 0.93))
         # 叶簇疏密决定边缘形状，几处透光的偏黄叶面留在冠层上方。
         crown.data.materials.append(M('#a5bd76' if i >= 3 else '#7c9f62'))
+        for material in crown.data.materials:
+            material['district_finish'] = 'foliage'
         for vertex in crown.data.vertices:
             vertex.co *= rnd.uniform(0.81, 1.16)
         for poly in crown.data.polygons:
@@ -267,10 +358,7 @@ def tree(x, y, s=1.0, z=0.0, kind='round'):
         for i, (r, hh) in enumerate([(0.24, 0.3), (0.19, 0.28), (0.13, 0.25)]):
             cyl(x, y, z + (0.15 + i * 0.17) * s, r * s, hh * s, 'pine', 12, r2=0.0)
         return
-    cyl(x, y, z, 0.045 * s, 0.32 * s, 'trunk', 8)
-    ball(x, y, z + 0.5 * s, 0.25 * s, 'leaf')
-    ball(x + 0.1 * s, y - 0.09 * s, z + 0.6 * s, 0.17 * s, 'leaf_light')
-    ball(x - 0.09 * s, y + 0.07 * s, z + 0.64 * s, 0.16 * s, 'leaf_light')
+    round_tree(x, y, 0.81 * s, z, seed=round(x * 131 + y * 89))
 
 
 def bush(x, y, r=0.08, z=Z0, m='leaf'):
@@ -315,7 +403,10 @@ def parapet(x, y, z, sx, sy, h=0.08, t=0.04, m='roof_red'):
 
 def water_tank(x, y, z, r=0.12, h=0.22, m='tank'):
     cyl(x, y, z, r, h, m)
-    cyl(x, y, z + h, r * 1.02, 0.02, 'white')
+    for level in (0.16, 0.78):
+        cyl(x, y, z + level*h, r*1.035, 0.009, 'steel')
+    cyl(x, y, z + h, r*1.025, 0.015, 'steel', r2=r*0.90)
+    cyl(x, y, z + h + 0.015, r*0.26, 0.012, 'dark_metal')
 
 
 def solar_heater(x, y, z, w=0.5):
@@ -339,25 +430,17 @@ def no_auto_back():
 
 
 def window_back(x, z, sx, sz, y, frame='frame', glass='glass', sill=True):
-    """背面（y=常数，朝 +Y）开一扇窗。"""
-    box(x, y - 0.008, z, sx, 0.02, sz, frame)
-    box(x + 0.02, y, z + 0.02, sx - 0.04, 0.02, sz - 0.04, glass)
-    if sill:
-        box(x - 0.01, y, z - 0.02, sx + 0.02, 0.04, 0.02, 'curb')
+    sash('back', x, z, sx, sz, y, frame, glass, sill)
 
 
 def window_left(y, z, sy, sz, x, frame='frame', glass='glass', sill=True):
-    """左面（x=常数，朝 -X）开一扇窗。"""
-    box(x - 0.012, y, z, 0.02, sy, sz, frame)
-    box(x - 0.02, y + 0.02, z + 0.02, 0.02, sy - 0.04, sz - 0.04, glass)
-    if sill:
-        box(x - 0.04, y - 0.01, z - 0.02, 0.04, sy + 0.02, 0.02, 'curb')
+    sash('left', y, z, sy, sz, x, frame, glass, sill)
 
 
 def curtain_front(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
     """正面玻璃幕墙：一整片玻璃 + 竖横框。"""
     _OPENINGS.append(('cfront', x, z, sx, sz, y, nx, nz, glass, mull))
-    box(x, y - 0.012, z, sx, 0.012, sz, glass)
+    box(x, y - 0.012, z, sx, 0.012, sz, glazing(glass))
     for i in range(nx + 1):
         box(x + i * sx / nx - 0.008, y - 0.022, z, 0.016, 0.014, sz, mull)
     for j in range(nz + 1):
@@ -367,7 +450,7 @@ def curtain_front(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
 def curtain_side(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
     """侧面（x=常数，朝 +X）玻璃幕墙。"""
     _OPENINGS.append(('cside', y, z, sy, sz, x, ny, nz, glass, mull))
-    box(x, y, z, 0.012, sy, sz, glass)
+    box(x, y, z, 0.012, sy, sz, glazing(glass))
     for i in range(ny + 1):
         box(x + 0.008, y + i * sy / ny - 0.008, z, 0.014, 0.016, sz, mull)
     for j in range(nz + 1):
@@ -376,7 +459,7 @@ def curtain_side(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
 
 def curtain_back(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
     """背面（y=常数，朝 +Y）玻璃幕墙。"""
-    box(x, y, z, sx, 0.012, sz, glass)
+    box(x, y, z, sx, 0.012, sz, glazing(glass))
     for i in range(nx + 1):
         box(x + i * sx / nx - 0.008, y + 0.008, z, 0.016, 0.014, sz, mull)
     for j in range(nz + 1):
@@ -385,7 +468,7 @@ def curtain_back(x, z, sx, sz, y, nx, nz, glass='glass', mull='white'):
 
 def curtain_left(y, z, sy, sz, x, ny, nz, glass='glass', mull='white'):
     """左面（x=常数，朝 -X）玻璃幕墙。"""
-    box(x - 0.012, y, z, 0.012, sy, sz, glass)
+    box(x - 0.012, y, z, 0.012, sy, sz, glazing(glass))
     for i in range(ny + 1):
         box(x - 0.022, y + i * sy / ny - 0.008, z, 0.014, 0.016, sz, mull)
     for j in range(nz + 1):
@@ -482,6 +565,7 @@ def actor(name, width_px, px_scale=1):
 
 def _reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    _PANES.clear()
     _MATS.clear()
     _OPENINGS.clear(); _AUTO_BACK[0] = True
     sc = bpy.context.scene

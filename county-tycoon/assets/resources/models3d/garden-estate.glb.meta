@@ -29,7 +29,7 @@
       "name": "立方体.mesh",
       "userData": {
         "gltfIndex": 0,
-        "triangleCount": 4500
+        "triangleCount": 6016
       },
       "ver": "1.1.1",
       "imported": true,
@@ -47,6 +47,22 @@
       "name": "lit.material",
       "userData": {
         "gltfIndex": 0
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
+    "50ba1": {
+      "importer": "gltf-material",
+      "uuid": "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@50ba1",
+      "displayName": "",
+      "id": "50ba1",
+      "name": "housing.material",
+      "userData": {
+        "gltfIndex": 2
       },
       "ver": "1.0.14",
       "imported": true,
@@ -100,7 +116,8 @@
       "textures": [],
       "materials": [
         "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@ce988",
-        "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@53647"
+        "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@53647",
+        "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@50ba1"
       ],
       "scenes": [
         "748255a2-c8ae-4e14-8aa5-8fbe85d9bd8d@f6bfc"

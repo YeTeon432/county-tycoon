@@ -10,13 +10,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
 import lib
 from homes_shops import grille_front, balcony_front, lantern, stool, table, steamer, carton, car
-from civic_industry import sign_front, bench, extrude_yz
+from civic_industry import sign_front, bench, beam, extrude_yz, extrude_xz
 lib._SPRITES.clear()
 
 
 def board(s, x, y, z, sw, sh, bg, ink, size=None, depth=0.03):
     """正面招牌：(x, z) 左下角，贴在 y 这面墙外。"""
+    box(x-0.008, y-depth+0.009, z-0.009, sw+0.016, depth, sh+0.018, 'dark_metal')
     box(x, y - depth, z, sw, depth, sh, bg)
+    box(x-0.01, y-depth-0.009, z+sh, sw+0.02, depth+0.018, 0.009, 'steel')
     text(s, x + sw / 2, y - depth - 0.004, z + sh / 2, size or sh * 0.7, ink, 'front')
 
 
@@ -167,9 +169,9 @@ def pharmacy():
 @sprite('teahouse', 1, 1)
 def teahouse():
     """茶馆：木构老房子，青瓦坡顶，木格窗，黑底金字匾「茶馆」，檐下挂灯笼，门口竹子和茶桌。"""
-    lot(1, 1, m=M('#b8b2a4'))
+    lot(1, 1, m=M('pave', color='#b8b2a4'))
     x0, y0, sx, sy, H = 0.14, 0.34, 0.72, 0.52, 0.44
-    wood = M('#8a5a34'); dark = M('#5a3a22'); white = M('#efe9dc')
+    wood = M('wood'); dark = M('wood', color='#654832'); white = M('paint_cream', color='#efe9dc')
     box(x0, y0, Z0, sx, sy, 0.06, M('#9a9488'))                                         # 石台基
     box(x0 + 0.02, y0 + 0.02, Z0 + 0.06, sx - 0.04, sy - 0.04, H - 0.06, white)
     for xx in (x0 + 0.02, x0 + sx / 2 - 0.015, x0 + sx - 0.05):                          # 木柱
@@ -183,7 +185,7 @@ def teahouse():
             box(xx, y0 + 0.006, Z0 + 0.08 + k * 0.065, 0.26, 0.008, 0.006, dark)
     for k in range(3):                                                                  # 侧面木格窗
         box(x0 + sx - 0.02, y0 + 0.1 + k * 0.12, Z0 + 0.16, 0.012, 0.08, 0.14, M('#e8c98e', emit=0.3))
-    tile_roof(x0, y0, Z0 + H, sx, sy, 0.22, M('#4a4f57'), eave=0.08)
+    tile_roof(x0, y0, Z0 + H, sx, sy, 0.22, M('roof_red', color='#566267'), eave=0.08)
     box(x0 + 0.2, y0 - 0.1, Z0 + H + 0.02, 0.32, 0.03, 0.12, M('#1d1d20'))                # 匾
     text('茶馆', x0 + 0.36, y0 - 0.105, Z0 + H + 0.08, 0.08, M('#f0bf45', emit=0.8), 'front')
     lantern(x0 + 0.06, y0 - 0.04, Z0 + H - 0.02)
@@ -352,14 +354,27 @@ def market():
     """菜市场：绿色钢结构大棚（人字顶，四面敞开），棚下一排排菜摊，正面山墙大招牌「菜市场」，门口三轮车和菜筐。"""
     lot(2, 2, m='concrete')
     x0, y0, sx, sy, H = 0.12, 0.42, 1.76, 1.46, 0.5
-    green = M('#3f9a55'); steel = M('#8c949c')
+    green = M('roof_green', color='#73998a'); steel = M('steel', color='#758780')
     for i in range(5):                                                                   # 柱子
         for yy in (y0, y0 + sy - 0.04):
             box(x0 + i * (sx - 0.04) / 4, yy, Z0, 0.04, 0.04, H, steel)
     for xx in (x0, x0 + sx - 0.04):
         box(xx, y0 + sy / 2 - 0.02, Z0, 0.04, 0.04, H, steel)
-    box(x0, y0, Z0 + H, sx, sy, 0.03, steel)
-    prism(x0 - 0.06, y0 - 0.06, Z0 + H + 0.03, sx + 0.12, sy + 0.12, 0.42, green, axis='y')  # 人字顶，屋脊沿 y：山墙朝前
+    # 两坡之间抬高一条采光带；正面能透过山墙桁架看到里面的菜摊。
+    eave, ridge = Z0+H, Z0+H+0.29
+    left, right, middle = x0-0.06, x0+sx+0.06, x0+sx/2
+    for outer, inner in ((left, middle-0.24), (right, middle+0.24)):
+        extrude_xz([(outer,eave), (inner,ridge), (inner,ridge+0.022), (outer,eave+0.022)],
+                   y0-0.045, y0+sy+0.045, green)
+    box(middle-0.24, y0, ridge, 0.48, sy, 0.091, 'glass')
+    prism(middle-0.28, y0-0.055, ridge+0.087, 0.56, sy+0.11, 0.085, green, axis='y')
+    for row in range(5):
+        yy = y0 + row*(sy-0.025)/4
+        box(x0, yy, eave-0.025, sx, 0.025, 0.025, steel)
+        for outer, inner in ((x0,middle-0.24), (x0+sx,middle+0.24)):
+            beam((outer,yy,eave), (inner,yy,ridge), 0.028, 0.022, steel)
+            beam((inner,yy,ridge), (middle,yy,eave), 0.020, 0.018, steel)
+            box(inner-0.009, yy, ridge, 0.018, 0.022, 0.091, steel)
     box(x0 + sx / 2 - 0.5, y0 - 0.08, Z0 + H + 0.06, 1.0, 0.03, 0.22, 'sign_white')         # 山墙招牌
     text('菜市场', x0 + sx / 2, y0 - 0.085, Z0 + H + 0.17, 0.17, M('#2f7a35'), 'front')
     # 棚下菜摊：三排水泥台 + 菜筐

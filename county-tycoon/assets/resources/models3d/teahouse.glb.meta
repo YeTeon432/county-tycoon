@@ -55,6 +55,22 @@
       ],
       "subMetas": {}
     },
+    "50ba1": {
+      "importer": "gltf-material",
+      "uuid": "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@50ba1",
+      "displayName": "",
+      "id": "50ba1",
+      "name": "housing.material",
+      "userData": {
+        "gltfIndex": 2
+      },
+      "ver": "1.0.14",
+      "imported": true,
+      "files": [
+        ".json"
+      ],
+      "subMetas": {}
+    },
     "04037": {
       "importer": "gltf-scene",
       "uuid": "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@04037",
@@ -100,7 +116,8 @@
       "textures": [],
       "materials": [
         "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@ce988",
-        "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@53647"
+        "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@53647",
+        "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@50ba1"
       ],
       "scenes": [
         "f38e5149-1754-4acb-a7d2-ad3e2cfc3d76@04037"

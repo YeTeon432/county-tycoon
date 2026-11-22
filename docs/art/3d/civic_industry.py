@@ -103,6 +103,10 @@ def sawtooth(x0, y0, z, sx, sy, n, th, roof, glass='glass'):
         ya = y0 + i * d
         extrude_yz([(ya, z), (ya + d, z), (ya, z + th)], x0, x0 + sx, roof)
         box(x0 + 0.03, ya - 0.012, z + 0.015, sx - 0.06, 0.014, th - 0.04, glass)
+        box(x0-0.008, ya-0.021, z+th-0.01, sx+0.016, 0.034, 0.02, 'steel')
+        for k in range(1, max(2, round(sx / 0.29))):
+            seam = x0 + k*sx/max(2, round(sx / 0.29))
+            beam((seam, ya, z+th+0.004), (seam, ya+d, z+0.004), 0.009, 0.009, 'steel')
         for k in range(1, int(sx / 0.18)):
             box(x0 + k * sx / int(sx / 0.18) - 0.006, ya - 0.018, z + 0.015, 0.012, 0.012, th - 0.04, 'white')
 
@@ -249,7 +253,10 @@ def clinic():
     for cx in (x0 + 0.22, x0 + 0.52):
         box(cx, 0.11, Z0, 0.02, 0.02, 0.23, 'steel')
     sign_front('卫生院', x0 + 0.38, y0, Z0 + 0.315, 0.56, 0.11, 'sign_white', M('#1f9a40'), size=0.09)
-    # 坡道扶手意思一下：门口台阶
+    for post in (0.09, 0.18):
+        cyl(x0+0.545, post, Z0, 0.007, 0.079, 'steel', 8)
+    beam((x0+0.545, 0.09, Z0+0.079), (x0+0.545, 0.20, Z0+0.079), 0.012, 0.012, 'steel')
+    # 门廊铺面
     box(x0 + 0.24, 0.12, Z0, 0.28, 0.14, 0.015, 'curb')
     # 女儿墙 + 屋顶十字灯箱
     parapet(x0, y0, top, sx, sy, h=0.06, m=lb)
@@ -369,13 +376,16 @@ def textile():
     x0, y0, sx, sy, H = 0.12, 0.5, 1.76, 1.36, 0.62
     box(x0, y0, Z0, sx, sy, H, M('#eef3f7'), bevel=0.005)
     top = Z0 + H
-    blue = M('#6fb1e3')
+    blue = M('paint_blue', color='#8faeba')
     box(x0 - 0.008, y0 - 0.008, Z0, sx + 0.016, sy + 0.016, 0.07, blue)
     box(x0 - 0.01, y0 - 0.01, top - 0.04, sx + 0.02, sy + 0.02, 0.04, blue)
-    sawtooth(x0, y0, top, sx, sy, 5, 0.16, M('#8fcaf0'))
+    sawtooth(x0, y0, top, sx, sy, 5, 0.16, M('roof_blue', color='#9bbdc5'))
     # 正面：两扇大卷帘门 + 一排窗 + 招牌
     for dx in (0.18, 1.12):
         box(x0 + dx, y0 - 0.012, Z0, 0.42, 0.014, 0.4, 'steel')
+        box(x0+dx-0.023, y0-0.16, Z0+0.407, 0.466, 0.165, 0.025, 'roof_grey', bevel=0.005)
+        for edge in (0.025, 0.395):
+            beam((x0+dx+edge, y0-0.14, Z0+0.405), (x0+dx+edge, y0, Z0+0.33), 0.012, 0.012, 'dark_metal')
         for k in range(12):
             box(x0 + dx, y0 - 0.018, Z0 + 0.02 + k * 0.032, 0.42, 0.008, 0.005, 'frame')
     for i in range(3):
@@ -410,7 +420,7 @@ def food_factory():
     top = Z0 + H
     box(x0 - 0.008, y0 - 0.008, Z0, sx + 0.016, sy + 0.016, 0.08, grey)
     # 浅坡双坡顶（屋脊沿 y）
-    prism(x0 - 0.03, y0 - 0.03, top, sx + 0.06, sy + 0.06, 0.18, M('#7fa9cf'), axis='y')
+    prism(x0 - 0.03, y0 - 0.03, top, sx + 0.06, sy + 0.06, 0.18, M('roof_blue', color='#78909b'), axis='y')
     extrude_xz([(x0, top), (x0 + sx, top), (x0 + sx / 2, top + 0.15)], y0, y0 + 0.001, wall)
     # 装卸口：月台 + 两个卷帘门 + 雨棚
     box(x0 + 0.05, y0 - 0.12, Z0, 1.08, 0.12, 0.1, grey)
@@ -425,21 +435,27 @@ def food_factory():
     for i in range(4):
         window_side(y0 + 0.12 + i * 0.3, Z0 + 0.25, 0.18, 0.18, x0 + sx)
     # 料仓
-    sil = M('#dfe4ea', rough=0.3, metal=0.5)
+    sil = M('steel', color='#c4caca', rough=0.38, metal=0.5)
     for i, sy_ in enumerate((0.55, 0.95, 1.35)):
         cx = 1.62
         cyl(cx, sy_, Z0, 0.18, 0.12, 'concrete', 20)
         cyl(cx, sy_, Z0 + 0.12, 0.17, 0.85, sil, 24)
         for z in (0.35, 0.65):
             cyl(cx, sy_, Z0 + 0.12 + z, 0.173, 0.015, grey, 24)
-        cyl(cx, sy_, Z0 + 0.12 + 0.45, 0.174, 0.1, M('#e8453c'), 24)
+        cyl(cx, sy_, Z0 + 0.12 + 0.45, 0.174, 0.034, M('steel', color='#a9634b'), 24)
         cyl(cx, sy_, Z0 + 0.97, 0.17, 0.12, sil, 24, r2=0.04)
     # 料仓顶的走道 + 管子连到厂房
     box(1.6, 0.5, Z0 + 1.0, 0.04, 0.9, 0.025, 'dark_metal')
     box(x0 + sx - 0.02, 1.3, Z0 + 0.62, 0.36, 0.05, 0.05, 'steel')
     cyl(1.62, 0.95, Z0 + 1.09, 0.018, 0.14, 'steel', 8)
     # 爬梯
-    box(1.79, 0.53, Z0 + 0.12, 0.012, 0.04, 0.85, 'dark_metal')
+    for yy in (0.483, 0.573):
+        box(1.803, yy, Z0+0.10, 0.012, 0.014, 0.91, 'dark_metal')
+    for k in range(9):
+        box(1.804, 0.483, Z0+0.15+k*0.094, 0.015, 0.104, 0.009, 'steel')
+    for yy in (0.56, 0.94, 1.34):
+        box(1.65, yy, Z0+1.022, 0.009, 0.012, 0.105, 'steel')
+    box(1.65, 0.54, Z0+1.12, 0.012, 0.84, 0.012, 'steel')
     # 倒进来的货车（车头朝 -Y）
     truck(x0 + 0.21, 0.01, along='y', body='white', cab='red', cargo=M('#f3f3f0'))
     for k in range(3):
@@ -451,28 +467,29 @@ def food_factory():
 def electronics():
     """电子厂：两栋白 + 蓝玻璃的现代厂房（左长楼 5 层、右后 3 层），二层玻璃连廊相连。"""
     lot(2, 2)
-    blueg = M('#5aa6e6', rough=0.06, metal=0.3)
-    wall = M('#f5f7fa'); trim = M('#2f6fd0')
+    blueg = M('glass', color='#789eaa')
+    wall = M('tile_white', color='#dedfd7')
+    trim = M('steel', color='#83979a')
 
     def block(x, y, sx, sy, floors, nf, ns):
         h = floors * FH
-        box(x, y, Z0, sx, sy, h, wall, bevel=0.005)
+        box(x, y, Z0, sx, sy, h, wall, bevel=0.014)
         for f in range(floors):
-            z = Z0 + f * FH
-            if f > 0 or True:
-                box(x + 0.04, y - 0.012, z + 0.08, sx - 0.08, 0.012, 0.15, blueg)
-                for k in range(1, nf):
-                    box(x + 0.04 + k * (sx - 0.08) / nf, y - 0.02, z + 0.08, 0.01, 0.01, 0.15, wall)
-            box(x + sx, y + 0.05, z + 0.08, 0.012, sy - 0.1, 0.15, blueg)
-            for k in range(1, ns):
-                box(x + sx + 0.002, y + 0.05 + k * (sy - 0.1) / ns, z + 0.08, 0.01, 0.01, 0.15, wall)
-            # 背面 / 左面（D031 视角旋转后看得见）
-            box(x + 0.04, y + sy, z + 0.08, sx - 0.08, 0.012, 0.15, blueg)
-            for k in range(1, nf):
-                box(x + 0.04 + k * (sx - 0.08) / nf, y + sy + 0.01, z + 0.08, 0.01, 0.01, 0.15, wall)
-            box(x - 0.012, y + 0.05, z + 0.08, 0.012, sy - 0.1, 0.15, blueg)
-            for k in range(1, ns):
-                box(x - 0.012, y + 0.05 + k * (sy - 0.1) / ns, z + 0.08, 0.01, 0.01, 0.15, wall)
+            z = Z0 + f*FH
+            for face, start, width, plane, bays in (
+                ('front',x,sx,y,nf), ('back',x,sx,y+sy,nf),
+                ('side',y,sy,x+sx,ns), ('left',y,sy,x,ns),
+            ):
+                pitch = (width-0.08)/bays
+                for k in range(bays):
+                    sash(face, start+0.04+k*pitch, z+0.075, pitch-0.004, 0.174,
+                         plane, trim, blueg, False)
+            if f:
+                box(x-0.026, y-0.032, z+0.047, sx+0.052, sy+0.064, 0.025,
+                    M('steel', color='#b8c4bf'), bevel=0.005)
+        # 侧立面按结构跨设置竖向遮阳翼，底层留出通往连廊的通道。
+        for k in range(1, ns, 2):
+            box(x+sx, y+0.04+k*(sy-0.08)/ns, Z0+FH, 0.075, 0.018, h-FH, trim)
         parapet(x, y, Z0 + h, sx, sy, h=0.05, m=trim)
         return Z0 + h
 
@@ -589,7 +606,7 @@ def center_county():
     """发展中心：白框 + 玻璃幕墙的现代公共建筑（中间 5 层、两翼 3 层），门前广场 + 旗杆。"""
     lot(2, 2)
     box(0, 0, Z0, 2, 0.95, 0.004, M('#e6e0d2'))
-    wall = M('#fbfbf8'); glass = M('#6db4ea', rough=0.05, metal=0.3)
+    wall = M('#fbfbf8'); glass = M('glass', color='#91acb4')
     by = 0.98
     # 两翼
     for wx in (0.14, 1.36):
@@ -630,7 +647,7 @@ def center_county():
 def school():
     """学校：米黄墙红坡顶三层教学楼 + 中间楼梯塔，前面红色跑道操场，旗杆。"""
     lot(2, 2)
-    wall = M('#f3dca4'); trim = M('#fbf3dc'); roof = M('#c8483c')
+    wall = M('paint_cream', color='#e6d6b2'); trim = M('#fbf3dc'); roof = M('roof_red')
     x0, y0, sx, sy = 0.12, 1.26, 1.76, 0.6
     fh = 0.32; floors = 3
     box(x0, y0, Z0, sx, sy, fh * floors, wall, bevel=0.005)
@@ -995,7 +1012,7 @@ def car_factory():
     sign_front('总装车间', (ox0 + ox1) / 2, yf, Z0 + 0.53, 0.5, 0.1, 'sign_white', M('#d8322a'), size=0.075)
     # 侧面：一排高窗 + 一个卷帘门
     for i in range(5):
-        curtain_side(yf + 0.06 + i * 0.21, Z0 + 0.36, 0.17, 0.18, x1, 2, 1, glass=M('#6db4ea', rough=0.05, metal=0.3))
+        curtain_side(yf + 0.06 + i * 0.21, Z0 + 0.36, 0.17, 0.18, x1, 2, 1, glass=M('glass', color='#91acb4'))
     box(x1, yf + 0.1, Z0, 0.012, 0.3, 0.3, 'steel')
     for k in range(8):
         box(x1 + 0.006, yf + 0.1, Z0 + 0.02 + k * 0.035, 0.008, 0.3, 0.004, 'frame')
@@ -1003,21 +1020,21 @@ def car_factory():
     for (bz, bh) in ((Z0 + 0.6, 0.06), (Z0 + 0.7, 0.02)):
         box(x0, yb - 0.004, bz, x1 - x0, 0.01, bh, red)
     for i in range(8):
-        curtain_back(x0 + 0.08 + i * 0.22, Z0 + 0.36, 0.17, 0.18, yb, 2, 1, glass=M('#6db4ea', rough=0.05, metal=0.3))
+        curtain_back(x0 + 0.08 + i * 0.22, Z0 + 0.36, 0.17, 0.18, yb, 2, 1, glass=M('glass', color='#91acb4'))
     for dx in (x0 + 0.25, x0 + 1.1):
         box(dx, yb, Z0, 0.4, 0.012, 0.3, 'steel')
         for k in range(8):
             box(dx, yb + 0.006, Z0 + 0.02 + k * 0.035, 0.4, 0.008, 0.004, 'frame')
     # 屋顶：采光带 + 设备
     for k in range(3):
-        box(0.85, yf + 0.15 + k * 0.3, top, 0.95, 0.1, 0.04, M('#8fcaf0', rough=0.05, metal=0.3), bevel=0.01)
+        box(0.85, yf + 0.15 + k * 0.3, top, 0.95, 0.1, 0.04, M('glass', color='#9dbdc0'), bevel=0.01)
     box(1.4, 1.55, top, 0.3, 0.22, 0.12, M('#d5dbe2'), bevel=0.01)
     for k in range(2):
         cyl(1.47 + k * 0.15, 1.66, top + 0.12, 0.05, 0.02, 'dark_metal', 16)
     # 左后办公楼（玻璃幕墙 6 层 + 红顶带 + 楼顶标志）
     ow0, ow1, oy0, oy1, oh2 = 0.12, 0.72, 1.3, 1.88, 6 * FH
     box(ow0, oy0, Z0, ow1 - ow0, oy1 - oy0, oh2, white, bevel=0.004)
-    gl = M('#5aa6e6', rough=0.05, metal=0.3)
+    gl = M('glass', color='#7999a5')
     curtain_front(ow0 + 0.05, top + 0.04, ow1 - ow0 - 0.1, Z0 + oh2 - top - 0.14, oy0, 3, 3, glass=gl)
     curtain_side(oy0 + 0.05, top + 0.04, oy1 - oy0 - 0.1, Z0 + oh2 - top - 0.14, ow1, 3, 3, glass=gl)
     box(ow0 - 0.01, oy0 - 0.01, Z0 + oh2 - 0.08, ow1 - ow0 + 0.02, oy1 - oy0 + 0.02, 0.08, red)

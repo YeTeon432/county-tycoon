@@ -2,7 +2,7 @@ import { _decorator, Color, Component, Graphics, JsonAsset, Label, Layers, Node,
 import { ArtLibrary } from '../core/ArtLibrary';
 import { DayClock } from '../core/DayClock';
 import { IsoMath } from '../core/IsoMath';
-import { PlacedBuilding, TownModel } from '../core/TownModel';
+import { Facing, PlacedBuilding, TownModel } from '../core/TownModel';
 import { BuildingLayer } from './BuildingLayer';
 import type { Actor3D } from './World3D';
 import { skinOf as lookOf } from '../core/Appearance';
@@ -71,6 +71,21 @@ const SHADOW: Record<Kind, { frame: string; settle: number }> = {
     car: { frame: 'shadow-l', settle: 4.25 },
 };
 
+const PICKUP_WAIT = 1.15;
+const PICKUP_EXIT_ALONG = 0.36;
+const PICKUP_EXIT_OUT = 0.12;
+const PICKUP_EXIT_LENGTH = Math.hypot(PICKUP_EXIT_ALONG, PICKUP_EXIT_OUT);
+// 门面向街道的法线，和模型的四个旋转方向一致。
+const FRONT: Record<Facing, [number, number]> = { L: [0, 1], R: [1, 0], UR: [0, -1], UL: [-1, 0] };
+
+interface Pickup {
+    elapsed: number;
+    travel: number;
+    startX: number; startY: number;
+    windowX: number; windowY: number;
+    normalX: number; normalY: number;
+}
+
 interface Agent {
     kind: Kind;
     node: Node;
@@ -89,6 +104,7 @@ interface Agent {
     side: number;               // 行人走哪侧人行道：±1
     anim: number;
     residentId: number;
+    pickup: Pickup | null;
     /** 要去的楼 */
     to: number;
     /** 行进位置和本帧交给 World3D 的画法 */
@@ -332,7 +348,12 @@ export class LifeLayer extends Component {
         for (let i = this._agents.length - 1; i >= 0; i--) {
             const a = this._agents[i];
             const w = this._model!.width;
-            if (a.path.slice(a.i).some((c) => !this.roadKind(c % w, Math.floor(c / w)))) this.arrive(i, false);
+            const destination = this.buildingByUid(a.to);
+            const facing = FRONT[destination?.facing ?? 'L'];
+            const turned = a.pickup && (facing[0] !== a.pickup.normalX || facing[1] !== a.pickup.normalY);
+            if (!destination || turned || a.path.slice(a.i).some((c) => !this.roadKind(c % w, Math.floor(c / w)))) {
+                this.arrive(i, false);
+            }
         }
         // 楼被拆了：人在那栋楼里就当回家了
         this._people.forEach((p) => {
@@ -560,10 +581,17 @@ export class LifeLayer extends Component {
             const prev = new Int32Array(w * h).fill(-2);
             const queue: number[] = [];
             for (const c of this.doorCells(a)) { prev[c] = -1; queue.push(c); }
+            // 多面临街时优先走到取茶窗。正门道路不连通时仍可从原有入口到店。
+            const [nx, ny] = FRONT[b.facing ?? 'L'];
+            const frontCell = (b.row + ny) * w + b.col + nx;
+            const preferFront = b.def.id === 'milk-tea' && goal.has(frontCell);
             let hit = -1;
             for (let qi = 0; qi < queue.length; qi++) {
                 const c = queue[qi];
-                if (goal.has(c)) { hit = c; break; }
+                if (goal.has(c)) {
+                    if (!preferFront || c === frontCell) { hit = c; break; }
+                    if (hit < 0) hit = c;
+                }
                 const col = c % w, row = Math.floor(c / w);
                 for (const [dx, dy] of DIRS) {
                     const nc = col + dx, nr = row + dy;
@@ -617,7 +645,7 @@ export class LifeLayer extends Component {
             speed: base * hurry,
             side: R(2) < 0.5 ? 1 : -1,
             anim: R(3),
-            residentId: who.id,
+            residentId: who.id, pickup: null,
             to,
             view: {
                 gx: 0, gy: 0, frame: null, w: 0, h: 0, flip: false,
@@ -644,6 +672,10 @@ export class LifeLayer extends Component {
 
     // ---------------- 走路 ----------------
     private step(a: Agent, dt: number, index: number): void {
+        if (a.pickup) {
+            this.stepPickup(a, a.pickup, dt, index);
+            return;
+        }
         const w = this._model!.width;
         if (a.path.length > 1) {
             const d = a.speed * this.roadFactor(a) * dt;
@@ -652,12 +684,9 @@ export class LifeLayer extends Component {
             while (a.t >= 1) {
                 a.i++;
                 if (a.i >= a.path.length - 1) {
-                    if (a.node.children.length > 0) {
-                        a.t = 1;
-                        this.updatePosition(a);
-                        this.positionChat(a);
-                    }
-                    this.arrive(index, true);
+                    a.t = 1;
+                    this.updatePosition(a);
+                    this.finishRoad(a, index);
                     return;
                 }
                 a.t -= 1;
@@ -668,9 +697,44 @@ export class LifeLayer extends Component {
         } else {
             // 两栋楼共用一个门口：原地站一下就到
             a.t += dt;
-            if (a.t >= 0.6) { this.arrive(index, true); return; }
+            if (a.t >= 0.6) { this.finishRoad(a, index); return; }
         }
         this.updatePosition(a);
+    }
+
+    private finishRoad(a: Agent, index: number): void {
+        const shop = this.buildingByUid(a.to);
+        if (shop?.def.id === 'milk-tea' && a.kind === 'ped' && this._info.get(a.residentId)?.jobId !== a.to) {
+            const [nx, ny] = FRONT[shop.facing ?? 'L'];
+            if (a.tc === shop.col + nx && a.tr === shop.row + ny) {
+                // 奶茶铺的窗口在本地 x=0.34、距临街边 0.18 格处。
+                const windowX = shop.col + 0.5 + 0.32 * nx - 0.16 * ny;
+                const windowY = shop.row + 0.5 + 0.32 * ny + 0.16 * nx;
+                a.pickup = {
+                    elapsed: 0, travel: Math.hypot(windowX - a.view.gx, windowY - a.view.gy) / a.speed,
+                    startX: a.view.gx, startY: a.view.gy, windowX, windowY, normalX: nx, normalY: ny,
+                };
+                return;
+            }
+        }
+        if (a.node.children.length) this.positionChat(a);
+        this.arrive(index, true);
+    }
+
+    private stepPickup(a: Agent, p: Pickup, dt: number, index: number): void {
+        p.elapsed += dt;
+        const leave = p.travel + PICKUP_WAIT;
+        // 从取餐窗沿铺装走向店门一侧，避开车行道。位移决定走路帧，等候时双脚固定。
+        const approach = Math.min(1, p.elapsed / p.travel);
+        const exit = Math.min(1, Math.max(0, p.elapsed - leave) * a.speed / PICKUP_EXIT_LENGTH);
+        const x = p.startX + (p.windowX - p.startX) * approach
+            + (PICKUP_EXIT_ALONG * p.normalY + PICKUP_EXIT_OUT * p.normalX) * exit;
+        const y = p.startY + (p.windowY - p.startY) * approach
+            + (PICKUP_EXIT_OUT * p.normalY - PICKUP_EXIT_ALONG * p.normalX) * exit;
+        a.anim += Math.hypot(x - a.view.gx, y - a.view.gy);
+        a.view.gx = x;
+        a.view.gy = y;
+        if (exit === 1) this.arrive(index, true);
     }
 
     /** 车道偏移：行人走人行道，车靠一侧（垂直于行进方向，对向自动分两边） */
@@ -689,7 +753,14 @@ export class LifeLayer extends Component {
 
     private layoutActor(a: Agent): void {
         const iso = this._iso!, art = this._art!, v = a.view;
-        const dx = a.tc - a.col, dy = a.tr - a.row;
+        let dx = a.tc - a.col, dy = a.tr - a.row;
+        const pickup = a.pickup;
+        const waiting = pickup && pickup.elapsed >= pickup.travel && pickup.elapsed < pickup.travel + PICKUP_WAIT;
+        if (pickup) {
+            const leaving = pickup.elapsed >= pickup.travel + PICKUP_WAIT;
+            dx = leaving ? pickup.normalY : -pickup.normalX;
+            dy = leaving ? -pickup.normalX : pickup.normalY;
+        }
         // 朝向看的是屏幕上往哪走（D031 转视角后按视图方向）：
         // +vx 正面，+vy 正面翻转，-vx 背面，-vy 背面翻转（车：沿 vy 翻转）
         const [vdx, vdy] = iso.viewDir(dx, dy);
@@ -698,7 +769,7 @@ export class LifeLayer extends Component {
         let name: string;
         if (a.kind === 'ped') {
             const f = Math.floor(a.anim / LifeLayer.STRIDE) % 2;
-            const suffix = `-${front ? 'front' : 'back'}${dx === 0 && dy === 0 ? 0 : f}`;
+            const suffix = `-${front ? 'front' : 'back'}${waiting || (dx === 0 && dy === 0) ? 0 : f}`;
             // D023：先用新外观（woman1-front0），图集里还没有就退回旧的 ped<N>
             name = a.look && art.get(a.look + suffix) ? a.look + suffix : `ped${a.skin}${suffix}`;
         } else if (a.kind === 'scoot') {

@@ -224,7 +224,7 @@ def workshop():
 @sprite('clinic', 1, 1)
 def clinic():
     """卫生院：白墙 + 浅蓝腰线三层，门口雨棚，绿色十字灯箱，招牌「卫生院」。"""
-    lot(1, 1)
+    street_lot(1, 1, '#c9c6b9')
     x0, y0, sx, sy = 0.12, 0.26, 0.76, 0.62
     floors = 3
     box(x0, y0, Z0, sx, sy, FH * floors, 'tile_white', bevel=0.005)
@@ -1079,7 +1079,7 @@ def plaza():
     for (tx, ty, ts) in [(0.3, 0.3, 1.0), (1.84, 0.16, 0.5), (0.22, 1.78, 1.2), (1.7, 1.7, 1.0)]:
         box(tx - 0.12, ty - 0.12, Z0, 0.24, 0.24, 0.04, 'curb')
         box(tx - 0.1, ty - 0.1, Z0 + 0.04, 0.2, 0.2, 0.003, 'grass')
-        tree(tx, ty, ts, Z0 + 0.04)
+        round_tree(tx, ty, ts * 0.83, Z0 + 0.04, seed=round(tx * 100 + ty * 9))
 
 
 if __name__ == '__main__':

@@ -26,7 +26,7 @@
   模型不要伸出占地菱形的下边，伸出去的部分会被裁掉（库会警告）。
 - 游戏里一格 32×16 世界单位，图是 4 倍分辨率（atlas-frames.json 里 "scale": 4）。
 """
-import bpy, math, os, sys
+import bpy, math, os, random, sys
 from mathutils import Vector
 
 TILE_PX = 128                     # 一格菱形宽多少像素
@@ -201,6 +201,14 @@ def lot(w, h, m='pave', z=Z0):
     return box(0, 0, 0, w, h, z, m)
 
 
+def street_lot(w, h, yard, depth=0.21):
+    """临街铺装一直铺到左右地界，后院与铺装齐平。"""
+    box(0, depth, 0, w, h - depth, Z0, yard)
+    box(0, 0, 0, w, depth, Z0, '#c7c2b5')
+    for i in range(1, w * 4):
+        box(i * 0.25, 0.006, Z0, 0.004, depth - 0.012, 0.001, '#b5b0a4')
+
+
 def window_front(x, z, sx, sz, y=0.0, frame='frame', glass='glass', sill=True):
     """正面（y=常数，朝 -Y）开一扇窗：窗框 + 玻璃略凹。"""
     _OPENINGS.append(('front', x, z, sx, sz, y, frame, glass, sill))
@@ -225,6 +233,31 @@ def awning_front(x, z, sx, y=0.0, depth=0.2, c1='red', c2='white', stripes=None)
     sw = sx / n
     for i in range(n):
         box(x + i * sw, y - depth, z, sw, depth, 0.02, c1 if i % 2 == 0 else c2, rot=(-0.35, 0, 0))
+
+
+def round_tree(x, y, s=1.0, z=0.0, seed=0, light='#93b475', dark='#638857'):
+    """分叉的树干托住几簇不等大的叶冠，树冠外缘露出枝间空隙。"""
+    rnd = random.Random(seed)
+    cyl(x, y, z, 0.037 * s, 0.56 * s, '#927b61', 8, r2=0.025 * s)
+    phase = rnd.uniform(0, 2 * math.pi)
+    for i in range(6):
+        angle = phase + i * 2.40
+        reach = (0.17 if i < 4 else 0.073) * s
+        cx, cy = x + math.cos(angle) * reach, y + math.sin(angle) * reach
+        cz = z + (0.57 + i * 0.057 + rnd.uniform(-0.02, 0.02)) * s
+        branch = Vector((cx - x, cy - y, cz - z - 0.37 * s))
+        twig = cyl(x, y, z, 0.017 * s, branch.length, '#89785d', 6, r2=0.009 * s)
+        twig.location = Vector((x, y, z + 0.37 * s)) + branch / 2
+        twig.rotation_euler = branch.to_track_quat('Z', 'Y').to_euler()
+        radius = s * rnd.uniform(0.155, 0.205)
+        crown = ball(cx, cy, cz, radius, dark if i < 3 else light, 2, scale=(1.0, 0.88, 0.93))
+        # 叶簇疏密决定边缘形状，几处透光的偏黄叶面留在冠层上方。
+        crown.data.materials.append(M('#a5bd76' if i >= 3 else '#7c9f62'))
+        for vertex in crown.data.vertices:
+            vertex.co *= rnd.uniform(0.81, 1.16)
+        for poly in crown.data.polygons:
+            if poly.normal.z > 0.22 and rnd.random() < 0.24:
+                poly.material_index = 1
 
 
 def tree(x, y, s=1.0, z=0.0, kind='round'):

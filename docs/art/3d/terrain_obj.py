@@ -14,31 +14,6 @@ def _flat(o):
     return o
 
 
-def round_tree(x, y, s=1.0, z=0.0, seed=0, light='#93b475', dark='#638857'):
-    """分叉的树干托住几簇不等大的叶冠，树冠外缘露出枝间空隙。"""
-    rnd = random.Random(seed)
-    cyl(x, y, z, 0.037 * s, 0.56 * s, '#927b61', 8, r2=0.025 * s)
-    phase = rnd.uniform(0, 2 * math.pi)
-    for i in range(6):
-        angle = phase + i * 2.40
-        reach = (0.17 if i < 4 else 0.073) * s
-        cx, cy = x + math.cos(angle) * reach, y + math.sin(angle) * reach
-        cz = z + (0.57 + i * 0.057 + rnd.uniform(-0.02, 0.02)) * s
-        branch = Vector((cx - x, cy - y, cz - z - 0.37 * s))
-        twig = cyl(x, y, z, 0.017 * s, branch.length, '#89785d', 6, r2=0.009 * s)
-        twig.location = Vector((x, y, z + 0.37 * s)) + branch / 2
-        twig.rotation_euler = branch.to_track_quat('Z', 'Y').to_euler()
-        radius = s * rnd.uniform(0.155, 0.205)
-        crown = ball(cx, cy, cz, radius, dark if i < 3 else light, 2, scale=(1.0, 0.88, 0.93))
-        # 叶簇疏密决定边缘形状，几处透光的偏黄叶面留在冠层上方。
-        crown.data.materials.append(M('#a5bd76' if i >= 3 else '#7c9f62'))
-        for vertex in crown.data.vertices:
-            vertex.co *= rnd.uniform(0.81, 1.16)
-        for poly in crown.data.polygons:
-            if poly.normal.z > 0.22 and rnd.random() < 0.24:
-                poly.material_index = 1
-
-
 def pine(x, y, s=1.0, z=0.0):
     cyl(x, y, z, 0.035 * s, 0.18 * s, 'trunk', 8)
     for i, (r, hh) in enumerate([(0.2, 0.28), (0.16, 0.26), (0.11, 0.24)]):

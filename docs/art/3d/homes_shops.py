@@ -2,6 +2,7 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib import *
+from lib import _OPENINGS
 
 
 @sprite('house', 1, 1)
@@ -21,7 +22,8 @@ def lane_house(terrace):
     brick = '#da9a80' if terrace else '#d6ad88'
     trim, metal = '#ede8dc', '#7e8d89'
     glass = '#a7d4d4' if terrace else '#94cbe1'
-    lot(1, 1, '#d8cabb')
+    street_lot(1, 1, '#c2b8a5')
+    existing = set(bpy.context.scene.objects) if terrace else None
     fh = 0.29
     top = Z0 + 4 * fh
     tower_x = 0.65 if terrace else 0.09
@@ -86,13 +88,30 @@ def lane_house(terrace):
         window_front(0.15, top + 0.105, 0.13, 0.115, y=0.24, frame=trim, glass=glass, sill=False)
         solar_heater(0.45, 0.54, top + 0.034, w=0.29)
 
+    if terrace:
+        # 整座住宅后退，院门与首层门厅对齐。窄砖墙和种植带收住房前的空地。
+        for obj in set(bpy.context.scene.objects) - existing:
+            obj.location.y += 0.10
+        # 自动补背窗使用建模时登记的开口坐标。
+        for i, opening in enumerate(_OPENINGS):
+            face, along, z, w, h, plane, *style = opening
+            if face.endswith('side'):
+                along += 0.10
+            else:
+                plane += 0.10
+            _OPENINGS[i] = (face, along, z, w, h, plane, *style)
+        box(0.49, 0.11, Z0, 0.43, 0.13, 0.055, '#ae8871')
+        box(0.49, 0.11, Z0 + 0.055, 0.43, 0.026, 0.073, '#c8987f', bevel=0.008)
+        for x in (0.55, 0.67, 0.81):
+            bush(x, 0.195, 0.067, Z0 + 0.056, '#82956d')
+
 
 @sprite('milk-tea', 1, 1)
 def milk_tea():
     """浅青金属屋面、内退的取茶窗口与独立的玻璃入口。"""
     wood, cream, berry = '#a57351', '#fff1d5', '#e9837f'
     wall, metal = '#f7dfb8', '#698781'
-    lot(1, 1, '#ddd0ba')
+    street_lot(1, 1, '#cabea8')
     # 门面留空。后墙上的货架透过敞开的窗口可见，窗台从外侧一直延伸到店内。
     box(0.09, 0.55, Z0, 0.78, 0.32, 0.45, wall)
     for x in (0.09, 0.84):

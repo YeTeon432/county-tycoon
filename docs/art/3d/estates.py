@@ -3,10 +3,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib import Z0, box, bush, lamp, lot, pyramid, run, sprite, text, tree
+from lib import curtain_front, parapet, prism, round_tree, street_lot, Z0, box, bush, lamp, lot, pyramid, run, sprite, text, tree
 
 
-def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z0):
+def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z0, rooftop_room=True):
     height = floors * 0.24
     box(x, y, base, w, d, height, wall, bevel=0.01)
     cols = max(2, round(w / 0.28))
@@ -27,7 +27,7 @@ def block(x, y, w, d, floors, wall, roof, pitched=False, balconies=False, base=Z
     box(x - 0.018, y - 0.018, top, w + 0.036, d + 0.036, 0.045, roof)
     if pitched:
         pyramid(x - 0.035, y - 0.035, top + 0.04, w + 0.07, d + 0.07, 0.15, roof)
-    else:
+    elif rooftop_room:
         box(x + w * 0.6, y + d * 0.45, top + 0.045, 0.21, 0.19, 0.13, wall)
 
 
@@ -52,12 +52,36 @@ def workers():
 
 @sprite('resettlement', 2, 2)
 def resettlement():
-    lot(2, 2, 'pave')
-    for x, y in ((0.12, 1.32), (1.06, 1.32), (0.13, 0.50)):
-        block(x, y, 0.80, 0.50, 5, 'paint_cream', 'roof_red', True)
-    box(1.10, 0.55, Z0, 0.68, 0.43, 0.015, 'grass')
-    tree(1.47, 0.79, 0.69, z=Z0)
-    gate('同心家园', 'brown')
+    street_lot(2, 2, '#bdb5a2')
+    # 后排是有坡屋面的长板楼。前排错开半个楼宽，让院入口直接望得见楼梯口。
+    for x, y, w, d, floors, paint, tile in (
+        (0.14, 1.18, 1.71, 0.59, 5, '#e4ceb2', '#9b6b5c'),
+        (0.14, 0.39, 0.88, 0.57, 3, '#e1dccc', '#858984'),
+    ):
+        block(x, y, w, d, floors, paint, '#ad9b86', rooftop_room=floors != 5)
+        top = Z0 + floors * 0.24 + 0.045
+        if floors == 5:
+            prism(x - 0.032, y - 0.036, top, w + 0.064, d + 0.072, 0.145, tile)
+            box(x - 0.042, y + d / 2 - 0.014, top + 0.134, w + 0.084, 0.028, 0.020, '#ad8070')
+        else:
+            parapet(x - 0.018, y - 0.018, top, w + 0.036, d + 0.036, h=0.044, t=0.018, m=tile)
+        stair = x + w * 0.51
+        box(stair, y - 0.055, Z0, 0.16, 0.07, floors * 0.24, '#bc967e')
+        for f in range(1, floors):
+            box(stair + 0.036, y - 0.06, Z0 + f * 0.24 - 0.045, 0.088, 0.012, 0.143, '#84a7a9')
+            for bx in ([x + 0.03, x + w - 0.35] if floors == 5 else [x + 0.03]):
+                z = Z0 + f * 0.24
+                box(bx, y - 0.116, z, 0.33, 0.12, 0.024, '#e9dfcb', bevel=0.007)
+                box(bx, y - 0.116, z + 0.024, 0.33, 0.02, 0.072, '#c3c2ae')
+                if f == 2:
+                    curtain_front(bx + 0.01, z + 0.096, 0.31, 0.14, y - 0.107, 3, 1,
+                                  glass='#9bb7b8', mull='#d9d4c6')
+        box(stair - 0.04, y - 0.136, Z0 + 0.194, 0.24, 0.16, 0.027, '#d5c9ae', bevel=0.008)
+    box(1.36, 0.29, Z0, 0.49, 0.55, 0.024, '#94a081')
+    round_tree(1.63, 0.60, 0.68, z=Z0 + 0.024, seed=14)
+    for x, length in ((0.08, 0.89), (1.40, 0.50)):
+        box(x, 0.22, Z0, length, 0.064, 0.115, '#b5957b', bevel=0.008)
+    text('同心家园', 0.69, 0.216, Z0 + 0.066, 0.075, 'sign_white', 'front')
 
 
 @sprite('highrise', 2, 2)

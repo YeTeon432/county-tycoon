@@ -69,7 +69,7 @@ export class World3D extends Component {
     private _streetNode: Node | null = null;
     private _streetMat: Material | null = null;
     private readonly _groundCapacity = new WeakMap<Node, number>();
-    private _mats: { lit: Material; emit: Material; ground: Material; relief: Material; foliage: Material; glass: Material } | null = null;
+    private _mats: { lit: Material; emit: Material; ground: Material; relief: Material; foliage: Material; glass: Material; housing: Material } | null = null;
     private readonly _prefabs = new Map<string, Prefab>();
     private readonly _missing = new Set<string>();
     /** uid → 楼的节点 */
@@ -170,14 +170,14 @@ export class World3D extends Component {
             if (err) { console.error('[World3D] 人车材质', err.message); return; }
             this._actorMat = mat;
         });
-        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands', 'models3d/foliage', 'models3d/glazing'], Material, (err, mats) => {
+        resources.load(['models3d/building', 'models3d/emit', 'models3d/ground-unlit', 'models3d/highlands', 'models3d/foliage', 'models3d/glazing', 'models3d/housing'], Material, (err, mats) => {
             if (err) {
                 console.error('[World3D] 材质', err.message);
                 director.emit('town-load-error');
                 return;
             }
             const by = (n: string) => mats.find((m) => m.name === n)!;
-            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands'), foliage: by('foliage'), glass: by('glazing') };
+            this._mats = { lit: by('building'), emit: by('emit'), ground: by('ground-unlit'), relief: by('highlands'), foliage: by('foliage'), glass: by('glazing'), housing: by('housing') };
             const street = new Material();
             street.initialize({ effectAsset: this._mats.emit.effectAsset, technique: 1, defines: { USE_TEXTURE: true } });
             this._streetMat = street;
@@ -658,7 +658,8 @@ export class World3D extends Component {
             const diffuse = id === 'tree' || id.startsWith('terrain-forest-') ? mats.foliage : mats.lit;
             for (let i = 0; i < mr.sharedMaterials.length; i++) {
                 let surface = diffuse;
-                if (mr.sharedMaterials[i]?.name === 'glass') surface = mats.glass;
+                if (mr.sharedMaterials[i]?.name === 'housing') surface = mats.housing;
+                else if (mr.sharedMaterials[i]?.name === 'glass') surface = mats.glass;
                 else if (i === 1) surface = mats.emit; // 旧版模型的第二个子网格为招牌灯。
                 mr.setSharedMaterial(surface, i);
             }

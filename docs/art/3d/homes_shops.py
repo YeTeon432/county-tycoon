@@ -610,76 +610,132 @@ def tutoring():
 
 
 # ================================================================ 2×2
-def res_tower(x0, y0, sx, sy, nf, fh, door=False):
-    """米黄瓷砖住宅楼：棕色竖条、正面阳台 + 窗、侧面窗 + 空调外机，屋顶楼梯间、水箱。"""
-    wall = 'tile_beige'; brown = M('#9a6440')
-    box(x0, y0, Z0, sx, sy, fh * nf, wall, bevel=0.006)
-    top = Z0 + fh * nf
-    box(x0 - 0.005, y0 - 0.005, Z0, sx + 0.01, sy + 0.01, fh, 'tile_brick')            # 一层棕砖
-    cw = sx / 2
-    for f in range(nf):
-        z = Z0 + f * fh
-        if f:
-            tiles_band(x0, y0, z, sx, 'paint_cream')
-            tiles_band(x0 + sx, y0, z, sy, 'paint_cream', face='side')
-            # 左：阳台 + 落地窗；右：窗 + 空调
-            window_front(x0 + 0.05, z + 0.03, cw - 0.1, fh - 0.08, y=y0, sill=False)
-            balcony_front(x0 + 0.03, z + 0.02, cw - 0.06, y0, d=0.08, rail='steel')
-            window_front(x0 + cw + 0.06, z + 0.1, cw - 0.14, fh - 0.16, y=y0)
-            if f % 2:
-                ac_unit(x0 + cw + 0.08, y0, z + 0.015)
-            else:
-                grille_front(x0 + cw + 0.06, z + 0.1, cw - 0.14, fh - 0.16, y=y0, d=0.04)
-        n_s = max(2, int(sy / 0.34))
-        for i in range(n_s):
-            ys = y0 + 0.06 + i * (sy - 0.06) / n_s
-            window_side(ys, z + 0.1, (sy - 0.06) / n_s - 0.12, fh - 0.16, x0 + sx)
-            if f and (i + f) % 3 == 0:
-                ac_unit(x0 + sx, ys + (sy - 0.06) / n_s - 0.1, z + 0.02, face='side')
-    box(x0 + cw - 0.015, y0 - 0.015, Z0 + fh, 0.03, 0.015, fh * (nf - 1), brown)        # 竖条
-    if door:
-        box(x0 + cw - 0.13, y0 - 0.012, Z0, 0.26, 0.02, fh - 0.06, 'frame')
-        box(x0 + cw - 0.115, y0 - 0.02, Z0 + 0.015, 0.23, 0.02, fh - 0.09, 'glass')
-        box(x0 + cw - 0.16, y0 - 0.12, Z0 + fh - 0.05, 0.32, 0.12, 0.03, 'white')        # 门头雨棚
+def apartment_wing(x, y, w, depth, floors, courtyard=False):
+    """带外廊和内凹窗洞的步梯住宅。四面开窗，顶层晒台朝向院内。"""
+    fh = 0.295
+    materials = [M('#e2d4ba'), M('#bc8267'), M('#b7a993'), M('#708d96'), M('#97aeb0'), M('#81918d'), M('#e1cc9f')]
+    # 墙体、玻璃、铝框在同一个子网格中。顶点透明通道只存材质分类。
+    for mat, kind in zip(materials, ['wall', 'brick', 'wall', 'glass', 'glass', 'metal', 'wall']):
+        mat['housing_finish'] = kind
+    verts, faces, slots = [], [], []
+    outline = [(x, y), (x + w, y), (x + w, y + depth), (x, y + depth)]
+    for side, (ox, oy) in enumerate(outline):
+        ex, ey = outline[(side + 1) % 4]
+        length = math.hypot(ex - ox, ey - oy)
+        ux, uy = (ex - ox) / length, (ey - oy) / length
+
+        def point(u, z, inset):
+            return (ox + ux * u - uy * inset, oy + uy * u + ux * inset, z)
+
+        def quad(a, b, c, d, slot):
+            first = len(verts)
+            verts.extend([a, b, c, d])
+            faces.append((first, first + 1, first + 2, first + 3))
+            slots.append(slot)
+
+        def panel(left, right, low, high, inset, slot, nx=1, nz=1):
+            for i in range(nx):
+                u = left + (right - left) * i / nx
+                v = left + (right - left) * (i + 1) / nx
+                for j in range(nz):
+                    a = low + (high - low) * j / nz
+                    b = low + (high - low) * (j + 1) / nz
+                    quad(point(u, a, inset), point(v, a, inset), point(v, b, inset), point(u, b, inset), slot)
+
+        count = 3 if side % 2 == 0 else 2
+        bay = length / count
+        for f in range(floors):
+            z = Z0 + f * fh
+            for col in range(count):
+                lo, hi = col * bay, (col + 1) * bay
+                loggia = side == 0 and col == (2 if courtyard else 0)
+                stair = side == 0 and col == 1
+                wall = 1 if stair or side == 1 and col == 1 else 0
+                inset = 0.137 if loggia else 0.044
+                sill = z + (0.023 if loggia or (stair and f == 0) else 0.077)
+                head = z + fh - (0.033 if loggia else 0.054)
+                left, right = lo + (0.012 if loggia else 0.036), hi - (0.012 if loggia else 0.036)
+                panel(lo, hi, z, sill, 0, wall, 2)
+                panel(lo, hi, head, z + fh, 0, wall, 2)
+                panel(lo, left, sill, head, 0, wall)
+                panel(right, hi, sill, head, 0, wall)
+                edges = [(left, sill), (right, sill), (right, head), (left, head)]
+                for k, (u, a) in enumerate(edges):
+                    v, b = edges[(k + 1) % 4]
+                    quad(point(u, a, 0), point(v, b, 0), point(v, b, inset), point(u, a, inset), 2)
+                panel(left, right, sill, head, inset, 3 if stair or (col + f) % 3 else 4, 3, 4)
+                split = left + (right - left) * (0.37 if stair else 0.63)
+                panel(split - 0.004, split + 0.004, sill, head, inset - 0.003, 5)
+                if (col + f * 3 + side) % 7 == 0 and not stair:
+                    panel(left, split - 0.004, head - 0.046, head, inset - 0.002, 6)
+                # 可开启的窗扇自带上亮子，窗台下的斜面在日光下留出一条滴水边。
+                if not loggia:
+                    panel(left, right, head - 0.039, head - 0.031, inset - 0.004, 5)
+                    quad(
+                        point(left - 0.012, sill, 0),
+                        point(right + 0.012, sill, 0),
+                        point(right + 0.012, sill - 0.009, -0.018),
+                        point(left - 0.012, sill - 0.009, -0.018),
+                        2,
+                    )
+                if stair and f == 0:
+                    panel(split + 0.012, split + 0.023, sill + 0.054, sill + 0.12, inset - 0.008, 5)
+                if loggia and f:
+                    box(x + lo - 0.006, y - 0.090, z, bay + 0.012, 0.23, 0.022, '#e3ddcc', bevel=0.006)
+                    box(x + lo, y - 0.083, z + 0.022, bay, 0.020, 0.065, '#bcb8a5')
+                    for dx in (0.012, bay / 2, bay - 0.012):
+                        box(x + lo + dx, y - 0.076, z + 0.086, 0.009, 0.009, 0.033, '#586961')
+                    box(x + lo, y - 0.082, z + 0.116, bay, 0.014, 0.009, '#677672')
+                    if f == 2:
+                        box(x + lo + 0.033, y - 0.048, z + 0.025, 0.15, 0.055, 0.065, '#ad7358')
+                        bush(x + lo + 0.10, y - 0.017, 0.059, z + 0.097, '#82946a')
+    mesh = bpy.data.meshes.new('Apartment facade')
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new('Apartment facade', mesh)
+    bpy.context.collection.objects.link(obj)
+    for mat in materials:
+        mesh.materials.append(mat)
+    for polygon, slot in zip(mesh.polygons, slots):
+        polygon.material_index = slot
+    top = Z0 + floors * fh
+    box(x - 0.016, y - 0.032, top, w + 0.032, depth + 0.048, 0.027, '#d4c3aa', bevel=0.006)
+    parapet(x, y, top + 0.027, w, depth, h=0.046, t=0.016, m='#c8b8a0')
+    box(x + 0.025, y + 0.025, top + 0.026, w - 0.05, depth - 0.05, 0.008, '#a99f8d')
+    box(x + w * 0.35, y + depth * 0.54, top + 0.034, w * 0.44, 0.26, 0.159, '#cebda3')
+    prism(x + w * 0.35 - 0.018, y + depth * 0.54 - 0.02, top + 0.193, w * 0.44 + 0.036, 0.30, 0.064, '#886c5f')
+    if courtyard:
+        solar_heater(x + 0.10, y + 0.15, top + 0.035, w=0.30)
     else:
-        for i in range(2):
-            window_front(x0 + 0.08 + i * cw, Z0 + 0.1, cw - 0.16, fh - 0.18, y=y0)
-            grille_front(x0 + 0.08 + i * cw, Z0 + 0.1, cw - 0.16, fh - 0.18, y=y0, d=0.04)
-    parapet(x0, y0, top, sx, sy, m=brown)
-    box(x0 + 0.1, y0 + sy * 0.45, top, 0.26, 0.3, 0.26, wall)                           # 楼梯间
-    box(x0 + 0.08, y0 + sy * 0.45 - 0.02, top + 0.26, 0.3, 0.34, 0.03, brown)
-    box(x0 + 0.16, y0 + sy * 0.45 - 0.01, top, 0.1, 0.01, 0.18, 'brown')
-    water_tank(x0 + sx - 0.18, y0 + sy - 0.2, top, r=0.1, h=0.22)
-    return top
+        # 屋顶通向晒台，木格架和屋面之间留出可见的阴影。
+        for px in (x + 0.09, x + 0.47):
+            for py in (y + 0.11, y + 0.36):
+                box(px, py, top + 0.034, 0.019, 0.019, 0.162, '#987f64')
+        for i in range(6):
+            box(x + 0.065 + i * 0.084, y + 0.085, top + 0.196, 0.038, 0.324, 0.020, '#b39572')
+        for py in (y + 0.11, y + 0.36):
+            box(x + 0.065, py, top + 0.181, 0.46, 0.016, 0.017, '#8b765f')
+    for f in (1, 3):
+        ac_unit(x + w, y + depth * 0.68, Z0 + f * fh + 0.018, face='side')
+    box(x + w / 3 - 0.018, y - 0.117, Z0 + 0.222, w / 3 + 0.036, 0.152, 0.026, '#d9c4a5', bevel=0.007)
 
 
 @sprite('apartment', 2, 2)
 def apartment():
-    """商品房小区：两栋六层米黄步梯住宅楼并排，阳台空调外机，前院小区大门「幸福家园」、草坪、树。"""
-    lot(2, 2)
-    box(0.06, 0.06, Z0, 0.86, 0.62, 0.02, 'grass')
-    box(1.52, 0.06, Z0, 0.42, 0.5, 0.02, 'grass')
-    res_tower(0.14, 0.86, 0.8, 1.0, 6, 0.34, door=True)
-    res_tower(1.06, 0.64, 0.8, 1.0, 6, 0.34)
-    # 小区大门
-    for xx in (1.0, 1.42):
-        box(xx, 0.1, Z0, 0.08, 0.08, 0.36, 'tile_brick', bevel=0.005)
-    box(0.97, 0.08, Z0 + 0.36, 0.56, 0.12, 0.08, M('#9a6440'))
-    box(0.99, 0.076, Z0 + 0.37, 0.52, 0.006, 0.06, 'sign_red')
-    text('幸福家园', 1.25, 0.072, Z0 + 0.4, 0.05, M('#ffe14d', emit=0.8), 'front')
-    box(1.08, 0.13, Z0, 0.34, 0.01, 0.06, 'steel')                                     # 电动栏杆
-    box(1.08, 0.13, Z0 + 0.1, 0.32, 0.012, 0.012, M('#ffffff'))
-    for k in range(4):
-        box(1.1 + k * 0.08, 0.128, Z0 + 0.1, 0.04, 0.014, 0.012, 'red')
-    box(1.54, 0.12, Z0 + 0.02, 0.16, 0.14, 0.2, 'white')                                 # 门卫室
-    box(1.535, 0.115, Z0 + 0.12, 0.17, 0.005, 0.06, 'glass')
-    box(1.52, 0.1, Z0 + 0.22, 0.2, 0.18, 0.025, 'roof_blue')
-    # 绿化
-    tree(0.3, 0.26, 0.85, z=Z0); tree(0.6, 0.5, 0.8, z=Z0); tree(1.74, 0.36, 0.75, z=Z0)
-    for (bx, by) in [(0.38, 0.12), (0.5, 0.14), (0.7, 0.12), (0.82, 0.2), (0.12, 0.52), (1.84, 0.12), (1.78, 0.2)]:
-        bush(bx, by, 0.06, z=Z0 + 0.02)
-    lamp(0.92, 0.3)
-    ebike(0.3, 0.74, 'blue'); ebike(0.6, 0.74, 'red')
+    """幸福家园：六层街坊住宅与较矮的院内翼，砖砌楼梯间连接沿街门厅。"""
+    no_auto_back()
+    street_lot(2, 2, '#c2b8a4')
+    apartment_wing(0.11, 0.89, 0.90, 0.91, 6)
+    apartment_wing(1.13, 0.50, 0.75, 0.92, 4, courtyard=True)
+    box(0.09, 0.25, Z0, 0.55, 0.38, 0.024, '#91a27c')
+    round_tree(0.33, 0.43, 0.80, Z0 + 0.024, seed=32)
+    box(1.52, 0.24, Z0, 0.31, 0.13, 0.023, '#9ca685')
+    box(0.14, 0.20, Z0, 0.57, 0.055, 0.144, '#ac8069', bevel=0.009)
+    text('幸福家园', 0.43, 0.195, Z0 + 0.078, 0.087, 'sign_white', 'front')
+    box(0.78, 0.24, Z0, 0.23, 0.53, 0.008, '#d2cabc')
+    for bx in (0.16, 0.41):
+        box(bx, 0.68, Z0, 0.038, 0.10, 0.073, '#787c70')
+    box(0.12, 0.67, Z0 + 0.073, 0.38, 0.12, 0.021, '#b29879')
 
 
 def school_wing(name, outline, bottom, floors, glazing, wall):

@@ -6,7 +6,7 @@
 
 做法：照常跑出图脚本里登记的建模函数（含背面自动补窗），然后
   1. 文字转网格、修改器（倒角）应用掉；
-  2. 全部合成一个网格，材质只留底色，写进顶点色；按受光面、招牌灯及显式标注的玻璃分子网格；
+  2. 全部合成一个网格，材质只留底色，写进顶点色；按普通表面、招牌灯、玻璃和带局部日照的住宅立面分子网格；
   3. Cycles 烘环境光遮蔽，乘进顶点色；
   4. 坐标换成 Cocos 习惯（Y 朝上）由 glTF 导出器自动做；原点 = 占地左上角 (0,0,0)，1 单位 = 1 格。
 打印每栋楼的三角面数。
@@ -86,7 +86,7 @@ def _bake_ao(o):
             a = ao.data[li].color[0]
             a = 0.45 + 0.55 * a                      # 不要压成全黑：最暗留 45%
             c = col.data[li].color
-            col.data[li].color = (c[0] * a, c[1] * a, c[2] * a, 1.0)
+            col.data[li].color = (c[0] * a, c[1] * a, c[2] * a, c[3])
     # Cocos 的 builtin 着色器把顶点色当 sRGB（SRGBToLinear），glTF 导出的是线性值 → 这里先转成 sRGB，不然偏深偏艳
     def srgb(x):
         return 12.92 * x if x <= 0.0031308 else 1.055 * x ** (1 / 2.4) - 0.055
@@ -96,6 +96,37 @@ def _bake_ao(o):
     o.data.color_attributes.remove(o.data.color_attributes['AO'])
     o.data.color_attributes.active_color = o.data.color_attributes['Col']
     bpy.data.objects.remove(ground)
+
+
+def bake_balcony_sun(obj, depsgraph, colors):
+    """顶点 alpha 的低四位分别记录四个摆放朝向的日光可见度，供着色器逐顶点解码。"""
+    from mathutils import Vector
+    mesh = obj.data
+    # 与 World3D 中固定的日光 (-54°, 98°) 对齐。Blender 的高度轴为 Z。
+    sx, sy, sz = 0.582065, 0.081804, 0.809017
+    rays = [Vector((x, y, sz)) for x, y in ((sx, sy), (sy, -sx), (-sx, -sy), (-sy, sx))]
+    normal_matrix = obj.matrix_world.to_3x3().inverted().transposed()
+    cache = {}
+    kinds = {'glass': 0, 'metal': 1, 'brick': 2, 'wall': 3}
+    for face in mesh.polygons:
+        finish = mesh.materials[face.material_index].get('housing_finish')
+        if not finish:
+            continue
+        center = obj.matrix_world @ face.center
+        normal = (normal_matrix @ face.normal).normalized()
+        for li in face.loop_indices:
+            point = obj.matrix_world @ mesh.vertices[mesh.loops[li].vertex_index].co
+            # 棱边处从面内稍向内取样，避免把同一堵墙判断为遮挡物。
+            origin = point.lerp(center, 0.025) + normal * 0.001
+            key = (*origin.to_tuple(5), *normal.to_tuple(4))
+            if key not in cache:
+                visible = 0
+                for turn, ray in enumerate(rays):
+                    if normal.dot(ray) <= 0 or not bpy.context.scene.ray_cast(depsgraph, origin, ray, distance=5)[0]:
+                        visible |= 1 << turn
+                cache[key] = visible
+            # 高两位恒为 1，兼容预览的普通顶点色。接下来的两位区分表面材质。
+            colors.data[li].color[3] = (192 + kinds[finish] * 16 + cache[key]) / 255
 
 
 def export(name, w, h, fn):
@@ -112,6 +143,8 @@ def export(name, w, h, fn):
     objs = [o for o in bpy.context.scene.objects if o.type == 'MESH']
     lit = bpy.data.materials.new('lit'); emit = bpy.data.materials.new('emit')
     glass = bpy.data.materials.new('glass')
+    housing = bpy.data.materials.new('housing')
+    depsgraph = bpy.context.evaluated_depsgraph_get()
     for o in objs:
         me = o.data
         ca = me.color_attributes.new('Col', 'FLOAT_COLOR', 'CORNER')
@@ -119,13 +152,21 @@ def export(name, w, h, fn):
         for poly in me.polygons:
             mat = o.material_slots[poly.material_index].material if o.material_slots else None
             col = _base_color(mat)
-            surface_slots.append(2 if mat and mat.get('town_glass') else int(_emissive(mat)))
+            finish = mat.get('housing_finish') if mat else None
+            if finish:
+                surface_slots.append(3)
+            else:
+                surface_slots.append(2 if mat and mat.get('town_glass') else int(_emissive(mat)))
             for li in poly.loop_indices:
                 ca.data[li].color = col
+        if 3 in surface_slots:
+            bake_balcony_sun(o, depsgraph, ca)
         me.materials.clear()
         me.materials.append(lit); me.materials.append(emit)
-        if 2 in surface_slots:
+        if 2 in surface_slots or 3 in surface_slots:
             me.materials.append(glass)
+        if 3 in surface_slots:
+            me.materials.append(housing)
         for poly, slot in zip(me.polygons, surface_slots):
             poly.material_index = slot
     bpy.ops.object.select_all(action='DESELECT')
